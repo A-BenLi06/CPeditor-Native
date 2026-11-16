@@ -379,3 +379,9 @@ Core 规则区分空输入、缺少预期输出与预期输出为空、checker �
 - 根独立普通与完整C／C++两侧-Werror ASan+UBSan均16/16 CTest通过，完整服务依赖instrument的TSan HTTP1/1通过；独立补充分帧及实际EMFILE fatal accept清理普通／ASan通过。根证据out/research/http/root-verification.json及review/verification-fixed.json。
 - 作者三模式7组真实socket通过；慢接收探针实际响应完整缓冲，write_timeouts=0，不声称观察到阻塞写超时。AppleASan未启用LSan。原生文件I/O不保证硬抢占。
 - 当前提供共享C++监听服务；生命周期C ABI、两端应用启动和实际扩展、目标Windows10及最低macOS仍未验收。Windows会话和macOSInbox草稿不纳入提交。
+
+## 2026-11-17T03:07:06+08:00 — 保留校验许可原文的跨平台原始字节
+
+- c59c7a1 WindowsCI在CMake配置时正确拒绝Bundled Boost license SHA不一致；Git默认autocrlf把新许可证LF转换为CRLF。为third_party/licenses的锁定许可原文设置-text，保持官方字节及现有SHA，不改哈希值或关闭完整性检查。工作流加入.gitattributes变更触发。
+- 根用core.autocrlf=true导出完整独立index副本，许可SHA与官方lock完全一致；对该独立副本执行CMake配置通过，Boost版本／归档／源与捆绑许可验证仍保留。证据out/windows/research/root-license-autocrlf-configure.log。原失败日志out/windows/ci/43934149039保留。
+- 此修复不改变HTTP或判题语义；后续真实WindowsCI继续验证16项Core及控件／应用产物。Windows与macOS恢复草稿继续分别审查，不纳入提交。

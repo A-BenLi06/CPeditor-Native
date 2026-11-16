@@ -5,6 +5,7 @@ name: Windows 原生构建
     paths:
       - .github/workflows/windows.yml
       - .gitmodules
+      - .gitattributes
       - CMakeLists.txt
       - CMakePresets.json
       - cmake/**
@@ -19,6 +20,7 @@ name: Windows 原生构建
     paths:
       - .github/workflows/windows.yml
       - .gitmodules
+      - .gitattributes
       - CMakeLists.txt
       - CMakePresets.json
       - cmake/**
