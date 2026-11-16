@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "profile_resources": ["macos-clang"],
+  "default_profile_id": "macos-clang-cpp17",
+  "polling_milliseconds": 30,
+  "drain_events": 16,
+  "comparison": "trailing",
+  "max_import_bytes": 16777216,
+  "max_testcases": 4096
+}

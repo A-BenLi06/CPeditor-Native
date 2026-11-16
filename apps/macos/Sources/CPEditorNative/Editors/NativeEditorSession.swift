@@ -3,6 +3,7 @@ import SwiftUI
 import STTextView
 import NativeEditorModel
 import Observation
+import NativeCoreBridge
 
 /// 每个文档一个实例，标签切换只移动其容器，不重建原生 buffer。
 @MainActor @Observable final class NativeEditorSession: NSObject, @preconcurrency STTextViewDelegate {
@@ -10,6 +11,7 @@ import Observation
     let container = EditorContainer()
     private(set) var isComposing = false
     private(set) var selection = NSRange(location: 0, length: 0)
+    var testCases = [TestCaseInput()]
     @ObservationIgnored private var codeState: CodeEditorState?
     @ObservationIgnored private var codeHost: NSHostingView<CodeEditorSurface>?
     @ObservationIgnored private weak var codeView: NSTextView?

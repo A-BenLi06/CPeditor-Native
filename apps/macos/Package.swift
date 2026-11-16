@@ -1,5 +1,10 @@
 // swift-tools-version: 6.0
 import PackageDescription
+import Foundation
+
+let repositoryRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+let coreLibraryDirectory = ProcessInfo.processInfo.environment["CPN_CORE_LIBRARY_DIR"]
+    ?? repositoryRoot.appendingPathComponent("out/core/dev").path
 
 let package = Package(
     name: "CPEditorNativeMacOS",
@@ -15,13 +20,19 @@ let package = Package(
     ],
     targets: [
         .target(name: "NativeEditorModel", resources: [.process("Resources")]),
+        .target(name: "CPNativeCore", linkerSettings: [
+            .linkedLibrary("cpn_core"), .linkedLibrary("c++"),
+            .unsafeFlags(["-L", coreLibraryDirectory])
+        ]),
+        .target(name: "NativeCoreBridge", dependencies: ["CPNativeCore", "NativeEditorModel"]),
         .executableTarget(name: "CPEditorNative", dependencies: [
-            "NativeEditorModel",
+            "NativeEditorModel", "NativeCoreBridge",
             .product(name: "CodeEditorView", package: "CodeEditorView"),
             .product(name: "LanguageSupport", package: "CodeEditorView"),
             .product(name: "STTextView", package: "STTextView")
         ], resources: [.process("Resources")]),
         .testTarget(name: "NativeEditorModelTests", dependencies: ["NativeEditorModel"]),
+        .testTarget(name: "NativeCoreBridgeTests", dependencies: ["NativeCoreBridge", "NativeEditorModel"]),
         .testTarget(name: "NativeEditorIntegrationTests", dependencies: [
             "CPEditorNative", "NativeEditorModel",
             .product(name: "STTextView", package: "STTextView")

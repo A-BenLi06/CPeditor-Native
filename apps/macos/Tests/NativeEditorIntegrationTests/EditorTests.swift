@@ -3,9 +3,35 @@ import SwiftUI
 import Testing
 import NativeEditorModel
 import STTextView
+import NativeCoreBridge
 @testable import CPEditorNative
 
 @MainActor @Suite(.serialized) struct EditorTests {
+    @Test func runnerCompilesUnsavedNativeBufferAndMarksEditedSourceOld() async throws {
+        _ = NSApplication.shared
+        let profile = try LanguageProfile.load(id: "cpp")
+        let source = "#include <iostream>\nint main(){int a,b;if(std::cin>>a>>b)std::cout<<a+b<<'\\n';}\n"
+        let document = SourceDocument(text: source, editorKind: .stTextView, languageID: profile.id, saved: false)
+        let session = try NativeEditorSession(document: document, profile: profile)
+        defer { session.dispose() }
+        session.testCases = [TestCaseInput(input: "1 2\n", expected: "3\n")]
+        let runner = RunController()
+        #expect(runner.errorMessage == nil)
+        runner.runAll(session)
+        #expect(runner.isRunning)
+        let native = try #require(session.stView)
+        native.textSelection = NSRange(location: source.utf16.count, length: 0)
+        native.insertText("// changed after Run All\n", replacementRange: NSRange(location: NSNotFound, length: 0))
+        session.capture()
+        await runner.waitForCurrentRun()
+        let result = try #require(runner.result)
+        #expect(result.tests.first?.verdict == "AC")
+        #expect(!result.matches(document.snapshot()))
+        #expect(document.isDirty)
+        #expect(document.url == nil)
+        #expect(document.text.hasSuffix("// changed after Run All\n"))
+        await runner.shutdown()
+    }
     private func textView(in view: NSView) -> NSTextView? {
         if let text = view as? NSTextView, text.isEditable { return text }
         for child in view.subviews {

@@ -9,6 +9,8 @@ fi
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PACKAGE_DIR="$ROOT_DIR/apps/macos"
 OUTPUT_DIR="$ROOT_DIR/out/macos"
+CPN_CORE_LIBRARY_DIR="${CPN_CORE_LIBRARY_DIR:-$ROOT_DIR/out/core/dev}"
+export CPN_CORE_LIBRARY_DIR
 METADATA="$PACKAGE_DIR/AppMetadata.plist"
 APP_EXECUTABLE="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$METADATA")"
 BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$METADATA")"
@@ -27,6 +29,14 @@ if [[ ! -x "$LIFECYCLE" || "$ROOT_DIR/script/AppLifecycle.swift" -nt "$LIFECYCLE
     swiftc "$ROOT_DIR/script/AppLifecycle.swift" -o "$LIFECYCLE"
 fi
 
+if [[ "${CPN_CORE_PREBUILT:-0}" != 1 ]]; then
+    cmake -S "$ROOT_DIR" -B "$CPN_CORE_LIBRARY_DIR" -G Ninja -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON
+    cmake --build "$CPN_CORE_LIBRARY_DIR" --target cpn_core
+fi
+if [[ ! -f "$CPN_CORE_LIBRARY_DIR/libcpn_core.a" ]]; then
+    echo "没有找到共享 Core 静态库：$CPN_CORE_LIBRARY_DIR/libcpn_core.a" >&2
+    exit 1
+fi
 swift build --package-path "$PACKAGE_DIR"
 BIN_DIR="$(swift build --package-path "$PACKAGE_DIR" --show-bin-path)"
 "$LIFECYCLE" quit "$APP_BUNDLE"

@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "id": "macos-clang-cpp17",
+  "language_id": "cpp",
+  "source_filename": "main.cpp",
+  "artifact_name": "program",
+  "build": {
+    "executable": "/usr/bin/clang++",
+    "arguments": ["-std=c++17", "-O2", "${source}", "-o", "${artifact}"]
+  },
+  "run": { "executable": "${artifact}", "arguments": [] },
+  "build_limits": {
+    "spawn_timeout_ms": 5000,
+    "wall_timeout_ms": 30000,
+    "terminate_grace_ms": 100,
+    "drain_timeout_ms": 1000,
+    "stdout_bytes": 1048576,
+    "stderr_bytes": 1048576,
+    "combined_bytes": 2097152
+  },
+  "run_limits": {
+    "spawn_timeout_ms": 5000,
+    "wall_timeout_ms": 2000,
+    "terminate_grace_ms": 100,
+    "drain_timeout_ms": 1000,
+    "stdout_bytes": 1048576,
+    "stderr_bytes": 1048576,
+    "combined_bytes": 2097152
+  },
+  "inherit_environment": true,
+  "environment": [],
+  "variables": []
+}

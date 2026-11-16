@@ -18,6 +18,8 @@ struct WindowCloseGuard: NSViewRepresentable {
         }
         weak var workspace: Workspace?
         weak var originalDelegate: (any NSWindowDelegate)?
+        private var closeApproved = false
+        private var closeTask: Task<Void, Never>?
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
@@ -29,8 +31,20 @@ struct WindowCloseGuard: NSViewRepresentable {
         }
 
         func windowShouldClose(_ sender: NSWindow) -> Bool {
+            if closeApproved { return originalDelegate?.windowShouldClose?(sender) ?? true }
+            guard closeTask == nil else { return false }
             guard workspace?.canCloseAll() ?? true else { return false }
-            return originalDelegate?.windowShouldClose?(sender) ?? true
+            guard let workspace, !workspace.runner.isClosed else {
+                return originalDelegate?.windowShouldClose?(sender) ?? true
+            }
+            closeTask = Task { @MainActor [weak self, weak sender] in
+                await workspace.runner.shutdown()
+                guard let self, let sender else { return }
+                self.closeApproved = true
+                self.closeTask = nil
+                sender.performClose(nil)
+            }
+            return false
         }
 
         override func responds(to aSelector: Selector!) -> Bool {

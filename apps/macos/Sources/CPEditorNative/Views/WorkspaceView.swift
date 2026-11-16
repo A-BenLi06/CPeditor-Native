@@ -30,7 +30,8 @@ struct WorkspaceView: View {
             .navigationTitle(L10n.string("documents"))
             .navigationSplitViewColumnWidth(min: 180, ideal: 230, max: 320)
         } detail: {
-            VStack(spacing: 0) {
+            VSplitView {
+              VStack(spacing: 0) {
                 ZStack {
                     NativeEditorDeck(sessions: workspace.sessions, selectedID: workspace.selection,
                                      wrapText: workspace.wrapText, showMinimap: workspace.showMinimap)
@@ -43,6 +44,10 @@ struct WorkspaceView: View {
                     Divider()
                     EditorStatusView(session: session)
                 }
+              }.frame(minHeight: 170)
+              if let session = workspace.activeSession {
+                  RunPanelView(session: session, runner: workspace.runner)
+              }
             }
             .navigationTitle(workspace.activeSession.map(workspace.title(for:)) ?? L10n.string("app_name"))
         }

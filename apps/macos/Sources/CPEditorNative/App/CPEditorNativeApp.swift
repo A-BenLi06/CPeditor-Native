@@ -17,6 +17,7 @@ import AppKit
         init(_ workspace: Workspace) { self.workspace = workspace }
     }
     private static var registrations: [Registration] = []
+    private var terminationTask: Task<Void, Never>?
 
     static func register(_ workspace: Workspace) {
         registrations.removeAll { $0.workspace == nil }
@@ -26,7 +27,14 @@ import AppKit
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        Self.registrations.compactMap(\.workspace).allSatisfy { $0.canCloseAll() } ? .terminateNow : .terminateCancel
+        guard terminationTask == nil else { return .terminateLater }
+        let workspaces = Self.registrations.compactMap(\.workspace)
+        guard workspaces.allSatisfy({ $0.canCloseAll() }) else { return .terminateCancel }
+        terminationTask = Task { @MainActor in
+            for workspace in workspaces { await workspace.runner.shutdown() }
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {

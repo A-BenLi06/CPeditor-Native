@@ -28,6 +28,7 @@ struct WorkspaceConfiguration: Decodable {
     var wrapText = false
     var showMinimap = false
     var errorMessage: String?
+    let runner = RunController()
     @ObservationIgnored private var configuration: WorkspaceConfiguration?
     @ObservationIgnored private var profiles: [String: LanguageProfile] = [:]
 
@@ -146,6 +147,7 @@ struct WorkspaceConfiguration: Decodable {
 
     func closeActiveDocument() {
         guard let session = activeSession, canClose(session) else { return }
+        runner.cancel(documentID: session.document.id)
         session.dispose()
         sessions.removeAll { $0.document.id == session.document.id }
         selection = sessions.last?.document.id
