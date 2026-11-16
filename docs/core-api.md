@@ -80,13 +80,13 @@ sequenceDiagram
 
 `cpn_engine_session_load` 接收 UTF-8 恢复文件路径，返回含 `status`、`session`、`disk_digest` 与 `detail` 的版本 1 JSON。`cpn_engine_session_save_json` 接收恢复／备份／锁路径、完整会话和上次读取的磁盘摘要，返回文件替换状态。两者使用相同的 ABI 缓冲区释放规则，应在后台协调器中调用；保存受引擎关闭取消信号控制。
 
-保存前预留 64 KiB 返回缓冲区配额；容量不足不会先写文件再隐藏结果。调用成功的 `CPN_OK` 表示有可解码响应，是否保存成功须继续检查响应 `status` 和 `recovery_replaced`。`DurabilityUnknown` 表示原子替换已经发生但持久化未能确认，不能按普通“未保存”重试。
+保存前完成请求 DOM 清理，并同时预留 64 KiB 返回缓冲区配额和有限响应字符串存储；容量不足不会先写文件再隐藏结果。保存响应按有界字段直接编码，不在实际文件替换之后构造结果 DOM。调用成功的 `CPN_OK` 表示有可解码响应，是否保存成功须继续检查响应 `status` 和 `recovery_replaced`。`DurabilityUnknown` 表示原子替换已经发生但持久化未能确认，不能按普通“未保存”重试。
 
 恢复格式、限额、请求示例和合作锁／外部写入限制见 [会话恢复](session.md)。会话保存请求仍受引擎 `max_request_bytes` 约束。
 
 ## Companion 收件箱与导入接口
 
-C++ `parse_companion_payload`、`CompanionInboxService` 与 `prepare_import_application` 提供严格解码、持久接纳和文档＋回执的单一候选，进入服务库及单一 Core 归档。C ABI 已增加以下四个符号，ABI 仍为 1；均同步调用，原生客户端必须在后台协调器执行。当前没有 HTTP／原生导入 UI，字段与来源语义见 [Companion 文档](companion.md)。
+C++ `parse_companion_payload`、`CompanionInboxService` 与 `prepare_import_application` 提供严格解码、持久接纳和文档＋回执的单一候选，进入服务库及单一 Core 归档。C ABI 已增加以下四个导入符号，ABI 仍为 1；均同步调用，原生客户端必须在后台协调器执行。HTTP 生命周期接口见下节；原生导入的验收状态见 [实施状态](status.md)，字段与来源语义见 [Companion 文档](companion.md)。
 
 共同请求是版本 1 对象：
 
@@ -119,13 +119,46 @@ C++ `parse_companion_payload`、`CompanionInboxService` 与 `prepare_import_appl
 
 可选 `bounds` 对象采用 `CompanionInboxBounds` 同名字段与 `payload` 子对象（`CompanionBounds` 同名字段）。每项只接受正整数，且不超过 C++ 默认值构成的硬上限；`max_id_bytes` 至少 64。`max_receipts` 为 1–256，timeout 为 0–60000 ms（默认 5000）。未知／递归重复字段、浮点版本或限额、负数／溢出和错误路径在副作用前拒绝。
 
-accept／mark 先同时预留 64 KiB ABI 配额和字符串存储，再调用服务；配额耗尽不会先写盘再隐藏结果。写响应以有限编码生成，不在替换后分配 JSON DOM；只含 item 的稳定身份／状态／摘要／`test_count`／普通 stdio 能力／确认证据，不返回完整载荷或 test ID 数组。诊断中的非法 locale 字节只在诊断显示层替换，载荷原文保持不变。`CPN_OK` 表示得到可解码响应，仍须检查 `status`、`inbox_replaced`、`backup_replaced`；`DurabilityUnknown` 不能按普通无副作用失败重试。
+accept／mark 先提取并销毁请求 DOM，同时预留 64 KiB ABI 配额和字符串存储，再调用服务；配额耗尽不会先写盘再隐藏结果。写响应以有限编码生成，不在替换后分配或清理 JSON DOM；只含 item 的稳定身份／状态／摘要／`test_count`／普通 stdio 能力／确认证据，不返回完整载荷或 test ID 数组。诊断中的非法 locale 字节只在诊断显示层替换，载荷原文保持不变。`CPN_OK` 表示得到可解码响应，仍须检查 `status`、`inbox_replaced`、`backup_replaced`；`DurabilityUnknown` 不能按普通无副作用失败重试。
 
 所有响应采用既有 buffer ownership；读／准备在返回前再次检查关闭，写／确认使用引擎 stop token。并发 close 与请求允许 `CPN_CLOSED`／响应 `Cancelled` 的合法竞争，但不能释放尚在使用的对象或吞掉已发生的替换状态。
+
+## Companion 监听生命周期接口
+
+每个引擎最多持有一个 `CompanionListener`。以下三个同步接口同样在原生后台协调器调用，不能在 MainActor／DispatcherQueue 等待线程退出：
+
+| C ABI 符号 | 请求 | 行为 |
+| --- | --- | --- |
+| `cpn_engine_companion_listener_start_json` | 版本 1 `schema_version`、`workspace_id`、收件箱 `paths`；可选 `bounds`、`options` | 完整验证配置后绑定回环地址；同配置活动实例返回 `AlreadyStarted`，活动实例配置不同返回 `CPN_BUSY`；停止后可创建新实例 |
+| `cpn_engine_companion_listener_stop_json` | 仅 `{"schema_version":1}` | 取消并 join 网络／接纳线程；状态为 `Stopped` 或 `NotStarted`，重复停止幂等 |
+| `cpn_engine_companion_listener_info_json` | 仅 `{"schema_version":1}` | 返回实例、端口和统计状态；不会启动、停止或消费收件箱 |
+
+`options` 的完整字段及默认值集中映射到 `CompanionListenerOptions`，缺省与显式相同值比较为同配置。降低 `bounds.payload.max_json_bytes` 且省略 `max_body_bytes` 时，默认正文限额同步降低，避免配置自身冲突。
+
+| 字段 | 默认值 | 接口范围 |
+| --- | --- | --- |
+| `port` / `enable_ipv6` | 10045 / true | 0–65535 / boolean；0 申请临时端口 |
+| `max_connections` / `max_admissions` | 16 / 4 | 1–128 / 1–64 |
+| `max_body_bytes` | 16 MiB | 1–64 MiB，同时不得超过 payload 限额 |
+| `max_inflight_body_bytes` | 32 MiB | 1–128 MiB；正文预留超出合计预算时拒绝请求 |
+| `max_header_bytes` / `max_header_count` | 16384 / 64 | 1–65536 / 1–256 |
+| `max_response_bytes` | 65536 | 32768–65536 |
+| `socket_send_buffer_bytes` | 8192 | 1024–131072 |
+| `read_timeout_ms` / `write_timeout_ms` | 5000 / 5000 | 各 1–60000 |
+| `request_timeout_ms` | 15000 | 1–300000 |
+| `lock_timeout_ms` | 5000 | 0–60000 |
+
+所有整数均严格检查类型、溢出和组合条件；未知／递归重复字段在启动或停止前拒绝。`start` 响应的 `status` 为 `Started`、`AlreadyStarted`、`Closed`、`BindFailed` 或 `Failed`；端口冲突返回 `CPN_OK` 和 `BindFailed`，调用方检查业务状态后可重试。已关闭引擎的启动请求返回 `CPN_CLOSED`，`stop` 和 `info` 仍允许查询／清理。
+
+共同响应包含 `schema_version`、`status`、`has_listener`、`engine_closed`、`port`、`ipv6`、nullable `start_status`、`native_error`、`detail`、`failure_detail` 和 `statistics`。`info.status` 为 `ListenerInfo`。统计包含 `running`／`closed`／`failed` 布尔值、`active_connections`／`outstanding_admissions`／`inflight_body_bytes` 当前用量，以及 `accepted`／`duplicates`／`admission_failures`／`connection_rejections`／`admission_rejections`／`read_timeouts`／`write_timeouts`／`request_timeouts` 计数。没有实例时统计为零；诊断是有界文本，不作状态码解析。
+
+启动／停止前同时预留 64 KiB ABI 配额和有限响应存储；配额不足没有绑定／停止副作用。锁顺序为取得引擎引用后释放全局句柄锁，再进入实例锁，仅在预留／发布缓冲区时短暂访问句柄锁；网络 join 不持有全局句柄锁。`close`／`destroy` 先发出取消，再停止监听器，最后关闭任务注册表；与启动竞争时复查关闭并停止刚启动的实例，不能遗留监听线程。仍存活的响应缓冲区可在销毁引擎后释放。
+
+HTTP 分帧、状态码、持久接纳与有界网络行为见 [Companion HTTP](companion-http.md)。原生界面启停、真实扩展和目标系统验收单独登记，不由 ABI 测试替代。
 
 ## 当前限制
 
 - 原生进程后端支持进程组／Windows Job Object、并发三管道、墙钟超时、取消、输出限制和最终排空。未实现内存硬限额；启动期限是软期限，不能中断阻塞的原生进程创建调用。
 - 比较循环分批响应取消；内存分配和释放仍同步，不是硬实时保证。
 - 每个任务创建独立 workspace，源码快照和产物自动清理。文件写入同目录临时文件后原子替换；POSIX 替换成功后目录持久化失败通过 `AtomicWriteError.destination_replaced` 区分。
-- 尚未包含 Companion 监听／原生接入、LSP、格式化、压力／交互测试和发布接口；这些按完整实施计划继续推进。
+- 尚未完成两端 Companion 原生接入的全部验收，以及 LSP、格式化、压力／交互测试和发布接口；这些按完整实施计划继续推进。

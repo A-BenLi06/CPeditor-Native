@@ -73,6 +73,8 @@ flowchart TB
 
 共享 JSON 使用固定 nlohmann/json，回环 HTTP 使用固定 Boost.Beast／Asio；归档 SHA 和许可见 `third_party/core-dependencies.lock.json`，构建层仅引入内部网络头文件。每个生态使用一套依赖清单／锁定机制。领域层和服务层的公开头文件不得出现 Qt、XAML、WinRT、AppKit、SwiftUI 或编辑器库类型。通过构建目标依赖和独立 Core 构建落实此约束。具体平台实现文件可以使用原生框架类型。
 
+Companion 监听的启动／停止／查询与收件箱分页／接纳／准备／确认均通过同一 C ABI 提供。每个引擎协调最多一个监听器，关闭先取消并 join 网络服务，再关闭运行任务；网络操作不持有全局句柄锁，也不等待原生主线程。写接口在副作用前完成请求清理和响应预留，原生端检查业务状态及实际替换标记。完整生命周期及有界传输见 [Core API](core-api.md) 与 [Companion HTTP](companion-http.md)。
+
 ## Windows 应用
 
 使用 C++/WinRT WinUI 3。外壳负责命令、标签页、样例／结果面板、设置及恢复界面。`WinUIEditAdapter` 通过 Windows 本地的 `EditorSurface` 接口封装 `WinUIEditor::Editor` 和 Scintilla 通知。对于尚未打开或从会话恢复的后台文档，延迟创建开销较大的视图。文档一旦进入编辑状态，隐藏标签页时仍须保留其活动文本缓冲区和撤销栈；仅保存恢复数据不能替代这些状态。只有在选定组件能够保留文档和撤销状态所有权时，才可以分离／重建可视部分，否则应保留编辑器实例直到文档关闭。

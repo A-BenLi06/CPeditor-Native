@@ -53,11 +53,13 @@ public:
 [[noreturn]] void fail(CompanionInboxWriteStatus status, std::string detail) {
     throw InboxFailure(status, std::move(detail));
 }
-std::string detail(std::string_view value) {
-    auto length = std::min<std::size_t>(4096, value.size());
+constexpr std::size_t max_detail_bytes=4096;
+std::string_view detail_view(std::string_view value) {
+    auto length = std::min(max_detail_bytes, value.size());
     if (length < value.size()) while (length && (static_cast<unsigned char>(value[length]) & 0xc0) == 0x80) --length;
-    return std::string(value.substr(0, length));
+    return value.substr(0, length);
 }
+std::string detail(std::string_view value) {return std::string(detail_view(value));}
 void check_bounds(const CompanionInboxBounds& bounds) {
     if (!bounds.max_json_bytes || !bounds.max_json_depth || !bounds.max_json_nodes ||
         bounds.max_id_bytes < 64 || !bounds.max_path_bytes)
@@ -342,6 +344,7 @@ CompanionInboxWriteResult commit(const FileStore& files, const CompanionInboxPat
     const ExistingInbox& previous, const CompanionInboxSnapshot& candidate, CompanionInboxItem item,
     CompanionInboxWriteStatus success, const CompanionInboxBounds& bounds, std::stop_token stop) {
     CompanionInboxWriteResult result;
+    result.detail.reserve(max_detail_bytes);
     result.disk_digest = previous.disk_digest;
     const auto replacement = serialize_companion_inbox(candidate, bounds);
     std::optional<std::string> replacement_digest{sha256(replacement)};
@@ -351,8 +354,8 @@ CompanionInboxWriteResult commit(const FileStore& files, const CompanionInboxPat
         catch (const AtomicWriteError& error) {
             result.backup_replaced = error.destination_replaced;
             result.status = error.destination_replaced ? CompanionInboxWriteStatus::durability_unknown : CompanionInboxWriteStatus::io_failed;
-            result.detail = detail(error.what()); return result;
-        } catch (const std::exception& error) { result.detail = detail(error.what()); return result; }
+            result.detail.assign(detail_view(error.what())); return result;
+        } catch (const std::exception& error) { result.detail.assign(detail_view(error.what())); return result; }
     }
     if (stop.stop_requested()) { result.status = CompanionInboxWriteStatus::cancelled; return result; }
     try {
@@ -362,7 +365,7 @@ CompanionInboxWriteResult commit(const FileStore& files, const CompanionInboxPat
             result.disk_digest = current_digest; result.status = CompanionInboxWriteStatus::storage_conflict; return result;
         }
         storage_paths(inbox_paths(paths), bounds.max_path_bytes);
-    } catch (const std::exception& error) { result.detail = detail(error.what()); return result; }
+    } catch (const std::exception& error) { result.detail.assign(detail_view(error.what())); return result; }
     if (stop.stop_requested()) { result.status = CompanionInboxWriteStatus::cancelled; return result; }
     try {
         files.write_atomic(paths.inbox_file, replacement);
@@ -372,8 +375,8 @@ CompanionInboxWriteResult commit(const FileStore& files, const CompanionInboxPat
         result.inbox_replaced = error.destination_replaced;
         result.status = error.destination_replaced ? CompanionInboxWriteStatus::durability_unknown : CompanionInboxWriteStatus::io_failed;
         if (error.destination_replaced) { result.disk_digest = std::move(replacement_digest); result.item = std::move(item); }
-        result.detail = detail(error.what());
-    } catch (const std::exception& error) { result.detail = detail(error.what()); }
+        result.detail.assign(detail_view(error.what()));
+    } catch (const std::exception& error) { result.detail.assign(detail_view(error.what())); }
     return result;
 }
 const NativeEditorPreferences* own_preference(const std::vector<NativeEditorPreferences>& preferences, std::string_view namespace_id) {

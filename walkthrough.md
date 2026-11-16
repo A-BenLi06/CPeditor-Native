@@ -421,3 +421,18 @@ Core 规则区分空输入、缺少预期输出与预期输出为空、checker �
 - 可移植桥接源码统一首行无条件包含 pch.h，将测试模式的原生依赖条件集中放在 pch.h 内，保持 MSVC PCH 解析顺序与可移植测试一致；不关闭原生 PCH或编译器错误。WindowHandle 通过 get_strong 的 COM指针查询 IWindowNative；CurrentDocument 使用与生成控件 getter 相符的非const方法；未知异常返回原生hresult_error诊断。
 - 根实际对六个既有桥接与两个新增 Companion 源文件执行C++20／macOS14／完整严格警告／-Werror语法检查通过，记录out/windows/research/root-pch-portable-syntax.log；新文件与新 SelectedCompanionItem 的同类调整仍留在Companion草稿，不纳入本提交。
 - 本次精确暂存HEAD中的独立宿主调用hunk及既有PCH修复；没有纳入 Windows Companion／macOS／共享Core在途变更。完整Windows原生编译及目标机UI/IME/UU仍由后续CI和验证脚本确认。
+
+
+## 2026-11-17T04:00:35+08:00 — 监听生命周期 C ABI 与提交后分配边界
+
+### 改动与思路
+
+- 为每个 Engine 增加最多一个 CompanionListener，提供 start／stop／info JSON ABI。同配置活动实例幂等、异配置返回 Busy、停止后新建；close／destroy 先取消并 join，再关闭判题任务。缓冲配额和有界响应存储先于绑定／停止，保留全局句柄锁与实例锁的正确顺序。
+- 独立审查发现请求 DOM 析构可在发布后再次分配，以及 POSIX rename 后 parent_path／诊断／摘要分配会隐藏真实替换。启动、接纳、确认与会话保存提前提取并清理 DOM；会话保存复用有限回应编码，文件事务在提交前准备路径／异常消息、摘要和诊断存储，提交后使用移动及预留容量。
+- 新 ABI 回归测试覆盖严格配置、配额满无副作用、真实 HTTP 持久接纳、取消／端口冲突／并发生命周期和调用线程发布后禁止分配。Windows 两个手工 cl 测试链接入口补齐显式 Winsock 库；尚未纳入 Windows Companion 测试阶段与界面草稿。中文 API、HTTP、会话及状态文档同步。
+
+### 验证与范围
+
+- 根完整普通和 C／C++ 全归档严格警告 -Werror ASan／UBSan 各17/17通过，日志 out/core/verification/listener-root-ctest-final3.log 与 listener-root-sanitize-ctest-final3.log。
+- 独立44项检查全通过，含6次链接和38次执行；故障以实际绑定端口、已发布buffer和真实文件inode替换定位，覆盖四类发布、三个实际替换、7个绑定后分配点、停止与写后未知持久性。根复核所有源SHA与证据一致，原失败保留在 out/research/listener-abi-review，最终 verification-fixed.json。
+- Apple ASan detect_leaks=0，不声称LSan、最低系统或Windows原生验收。macOS／Windows Companion UI仍在独立复验，未纳入此提交；Windows完整宿主CI和目标Windows10／IME／UU／DPI／虚拟桌面继续分别验证。

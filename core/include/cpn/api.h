@@ -81,6 +81,15 @@ CPN_API cpn_status cpn_engine_companion_page_json(cpn_engine_handle, cpn_bytes r
 CPN_API cpn_status cpn_engine_companion_accept_json(cpn_engine_handle, cpn_bytes request_json, cpn_buffer*, cpn_error*);
 CPN_API cpn_status cpn_engine_companion_prepare_json(cpn_engine_handle, cpn_bytes request_json, cpn_buffer*, cpn_error*);
 CPN_API cpn_status cpn_engine_companion_mark_applied_json(cpn_engine_handle, cpn_bytes request_json, cpn_buffer*, cpn_error*);
+/* Each engine owns at most one loopback listener. Start accepts schema_version=1,
+   workspace_id, paths, optional bounds/options; stop/info accept only schema_version.
+   Start/stop reserve response quota before binding/stopping. Close/destroy also stop
+   and join the listener. Native clients invoke these calls on a background actor.
+   Active same configuration is AlreadyStarted; a different active configuration is
+   CPN_BUSY. After stop, start creates a new listener. Info remains available after close. */
+CPN_API cpn_status cpn_engine_companion_listener_start_json(cpn_engine_handle, cpn_bytes request_json, cpn_buffer*, cpn_error*);
+CPN_API cpn_status cpn_engine_companion_listener_stop_json(cpn_engine_handle, cpn_bytes request_json, cpn_buffer*, cpn_error*);
+CPN_API cpn_status cpn_engine_companion_listener_info_json(cpn_engine_handle, cpn_bytes request_json, cpn_buffer*, cpn_error*);
 /* Buffers remain valid until this call, including after engine destruction. */
 CPN_API cpn_status cpn_buffer_release(cpn_buffer_handle, cpn_error*);
 

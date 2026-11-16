@@ -81,7 +81,7 @@ try {
         "/I$(Join-Path $repositoryRoot 'core/include')", "/I$(Join-Path $repositoryRoot 'third_party/json/include')", "/I$bridgeSource",
         (Join-Path $bridgeSource 'CoreWire.cpp'), (Join-Path $bridgeSource 'CoreRunner.cpp'),
         (Join-Path $bridgeSource 'RunnerConfiguration.cpp'), (Join-Path $repositoryRoot 'apps/windows/tests/CoreRunnerTests.cpp'),
-        "/Fo$bridgeObjects\", "/Fe:$bridgeTestExe", '/link', $coreLibrary
+        "/Fo$bridgeObjects\", "/Fe:$bridgeTestExe", '/link', $coreLibrary, 'Ws2_32.lib', 'Mswsock.lib'
     ) -Report $report -OutputRoot $outputRoot
     $report.bridgeBuildCompleted = $true
     if ($nativeTestPlatform) {
@@ -99,7 +99,7 @@ try {
         (Join-Path $bridgeSource 'SessionWorker.cpp'), (Join-Path $bridgeSource 'RecoveryModel.cpp'),
         (Join-Path $bridgeSource 'SourceStore.cpp'), (Join-Path $bridgeSource 'RunnerConfiguration.cpp'),
         (Join-Path $repositoryRoot 'apps/windows/tests/SessionTests.cpp'),
-        "/Fo$sessionObjects\", "/Fe:$sessionTestExe", '/link', $coreLibrary
+        "/Fo$sessionObjects\", "/Fe:$sessionTestExe", '/link', $coreLibrary, 'Ws2_32.lib', 'Mswsock.lib'
     ) -Report $report -OutputRoot $outputRoot
     $report.sessionBuildCompleted = $true
     if ($nativeTestPlatform) {

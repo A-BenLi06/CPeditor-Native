@@ -98,8 +98,10 @@ POSIX 使用 `flock`，Windows 使用 `LockFileEx`。锁文件保留，释放句
 
 返回的 `recovery_replaced` 与 `backup_replaced` 区分备份／恢复的提交时点；只有恢复已替换时才按其摘要推进 token。原子写入失败前后的差异由 `AtomicWriteError.destination_replaced` 表达。此服务保存恢复文件，不负责原生源文件的 NSFileCoordinator／Win32 外部修改冲突、权限授权和保存菜单流程。
 
+POSIX 原子写入在 rename 前准备 parent 路径和持久性失败异常的消息存储；rename 后目录打开／同步失败仍报告已替换。会话服务在备份写入前计算新摘要并预留有界诊断存储，提交后移动摘要、直接写入已预留的诊断字符串。C ABI 在副作用前清理请求 DOM 并预留有限写响应，避免替换后的分配失败使响应丢失已发生的提交。
+
 ## 已执行验证
 
-macOS 普通与完整严格警告 ASan/UBSan 构建的 13 个 CTest 入口通过。会话与 ABI 测试覆盖未保存正文、稳定 ID／revision、原生未知偏好、NUL／0xFF、空／缺答案、损坏保留、两实例同 token 竞争、备份和恢复替换前后故障、缓冲区容量不足及取消。独立真实子进程验证跨进程排他锁与释放。
+macOS 普通与完整严格警告 ASan/UBSan 构建的 17 个 CTest 入口通过。会话与 ABI 测试覆盖未保存正文、稳定 ID／revision、原生未知偏好、NUL／0xFF、空／缺答案、损坏保留、两实例同 token 竞争、备份和恢复替换前后故障、缓冲区容量不足及取消。独立真实子进程验证跨进程排他锁与释放；按实际 inode 替换和缓冲区发布触发的分配故障验证提交标记与有限响应。当前 Apple ASan 未启用 LSan，不将该结果记为泄漏检测或最低系统／Windows 原生验收。
 
 macOS 原生会话接入阶段：30 项 Swift 模型／真实编辑器／Core ABI 测试和真实应用重启恢复、源文件冲突保护、另存及恢复后判题通过；详情见 [macOS 说明](../apps/macos/README.md)。Windows 会话 UI、独立 SessionWorker、严格 RecoveryModel、SourceStore、关闭屏障及 MAX 最终事务已接入源码；macOS 主机的 13 组真实 C ABI 便携测试与独立复审通过。Windows 原生编译、TextChanging／Scintilla、输入法和完整恢复行为仍需 CI／目标主机验证。

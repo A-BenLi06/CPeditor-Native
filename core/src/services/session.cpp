@@ -48,11 +48,13 @@ void bounds_valid(const SessionBounds& bounds) {
         !bounds.max_id_bytes || !bounds.max_path_bytes)
         throw std::invalid_argument("Invalid session bounds");
 }
-std::string detail(std::string_view text) {
-    auto end = std::min<std::size_t>(4096, text.size());
+constexpr std::size_t max_detail_bytes=4096;
+std::string_view detail_view(std::string_view text) {
+    auto end = std::min(max_detail_bytes, text.size());
     if (end < text.size()) while (end && (static_cast<unsigned char>(text[end]) & 0xc0) == 0x80) --end;
-    return std::string(text.substr(0, end));
+    return text.substr(0, end);
 }
+std::string detail(std::string_view text) {return std::string(detail_view(text));}
 Json parse_json(std::string_view text, std::size_t bytes, std::size_t depth) {
     if (text.size() > bytes) throw std::invalid_argument("Session JSON exceeds byte limit");
     std::vector<std::set<std::string>> keys;
@@ -343,6 +345,7 @@ SessionSaveResult SessionService::save(const SessionPaths& paths, const Workspac
     std::optional<std::string> expected_disk_digest, std::chrono::milliseconds lock_timeout, std::stop_token stop) const {
     std::lock_guard guard(mutex_);
     SessionSaveResult result;
+    result.detail.reserve(max_detail_bytes);
     std::string replacement;
     try {
         replacement = serialize_workspace_session(candidate, bounds_);
@@ -386,13 +389,14 @@ SessionSaveResult SessionService::save(const SessionPaths& paths, const Workspac
     } catch (const std::system_error& error) { result.detail = detail(error.what()); return result; }
     catch (const std::exception& error) { result.status = SessionSaveStatus::invalid_existing; result.detail = detail(error.what()); return result; }
     if (stop.stop_requested()) { result.status = SessionSaveStatus::cancelled; return result; }
+    auto replacement_digest = sha256(replacement);
     if (previous) {
         try { files_->write_atomic(paths.backup_file, *previous); result.backup_replaced = true; }
         catch (const AtomicWriteError& error) {
             result.backup_replaced = error.destination_replaced;
             result.status = error.destination_replaced ? SessionSaveStatus::durability_unknown : SessionSaveStatus::io_failed;
-            result.detail = detail(error.what()); return result;
-        } catch (const std::exception& error) { result.detail = detail(error.what()); return result; }
+            result.detail.assign(detail_view(error.what())); return result;
+        } catch (const std::exception& error) { result.detail.assign(detail_view(error.what())); return result; }
     }
     if (stop.stop_requested()) { result.status = SessionSaveStatus::cancelled; return result; }
     // Recheck after backup I/O. A writer bypassing the shared lock can still race the final replace.
@@ -400,18 +404,17 @@ SessionSaveResult SessionService::save(const SessionPaths& paths, const Workspac
         const auto current = files_->read_optional(paths.recovery_file, bounds_.max_json_bytes);
         const auto current_digest = current ? std::optional<std::string>{sha256(*current)} : std::nullopt;
         if (current_digest != result.disk_digest) { result.disk_digest = current_digest; result.status = SessionSaveStatus::conflict; return result; }
-    } catch (const std::exception& error) { result.detail = detail(error.what()); return result; }
+    } catch (const std::exception& error) { result.detail.assign(detail_view(error.what())); return result; }
     if (stop.stop_requested()) { result.status = SessionSaveStatus::cancelled; return result; }
-    const auto replacement_digest = sha256(replacement);
     try {
         files_->write_atomic(paths.recovery_file, replacement);
-        result.recovery_replaced = true; result.disk_digest = replacement_digest; result.status = SessionSaveStatus::saved;
+        result.recovery_replaced = true; result.disk_digest = std::move(replacement_digest); result.status = SessionSaveStatus::saved;
     } catch (const AtomicWriteError& error) {
         result.recovery_replaced = error.destination_replaced;
         result.status = error.destination_replaced ? SessionSaveStatus::durability_unknown : SessionSaveStatus::io_failed;
-        if (error.destination_replaced) result.disk_digest = replacement_digest;
-        result.detail = detail(error.what());
-    } catch (const std::exception& error) { result.detail = detail(error.what()); }
+        if (error.destination_replaced) result.disk_digest = std::move(replacement_digest);
+        result.detail.assign(detail_view(error.what()));
+    } catch (const std::exception& error) { result.detail.assign(detail_view(error.what())); }
     return result;
 }
 const char* session_load_status_name(SessionLoadStatus status) noexcept {

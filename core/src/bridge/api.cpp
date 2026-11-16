@@ -4,6 +4,7 @@
 #include "cpn/json.hpp"
 #include "cpn/session.hpp"
 #include "cpn/companion_inbox.hpp"
+#include "cpn/companion_listener.hpp"
 #include "cpn/text.hpp"
 #include <nlohmann/json.hpp>
 #include <algorithm>
@@ -28,12 +29,27 @@ void session_fields(const Json& object,std::initializer_list<std::string_view> a
 }
 constexpr std::size_t total_buffer_limit=256*1024*1024;
 constexpr std::size_t individual_buffer_limit=128*1024*1024;
+struct ListenerConfiguration {
+    std::string workspace_id;
+    cpn::CompanionInboxPaths paths;
+    cpn::CompanionInboxBounds bounds;
+    cpn::CompanionListenerOptions options;
+};
 struct Engine {
     Engine(cpn_engine_options value):options(value),jobs({value.max_workers,value.max_jobs}){}
     cpn_engine_options options;
     cpn::JobRegistry jobs;
     std::stop_source operations;
     std::mutex drain_mutex;
+    // Do not retain handles_mutex while joining listener threads.
+    std::mutex listener_mutex;
+    std::optional<ListenerConfiguration> listener_configuration;
+    std::optional<cpn::CompanionListenerStartResult> listener_start_result;
+    std::unique_ptr<cpn::CompanionListener> listener;
+    void close_listener() {
+        std::lock_guard lock(listener_mutex);
+        if(listener)listener->stop();
+    }
 };
 struct Buffer {std::uint64_t owner;std::string bytes;};
 std::mutex handles_mutex;
@@ -148,6 +164,7 @@ constexpr auto items="items";
 constexpr auto receipt="receipt";
 constexpr auto inbox_status="inbox_status";
 constexpr auto inbox_replaced="inbox_replaced";
+constexpr auto recovery_replaced="recovery_replaced";
 constexpr auto backup_replaced="backup_replaced";
 constexpr auto item="item";
 constexpr auto sequence="sequence";
@@ -161,6 +178,16 @@ constexpr auto payload_digest="payload_digest";
 constexpr auto ordinary_stdio_compatible="ordinary_stdio_compatible";
 constexpr auto applied_session_digest="applied_session_digest";
 constexpr auto applied_session_revision="applied_session_revision";
+}
+namespace listener_field {
+constexpr auto options="options", port="port", enable_ipv6="enable_ipv6";
+constexpr auto has_listener="has_listener", engine_closed="engine_closed", ipv6="ipv6";
+constexpr auto start_status="start_status", native_error="native_error", failure_detail="failure_detail";
+constexpr auto statistics="statistics", running="running", closed="closed", failed="failed";
+constexpr auto active_connections="active_connections", outstanding_admissions="outstanding_admissions", inflight_body_bytes="inflight_body_bytes";
+constexpr auto accepted="accepted", duplicates="duplicates", admission_failures="admission_failures";
+constexpr auto connection_rejections="connection_rejections", admission_rejections="admission_rejections";
+constexpr auto read_timeouts="read_timeouts", write_timeouts="write_timeouts", request_timeouts="request_timeouts";
 }
 constexpr std::uint64_t companion_request_schema_version=1;
 constexpr std::size_t companion_response_bytes=65536;
@@ -308,6 +335,65 @@ cpn::ImportDocumentDefaults companion_defaults(const Json& doc,const cpn::Sessio
     }
     return result;
 }
+struct ListenerSizeField { const char* name;std::size_t cpn::CompanionListenerOptions::* member; };
+constexpr ListenerSizeField listener_size_fields[]{
+    {"max_connections",&cpn::CompanionListenerOptions::max_connections},
+    {"max_admissions",&cpn::CompanionListenerOptions::max_admissions},
+    {"max_body_bytes",&cpn::CompanionListenerOptions::max_body_bytes},
+    {"max_inflight_body_bytes",&cpn::CompanionListenerOptions::max_inflight_body_bytes},
+    {"max_header_bytes",&cpn::CompanionListenerOptions::max_header_bytes},
+    {"max_header_count",&cpn::CompanionListenerOptions::max_header_count},
+    {"max_response_bytes",&cpn::CompanionListenerOptions::max_response_bytes},
+    {"socket_send_buffer_bytes",&cpn::CompanionListenerOptions::socket_send_buffer_bytes}};
+struct ListenerTimeField { const char* name;std::chrono::milliseconds cpn::CompanionListenerOptions::* member; };
+constexpr ListenerTimeField listener_time_fields[]{
+    {"read_timeout_ms",&cpn::CompanionListenerOptions::read_timeout},
+    {"write_timeout_ms",&cpn::CompanionListenerOptions::write_timeout},
+    {"request_timeout_ms",&cpn::CompanionListenerOptions::request_timeout},
+    {"lock_timeout_ms",&cpn::CompanionListenerOptions::lock_timeout}};
+ListenerConfiguration listener_configuration(const Json& doc) {
+    auto context=companion_common(doc);
+    ListenerConfiguration result{std::move(context.workspace_id),std::move(context.paths),context.bounds,{}};
+    // A reduced payload bound also reduces the omitted transport body default.
+    result.options.max_body_bytes=std::min(result.options.max_body_bytes,result.bounds.payload.max_json_bytes);
+    if(!doc.contains(listener_field::options))return result;
+    const auto& values=doc.at(listener_field::options);
+    if(!values.is_object())throw std::invalid_argument("Companion listener options must be an object");
+    for(const auto& [name,value]:values.items()){
+        if(name==listener_field::port)result.options.port=static_cast<std::uint16_t>(companion_integer(value,0,65535));
+        else if(name==listener_field::enable_ipv6){
+            if(!value.is_boolean())throw std::invalid_argument("Companion listener IPv6 option must be boolean");
+            result.options.enable_ipv6=value.get<bool>();
+        }else{
+            const auto size=std::find_if(std::begin(listener_size_fields),std::end(listener_size_fields),[&](const auto& field){return name==field.name;});
+            if(size!=std::end(listener_size_fields)){
+                result.options.*(size->member)=static_cast<std::size_t>(companion_integer(value,1,std::numeric_limits<std::size_t>::max()));
+                continue;
+            }
+            const auto time=std::find_if(std::begin(listener_time_fields),std::end(listener_time_fields),[&](const auto& field){return name==field.name;});
+            if(time!=std::end(listener_time_fields)){
+                result.options.*(time->member)=std::chrono::milliseconds{static_cast<std::int64_t>(companion_integer(value,0,300000))};
+                continue;
+            }
+            throw std::invalid_argument("Unknown Companion listener option: "+name);
+        }
+    }
+    return result;
+}
+bool same_listener_configuration(const ListenerConfiguration& left,const ListenerConfiguration& right) noexcept {
+    if(left.workspace_id!=right.workspace_id || left.paths.inbox_file!=right.paths.inbox_file ||
+       left.paths.backup_file!=right.paths.backup_file || left.paths.lock_file!=right.paths.lock_file ||
+       left.options.port!=right.options.port || left.options.enable_ipv6!=right.options.enable_ipv6 ||
+       left.bounds.payload.max_batch_size!=right.bounds.payload.max_batch_size)return false;
+    for(const auto& field:listener_size_fields)if(left.options.*(field.member)!=right.options.*(field.member))return false;
+    for(const auto& field:listener_time_fields)if(left.options.*(field.member)!=right.options.*(field.member))return false;
+    for(const auto& field:companion_payload_fields)if(left.bounds.payload.*(field.member)!=right.bounds.payload.*(field.member))return false;
+    for(const auto& field:companion_inbox_fields)if(left.bounds.*(field.member)!=right.bounds.*(field.member))return false;
+    return true;
+}
+void listener_request_schema(const Json& request) {
+    (void)companion_integer(request.at(companion_field::schema_version),companion_request_schema_version,companion_request_schema_version);
+}
 Json companion_receipt(const cpn::ImportApplicationReceipt& receipt) {
     return Json{{companion_field::inbox_id,receipt.inbox_id},{companion_field::import_id,receipt.import_id},
         {companion_field::problem_id,receipt.problem_id},{companion_field::document_id,receipt.document_id},
@@ -318,6 +404,16 @@ Json companion_receipt(const cpn::ImportApplicationReceipt& receipt) {
 class CompanionWriteResponse {
 public:
     CompanionWriteResponse(){bytes_.reserve(companion_response_bytes);}
+    std::string_view render(const cpn::SessionSaveResult& result) {
+        using namespace companion_field;
+        append("{");key(schema_version);number(companion_request_schema_version);
+        comma_key(status);string(cpn::session_save_status_name(result.status));
+        comma_key(detail);string(std::string_view(result.detail).substr(0,4096));
+        comma_key(disk_digest);optional(result.disk_digest);
+        comma_key(recovery_replaced);append(result.recovery_replaced?"true":"false");
+        comma_key(backup_replaced);append(result.backup_replaced?"true":"false");
+        append("}");return bytes_;
+    }
     std::string_view render(const cpn::CompanionInboxWriteResult& result) {
         using namespace companion_field;
         append("{");key(schema_version);number(companion_request_schema_version);comma_key(status);string(cpn::companion_inbox_write_status_name(result.status));
@@ -339,7 +435,35 @@ public:
         }else append("null");
         append("}");return bytes_;
     }
+    std::string_view render_listener(std::string_view operation,const Engine& engine,
+        const cpn::CompanionListenerStatistics& stats,std::string_view failure) {
+        using namespace companion_field;
+        append("{");key(schema_version);number(companion_request_schema_version);comma_key(status);string(operation);
+        comma_key(listener_field::has_listener);append(engine.listener?"true":"false");
+        comma_key(listener_field::engine_closed);append(engine.operations.stop_requested()?"true":"false");
+        const auto* started=engine.listener_start_result?&*engine.listener_start_result:nullptr;
+        comma_key(listener_field::port);number(started?started->port:0);
+        comma_key(listener_field::ipv6);append(started && started->ipv6?"true":"false");
+        comma_key(listener_field::start_status);if(started)string(cpn::companion_listener_start_status_name(started->status));else append("null");
+        comma_key(listener_field::native_error);signed_number(started?started->native_error:0);
+        comma_key(detail);string(started?std::string_view(started->detail).substr(0,4096):std::string_view{});
+        comma_key(listener_field::failure_detail);string(failure.substr(0,4096));
+        comma_key(listener_field::statistics);append("{");key(listener_field::running);append(stats.running?"true":"false");
+        comma_key(listener_field::closed);append(stats.closed?"true":"false");
+        comma_key(listener_field::failed);append(stats.failed?"true":"false");
+        for(const auto& [name,value]:std::array{
+            std::pair{listener_field::active_connections,static_cast<std::uint64_t>(stats.active_connections)},
+            std::pair{listener_field::outstanding_admissions,static_cast<std::uint64_t>(stats.outstanding_admissions)},
+            std::pair{listener_field::inflight_body_bytes,static_cast<std::uint64_t>(stats.inflight_body_bytes)},
+            std::pair{listener_field::accepted,stats.accepted},std::pair{listener_field::duplicates,stats.duplicates},
+            std::pair{listener_field::admission_failures,stats.admission_failures},
+            std::pair{listener_field::connection_rejections,stats.connection_rejections},std::pair{listener_field::admission_rejections,stats.admission_rejections},
+            std::pair{listener_field::read_timeouts,stats.read_timeouts},std::pair{listener_field::write_timeouts,stats.write_timeouts},
+            std::pair{listener_field::request_timeouts,stats.request_timeouts}}){comma_key(name);number(value);}
+        append("}}");return bytes_;
+    }
 private:
+    void signed_number(std::int64_t value){char text[21];const auto end=std::to_chars(std::begin(text),std::end(text),value).ptr;append({text,static_cast<std::size_t>(end-text)});}
     void append(std::string_view value){
         if(value.size()>companion_response_bytes-bytes_.size())throw std::length_error("Companion response exceeded its reserved capacity");
         bytes_.append(value);
@@ -399,13 +523,13 @@ cpn_status cpn_engine_create(const cpn_engine_options* given,cpn_engine_handle* 
 }
 cpn_status cpn_engine_close(cpn_engine_handle handle,cpn_error* destination){
     return boundary(destination,[&]{auto engine=lookup(handle);if(!engine)return error(destination,CPN_INVALID_HANDLE,"Unknown engine");
-        engine->operations.request_stop();engine->jobs.close();return error(destination,CPN_OK,{});});
+        engine->operations.request_stop();engine->close_listener();engine->jobs.close();return error(destination,CPN_OK,{});});
 }
 cpn_status cpn_engine_destroy(cpn_engine_handle handle,cpn_error* destination){
     return boundary(destination,[&]{std::shared_ptr<Engine> engine;
         {std::lock_guard guard(handles_mutex);auto found=engines.find(handle);if(found==engines.end())return error(destination,CPN_INVALID_HANDLE,"Unknown engine");
          engine=std::move(found->second);engines.erase(found);}
-        engine->operations.request_stop();engine->jobs.close();return error(destination,CPN_OK,{});});
+        engine->operations.request_stop();engine->close_listener();engine->jobs.close();return error(destination,CPN_OK,{});});
 }
 cpn_status cpn_engine_submit_json(cpn_engine_handle handle,cpn_bytes json,cpn_job_handle* output,cpn_error* destination){
     if(output)*output=0;
@@ -478,39 +602,112 @@ cpn_status cpn_engine_session_save_json(cpn_engine_handle handle,cpn_bytes reque
         if(engine->operations.stop_requested())return error(destination,CPN_CLOSED,"Engine is closed");
         if(!output || !request.data || !request.size || request.size>engine->options.max_request_bytes)
             return error(destination,CPN_INVALID_ARGUMENT,"Invalid session request bytes");
-        std::vector<std::set<std::string>> keys;
-        const auto doc=Json::parse(request.data,request.data+request.size,[&](int depth,Json::parse_event_t event,Json& parsed){
-            if(depth>64)throw std::invalid_argument("Session request nesting exceeds limit");
-            if(event==Json::parse_event_t::object_start)keys.emplace_back();
-            else if(event==Json::parse_event_t::object_end)keys.pop_back();
-            else if(event==Json::parse_event_t::key && !keys.back().insert(parsed.get<std::string>()).second)
-                throw std::invalid_argument("Duplicate session request field");
-            return true;
-        });
-        if(!doc.is_object() || !doc.at("schema_version").is_number_integer() || doc.at("schema_version")!=1)
-            return error(destination,CPN_INVALID_ARGUMENT,"Unsupported session request version");
-        session_fields(doc,{"schema_version","paths","session","expected_disk_digest","lock_timeout_ms"});
-        const auto& paths=doc.at("paths");
-        session_fields(paths,{"recovery_file","backup_file","lock_file"});
-        cpn::SessionPaths locations{cpn::path_from_utf8(paths.at("recovery_file").get<std::string>()),
-            cpn::path_from_utf8(paths.at("backup_file").get<std::string>()),cpn::path_from_utf8(paths.at("lock_file").get<std::string>())};
-        auto session=cpn::parse_workspace_session(doc.at("session").dump());
-        std::optional<std::string> digest;
-        if(doc.contains("expected_disk_digest") && !doc.at("expected_disk_digest").is_null())digest=doc.at("expected_disk_digest").get<std::string>();
+        cpn::SessionPaths locations;cpn::WorkspaceSession session;std::optional<std::string> digest;
         std::int64_t timeout=5000;
-        if(doc.contains("lock_timeout_ms")){
-            const auto& value=doc.at("lock_timeout_ms");
-            if(!value.is_number_integer() || value<0 || value>60000)return error(destination,CPN_INVALID_ARGUMENT,"Invalid session lock timeout");
-            timeout=value.get<std::int64_t>();
+        {
+            std::vector<std::set<std::string>> keys;
+            const auto doc=Json::parse(request.data,request.data+request.size,[&](int depth,Json::parse_event_t event,Json& parsed){
+                if(depth>64)throw std::invalid_argument("Session request nesting exceeds limit");
+                if(event==Json::parse_event_t::object_start)keys.emplace_back();
+                else if(event==Json::parse_event_t::object_end)keys.pop_back();
+                else if(event==Json::parse_event_t::key && !keys.back().insert(parsed.get<std::string>()).second)
+                    throw std::invalid_argument("Duplicate session request field");
+                return true;
+            });
+            if(!doc.is_object() || !doc.at("schema_version").is_number_integer() || doc.at("schema_version")!=1)
+                return error(destination,CPN_INVALID_ARGUMENT,"Unsupported session request version");
+            session_fields(doc,{"schema_version","paths","session","expected_disk_digest","lock_timeout_ms"});
+            const auto& paths=doc.at("paths");
+            session_fields(paths,{"recovery_file","backup_file","lock_file"});
+            locations={cpn::path_from_utf8(paths.at("recovery_file").get<std::string>()),
+                cpn::path_from_utf8(paths.at("backup_file").get<std::string>()),cpn::path_from_utf8(paths.at("lock_file").get<std::string>())};
+            session=cpn::parse_workspace_session(doc.at("session").dump());
+            if(doc.contains("expected_disk_digest") && !doc.at("expected_disk_digest").is_null())digest=doc.at("expected_disk_digest").get<std::string>();
+            if(doc.contains("lock_timeout_ms")){
+                const auto& value=doc.at("lock_timeout_ms");
+                if(!value.is_number_integer() || value<0 || value>60000)return error(destination,CPN_INVALID_ARGUMENT,"Invalid session lock timeout");
+                timeout=value.get<std::int64_t>();
+            }
         }
-        ReservedBuffer reserved;
-        const auto allocated=allocate_buffer(handle,*engine,std::string(65536,'\0'),&reserved.value,destination);
+        ReservedBuffer reserved;CompanionWriteResponse response;
+        const auto allocated=allocate_buffer(handle,*engine,std::string(companion_response_bytes,'\0'),&reserved.value,destination);
         if(allocated!=CPN_OK)return allocated;
         const auto saved=cpn::SessionService().save(locations,session,digest,std::chrono::milliseconds(timeout),engine->operations.get_token());
-        auto result=Json{{"schema_version",1},{"status",cpn::session_save_status_name(saved.status)},{"detail",saved.detail.substr(0,4096)},
-            {"recovery_replaced",saved.recovery_replaced},{"backup_replaced",saved.backup_replaced}};
-        result["disk_digest"]=saved.disk_digest?Json(*saved.disk_digest):Json(nullptr);
-        reserved.publish(result.dump(-1,' ',false,Json::error_handler_t::replace),output);
+        reserved.publish(response.render(saved),output);
+        return error(destination,CPN_OK,{});
+    });
+}
+cpn_status cpn_engine_companion_listener_start_json(cpn_engine_handle handle,cpn_bytes request,cpn_buffer* output,cpn_error* destination){
+    if(output)*output={};
+    return boundary(destination,[&]{
+        auto engine=lookup(handle);if(!engine)return error(destination,CPN_INVALID_HANDLE,"Unknown engine");
+        if(!output)return error(destination,CPN_INVALID_ARGUMENT,"Buffer output is required");
+        if(engine->operations.stop_requested())return error(destination,CPN_CLOSED,"Engine is closed");
+        ListenerConfiguration configuration;
+        {
+            const auto doc=companion_request(request,*engine,{companion_field::schema_version,companion_field::workspace_id,
+                companion_field::paths,companion_field::bounds,listener_field::options});
+            configuration=listener_configuration(doc);
+        }
+        // JSON destruction can allocate an iterative cleanup stack. Finish it before
+        // reserving the response or changing the active listener.
+        // The service constructor validates all supported option combinations before binding.
+        auto proposed=std::make_unique<cpn::CompanionListener>(configuration.options,configuration.workspace_id,
+            configuration.paths,cpn::native_file_store(),configuration.bounds);
+        std::lock_guard lock(engine->listener_mutex);
+        if(engine->operations.stop_requested())return error(destination,CPN_CLOSED,"Engine is closed");
+        const bool same=engine->listener_configuration && same_listener_configuration(*engine->listener_configuration,configuration);
+        if(engine->listener && engine->listener->statistics().running && !same)
+            return error(destination,CPN_BUSY,"A running Companion listener owns a different configuration");
+        ReservedBuffer reserved;CompanionWriteResponse response;
+        const auto allocated=allocate_buffer(handle,*engine,std::string(companion_response_bytes,'\0'),&reserved.value,destination);
+        if(allocated!=CPN_OK)return allocated;
+        if(!engine->listener || engine->listener->statistics().closed || !same){
+            // All potentially allocating configuration/instance work precedes any stop/bind.
+            if(engine->listener)engine->listener->stop();
+            engine->listener_configuration=std::move(configuration);
+            engine->listener=std::move(proposed);
+        }
+        engine->listener_start_result=engine->listener->start();
+        if(engine->operations.stop_requested()){
+            engine->listener->stop();return error(destination,CPN_CLOSED,"Engine closed during listener startup");
+        }
+        reserved.publish(response.render_listener(cpn::companion_listener_start_status_name(engine->listener_start_result->status),
+            *engine,engine->listener->statistics(),{}),output);
+        return error(destination,CPN_OK,{});
+    });
+}
+cpn_status cpn_engine_companion_listener_stop_json(cpn_engine_handle handle,cpn_bytes request,cpn_buffer* output,cpn_error* destination){
+    if(output)*output={};
+    return boundary(destination,[&]{
+        auto engine=lookup(handle);if(!engine)return error(destination,CPN_INVALID_HANDLE,"Unknown engine");
+        if(!output)return error(destination,CPN_INVALID_ARGUMENT,"Buffer output is required");
+        listener_request_schema(companion_request(request,*engine,{companion_field::schema_version}));
+        std::lock_guard lock(engine->listener_mutex);
+        // Copy diagnostics and reserve both output allocations before stop mutates/join workers.
+        const auto failure=engine->listener?engine->listener->failure_detail():std::string{};
+        ReservedBuffer reserved;CompanionWriteResponse response;
+        const auto allocated=allocate_buffer(handle,*engine,std::string(companion_response_bytes,'\0'),&reserved.value,destination);
+        if(allocated!=CPN_OK)return allocated;
+        if(engine->listener)engine->listener->stop();
+        reserved.publish(response.render_listener(engine->listener?"Stopped":"NotStarted",*engine,
+            engine->listener?engine->listener->statistics():cpn::CompanionListenerStatistics{},failure),output);
+        return error(destination,CPN_OK,{});
+    });
+}
+cpn_status cpn_engine_companion_listener_info_json(cpn_engine_handle handle,cpn_bytes request,cpn_buffer* output,cpn_error* destination){
+    if(output)*output={};
+    return boundary(destination,[&]{
+        auto engine=lookup(handle);if(!engine)return error(destination,CPN_INVALID_HANDLE,"Unknown engine");
+        if(!output)return error(destination,CPN_INVALID_ARGUMENT,"Buffer output is required");
+        listener_request_schema(companion_request(request,*engine,{companion_field::schema_version}));
+        std::lock_guard lock(engine->listener_mutex);
+        const auto failure=engine->listener?engine->listener->failure_detail():std::string{};
+        ReservedBuffer reserved;CompanionWriteResponse response;
+        const auto allocated=allocate_buffer(handle,*engine,std::string(companion_response_bytes,'\0'),&reserved.value,destination);
+        if(allocated!=CPN_OK)return allocated;
+        reserved.publish(response.render_listener("ListenerInfo",*engine,
+            engine->listener?engine->listener->statistics():cpn::CompanionListenerStatistics{},failure),output);
         return error(destination,CPN_OK,{});
     });
 }
@@ -576,10 +773,13 @@ cpn_status cpn_engine_companion_accept_json(cpn_engine_handle handle,cpn_bytes r
         auto engine=lookup(handle);if(!engine)return error(destination,CPN_INVALID_HANDLE,"Unknown engine");
         if(engine->operations.stop_requested())return error(destination,CPN_CLOSED,"Engine is closed");
         if(!output)return error(destination,CPN_INVALID_ARGUMENT,"Companion buffer output is required");
-        const auto doc=companion_request(request,*engine,{schema_version,workspace_id,paths,bounds,original_json,lock_timeout_ms});
-        const auto context=companion_common(doc);
-        const auto original=companion_text(doc.at(original_json),context.bounds.payload.max_json_bytes);
-        const auto timeout=companion_timeout(doc);
+        CompanionRequest context;std::string original;std::chrono::milliseconds timeout;
+        {
+            const auto doc=companion_request(request,*engine,{schema_version,workspace_id,paths,bounds,original_json,lock_timeout_ms});
+            context=companion_common(doc);
+            original=companion_text(doc.at(original_json),context.bounds.payload.max_json_bytes);
+            timeout=companion_timeout(doc);
+        }
         ReservedBuffer reserved;CompanionWriteResponse response;
         const auto allocated=allocate_buffer(handle,*engine,std::string(companion_response_bytes,'\0'),&reserved.value,destination);
         if(allocated!=CPN_OK)return allocated;
@@ -624,15 +824,19 @@ cpn_status cpn_engine_companion_mark_applied_json(cpn_engine_handle handle,cpn_b
         auto engine=lookup(handle);if(!engine)return error(destination,CPN_INVALID_HANDLE,"Unknown engine");
         if(engine->operations.stop_requested())return error(destination,CPN_CLOSED,"Engine is closed");
         if(!output)return error(destination,CPN_INVALID_ARGUMENT,"Companion buffer output is required");
-        const auto doc=companion_request(request,*engine,{schema_version,workspace_id,paths,bounds,import_id,session_paths,lock_timeout_ms,max_receipts});
-        const auto context=companion_common(doc);
-        const auto identity=companion_text(doc.at(import_id),context.bounds.max_id_bytes,true);
-        const auto timeout=companion_timeout(doc);const auto limits=companion_application_bounds(doc,context);
-        const auto& location=doc.at(session_paths);
-        session_fields(location,{recovery_file,backup_file,lock_file});
-        const auto path_limit=std::min(context.bounds.max_path_bytes,limits.session.max_path_bytes);
-        const cpn::SessionPaths locations{companion_path(location.at(recovery_file),path_limit),
-            companion_path(location.at(backup_file),path_limit),companion_path(location.at(lock_file),path_limit)};
+        CompanionRequest context;std::string identity;std::chrono::milliseconds timeout;
+        cpn::ImportApplicationBounds limits;cpn::SessionPaths locations;
+        {
+            const auto doc=companion_request(request,*engine,{schema_version,workspace_id,paths,bounds,import_id,session_paths,lock_timeout_ms,max_receipts});
+            context=companion_common(doc);
+            identity=companion_text(doc.at(import_id),context.bounds.max_id_bytes,true);
+            timeout=companion_timeout(doc);limits=companion_application_bounds(doc,context);
+            const auto& location=doc.at(session_paths);
+            session_fields(location,{recovery_file,backup_file,lock_file});
+            const auto path_limit=std::min(context.bounds.max_path_bytes,limits.session.max_path_bytes);
+            locations={companion_path(location.at(recovery_file),path_limit),
+                companion_path(location.at(backup_file),path_limit),companion_path(location.at(lock_file),path_limit)};
+        }
         ReservedBuffer reserved;CompanionWriteResponse response;
         const auto allocated=allocate_buffer(handle,*engine,std::string(companion_response_bytes,'\0'),&reserved.value,destination);
         if(allocated!=CPN_OK)return allocated;

@@ -1,6 +1,6 @@
 # Companion 回环 HTTP 服务
 
-共享 `CompanionListener` 使用 Boost.Beast／Asio 解析 HTTP，在一个异步网络线程和一个有界持久接纳线程中工作。公开头为 `core/include/cpn/companion_listener.hpp`，不暴露 Boost 类型。当前服务进入 CMake 服务库与单一 Core 归档；监听生命周期的 C ABI、两端应用启停和实际扩展互操作尚未接入。
+共享 `CompanionListener` 使用 Boost.Beast／Asio 解析 HTTP，在一个异步网络线程和一个有界持久接纳线程中工作。公开头为 `core/include/cpn/companion_listener.hpp`，不暴露 Boost 类型。服务和监听生命周期 C ABI 进入 CMake 服务库与单一 Core 归档；两端应用启停和实际扩展互操作的验收见 [实施状态](status.md)。
 
 ## 接纳与导入
 
@@ -62,10 +62,18 @@ sequenceDiagram
 
 在原生后台协调器调用 `start()`／`stop()`；停止取消监听、活动 socket、排队和正在等待锁的接纳，然后 join 两线程并排空取消 handler。并发外部 stop 串行完成。stop 后实例不可重启，应创建新实例。禁止从监听器自身线程调用 start／stop，检查在获取 join 锁及状态变化前拒绝重入，避免启动等待与外部停止形成死锁。停止不在 MainActor／DispatcherQueue 上等待，也不调用 UI 回调。
 
+C ABI 为每个引擎协调最多一个实例，提供 `cpn_engine_companion_listener_start_json`、`stop_json` 和 `info_json`。启动／停止前预留响应配额；活动实例的不同配置返回 `CPN_BUSY`，同配置返回 `AlreadyStarted`。引擎关闭先取消并 join 监听器，再关闭运行任务；关闭后仍可查询状态。完整字段、限额与缓冲区所有权见 [Core API](core-api.md#companion-监听生命周期接口)。
+
+绑定禁用地址复用，Windows 另外显式使用 `SO_EXCLUSIVEADDRUSE`，防止另一实例复用正在监听的端口。实际 HTTP 连接结束后的系统 `TIME_WAIT` 可能令同端口的新实例暂时返回 `BindFailed`；停止已 join 与“同端口立即可再绑定”是不同保证。原生客户端显示实际失败诊断，不把 `CPN_OK` 等同于 `Started`，不使用延时隐藏端口错误。真实关闭验证检查连接拒绝；未建立连接的端口另验证独占重新绑定。
+
 ## 固定依赖与验证边界
 
 Boost 1.92.0 官方 b2-nodocs 归档的 URL／SHA-256 和 BSL-1.0 原文身份保存在 `third_party/core-dependencies.lock.json`。CMake FetchContent 下载时校验归档，排除 Boost 自身库构建，仅为内部网络实现提供 system headers；不链接动态 Boost runtime，Windows 显式链接 `ws2_32`／`mswsock`。离线可复用 FetchContent 缓存；显式 `FETCHCONTENT_SOURCE_DIR_CPN_BOOST` 是开发者提供的本地源码覆盖，只检查版本及许可身份，不能当作归档逐文件完整性证明。
 
 `tests/core/companion_listener_tests.cpp` 使用真实 IPv4／可用 IPv6 socket 和原生 FileStore，覆盖原文、NUL／CRLF、分段／chunked／trailer、Host、预算、端口冲突、替换前后故障、锁等待、超时和并发停止。macOS ARM64 作者普通、完整 ASan／UBSan、TSan 三种模式各 7 组通过；ASan 显式关闭当前主机不支持的 LSan。慢接收探针观察到完整响应进入 TCP 缓冲，未触发阻塞写超时，不能声称已实测该分支。
 
-Windows 10、最低支持 macOS、真实 Competitive Companion 扩展和两端原生启停仍需后续验收。客户端测试命令必须在原生启停链路实现后，按真实配置端口执行；当前没有可直接启动监听的应用菜单或 CLI。
+`tests/abi/companion_listener_api_tests.cpp` 通过真实网络覆盖严格配置、规范化默认值、配额耗尽时没有绑定／停止副作用、HTTP 持久接纳和非消费分页、端口冲突重试、销毁后缓冲区、持锁接纳／未读完正文的关闭取消，以及并发 start／stop／close／destroy。带 Boost 类型的测试程序必须与 Core 使用一致的编译器配置及 macOS deployment target；只包含 C ABI 头的 Swift 原生桥接不暴露 Boost 类型。
+
+普通及完整 C／C++ 严格警告 ASan／UBSan 的 Core 17/17 入口通过。独立故障注入额外通过 44 项检查，按实际发布的缓冲区、实际绑定的端口和文件 inode 替换确定故障位置，覆盖启动失败清理、停止、写响应发布、替换标记和未知持久性的诊断路径。请求 DOM 清理、POSIX parent 路径／异常消息、摘要与诊断存储在副作用前准备，替换后不以分配新响应或诊断字符串的方式吞掉已发生的效果。原始失败与修复复验保留在 `out/research/listener-abi-review`。
+
+Windows 10、最低支持 macOS、真实 Competitive Companion 扩展和两端原生启停仍需后续验收。客户端测试命令必须在原生启停链路实现后，按真实配置端口执行；服务／ABI 验证不代表原生菜单与实际扩展验收。

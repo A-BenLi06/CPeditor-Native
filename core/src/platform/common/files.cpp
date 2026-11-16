@@ -131,7 +131,8 @@ public:
     }
     void write_atomic(const std::filesystem::path& destination,std::string_view bytes) const override {
         (void)path_to_utf8(destination);
-        auto temporary=destination.parent_path()/path_from_utf8(".cpn-"+unique_suffix()+".tmp");
+        auto parent=destination.parent_path();
+        auto temporary=parent/path_from_utf8(".cpn-"+unique_suffix()+".tmp");
 #ifdef _WIN32
         HANDLE file=CreateFileW(temporary.c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);
         if(file==INVALID_HANDLE_VALUE) throw std::system_error(GetLastError(),std::system_category(),"CreateFileW");
@@ -154,6 +155,11 @@ public:
             DeleteFileW(temporary.c_str());throw;
         }
 #else
+        if(parent.empty()) parent=".";
+        // Even exception-message storage is ready before rename commits. A late
+        // allocation failure must never hide that the destination was replaced.
+        const AtomicWriteError directory_open_failure("File replaced; cannot open directory for durability",true);
+        const AtomicWriteError directory_sync_failure("File replaced; directory durability could not be confirmed",true);
         int file=::open(temporary.c_str(),O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC,0600);
         if(file<0) throw std::system_error(errno,std::generic_category(),"open");
         bool closed=false;
@@ -175,11 +181,10 @@ public:
             closed=true;
             if(::rename(temporary.c_str(),destination.c_str())<0)
                 throw std::system_error(errno,std::generic_category(),"rename");
-            auto parent=destination.parent_path();if(parent.empty()) parent=".";
             const int directory=::open(parent.c_str(),O_RDONLY|O_CLOEXEC);
-            if(directory<0) throw AtomicWriteError("File replaced; cannot open directory for durability: "+std::generic_category().message(errno),true);
-            const auto synced=::fsync(directory);const auto error=errno;::close(directory);
-            if(synced<0) throw AtomicWriteError("File replaced; directory durability could not be confirmed: "+std::generic_category().message(error),true);
+            if(directory<0) throw directory_open_failure;
+            const auto synced=::fsync(directory);::close(directory);
+            if(synced<0) throw directory_sync_failure;
         } catch(...) {
             if(!closed) ::close(file);
             ::unlink(temporary.c_str());throw;
