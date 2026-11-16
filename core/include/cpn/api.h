@@ -74,6 +74,13 @@ CPN_API cpn_status cpn_engine_info_json(cpn_engine_handle, cpn_buffer*, cpn_erro
 /* Recovery file I/O is synchronous; native clients call these from their background actor. */
 CPN_API cpn_status cpn_engine_session_load(cpn_engine_handle, cpn_bytes path_utf8, cpn_buffer*, cpn_error*);
 CPN_API cpn_status cpn_engine_session_save_json(cpn_engine_handle, cpn_bytes request_json, cpn_buffer*, cpn_error*);
+/* Companion calls are synchronous and use schema-versioned JSON requests.
+   page is non-destructive; accept/mark_applied reserve response quota before file I/O.
+   prepare returns one session candidate containing both the document and its receipt. */
+CPN_API cpn_status cpn_engine_companion_page_json(cpn_engine_handle, cpn_bytes request_json, cpn_buffer*, cpn_error*);
+CPN_API cpn_status cpn_engine_companion_accept_json(cpn_engine_handle, cpn_bytes request_json, cpn_buffer*, cpn_error*);
+CPN_API cpn_status cpn_engine_companion_prepare_json(cpn_engine_handle, cpn_bytes request_json, cpn_buffer*, cpn_error*);
+CPN_API cpn_status cpn_engine_companion_mark_applied_json(cpn_engine_handle, cpn_bytes request_json, cpn_buffer*, cpn_error*);
 /* Buffers remain valid until this call, including after engine destruction. */
 CPN_API cpn_status cpn_buffer_release(cpn_buffer_handle, cpn_error*);
 

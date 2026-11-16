@@ -341,3 +341,19 @@ Core 规则区分空输入、缺少预期输出与预期输出为空、checker �
 - 82bc6d0 Windows CI 发现根新增return {}不能调用上游PRectangle的explicit构造函数。改用实际Geometry.h定义的PRectangle::FromInts(0,0,0,0)，保留空Wrapper时确定返回空矩形的语义。
 - 根使用实际固定Geometry.h对返回表达式及char8_t字节视图进行C++20／-Werror编译检查，重新PowerShell导出／应用补丁及全部after SHA校验均通过。证据out/windows/research/root-explicit-rectangle-review.log。
 - 更新PlatWin产物与patch SHA，参考子模块不修改；完整Windows结果等待后续CI，其他ABI／Windows会话草稿不纳入此修复提交。
+
+## 2026-11-17T02:30:35+08:00 — Companion 四接口 C ABI 与非消费分页
+
+### 改动与思路
+
+- ABI 1新增page／accept／prepare／mark_applied JSON符号。workspace和绝对路径显式，字段集中定义；原始payload必须字符串，递归重复／未知字段、浮点或溢出数字、错误路径／有界限额与defaults在副作用前完整验证。
+- page计入完整envelope／标点／canonical item实际字节，不消费、首项不容则Capacity、前缀只推进已返回sequence；prepare从最新持久Inbox生成文档与回执的单一候选，mark读取实际恢复回执。
+- accept／mark在写前同时预留64KiB ABI配额与字符串容量；有限无DOM响应不在替换后分配，保留替换／持久性不明状态。写响应含scalar身份与test_count，载荷和test ID数组由有界分页取回。诊断locale替换不改原文。
+- CMake新15项入口、中文Core API/Companion契约与状态登记已更新，HTTP／原生导入仍按后续工作记录。
+
+### 验证与范围
+
+- 根独立完整普通和-Werror两侧ASan／UBSan均15/15 CTest通过。作者纯C头／四符号链接运行与Swift typecheck通过；证据out/companion-abi/verification.json。
+- 独立只读审查910个分页边界普通／ASan+UBSan均通过，含转义workspace身份、跨两位sequence、整页末项has_more尺寸；原真实ABI套件另复验通过且主源码SHA未改变，证据out/companion-abi/review/verification.json。
+- 套件含配额满不写盘、坏输入／defaults、原文未知数值词法、4096样例有限写回应、实际回执／删除防重放／未来偏好／旧恢复／更新、销毁后buffer和真实持锁下close。Apple ASan不支持LSan，detect_leaks=0，不声称泄漏检测或Windows原生验收通过。
+- 本提交仅C ABI／CMake／契约与记录；Windows会话及HTTP草稿未纳入。

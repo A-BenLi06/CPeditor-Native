@@ -3,8 +3,12 @@
 #include "cpn/jobs.hpp"
 #include "cpn/json.hpp"
 #include "cpn/session.hpp"
+#include "cpn/companion_inbox.hpp"
+#include "cpn/text.hpp"
 #include <nlohmann/json.hpp>
 #include <algorithm>
+#include <array>
+#include <charconv>
 #include <cstring>
 #include <initializer_list>
 #include <limits>
@@ -87,7 +91,7 @@ struct ReservedBuffer {
     void publish(std::string_view bytes,cpn_buffer* output){
         std::lock_guard guard(handles_mutex);
         auto storage=buffers.at(value.handle);
-        if(bytes.size()>storage->bytes.size())throw std::length_error("Session response exceeds reserved buffer");
+        if(bytes.size()>storage->bytes.size())throw std::length_error("Response exceeds reserved buffer");
         buffer_bytes-=storage->bytes.size()-bytes.size();
         storage->bytes.resize(bytes.size());std::copy(bytes.begin(),bytes.end(),storage->bytes.begin());
         value.size=bytes.size();value.data=reinterpret_cast<const std::uint8_t*>(storage->bytes.data());
@@ -107,6 +111,265 @@ std::size_t output_size(const cpn::JobEvent& event){
     for(const auto& test:event.result->tests)size+=test.process.standard_output.size()+test.process.standard_error.size()+1024+test.testcase_id.size()+test.detail.size();
     return size;
 }
+namespace companion_field {
+constexpr auto schema_version="schema_version";
+constexpr auto workspace_id="workspace_id";
+constexpr auto paths="paths";
+constexpr auto inbox_file="inbox_file";
+constexpr auto backup_file="backup_file";
+constexpr auto lock_file="lock_file";
+constexpr auto bounds="bounds";
+constexpr auto payload="payload";
+constexpr auto original_json="original_json";
+constexpr auto lock_timeout_ms="lock_timeout_ms";
+constexpr auto after_sequence="after_sequence";
+constexpr auto max_items="max_items";
+constexpr auto max_page_bytes="max_page_bytes";
+constexpr auto import_id="import_id";
+constexpr auto session="session";
+constexpr auto session_paths="session_paths";
+constexpr auto recovery_file="recovery_file";
+constexpr auto defaults="defaults";
+constexpr auto source_text="source_text";
+constexpr auto language_id="language_id";
+constexpr auto toolchain_profile_id="toolchain_profile_id";
+constexpr auto document_preferences="document_preferences";
+constexpr auto namespace_id="namespace_id";
+constexpr auto object_json="object_json";
+constexpr auto max_receipts="max_receipts";
+constexpr auto status="status";
+constexpr auto detail="detail";
+constexpr auto disk_digest="disk_digest";
+constexpr auto inbox_id="inbox_id";
+constexpr auto revision="revision";
+constexpr auto next_after_sequence="next_after_sequence";
+constexpr auto has_more="has_more";
+constexpr auto items="items";
+constexpr auto receipt="receipt";
+constexpr auto inbox_status="inbox_status";
+constexpr auto inbox_replaced="inbox_replaced";
+constexpr auto backup_replaced="backup_replaced";
+constexpr auto item="item";
+constexpr auto sequence="sequence";
+constexpr auto state="state";
+constexpr auto problem_id="problem_id";
+constexpr auto document_id="document_id";
+constexpr auto test_count="test_count";
+constexpr auto test_ids="test_ids";
+constexpr auto previous_import_id="previous_import_id";
+constexpr auto payload_digest="payload_digest";
+constexpr auto ordinary_stdio_compatible="ordinary_stdio_compatible";
+constexpr auto applied_session_digest="applied_session_digest";
+constexpr auto applied_session_revision="applied_session_revision";
+}
+constexpr std::uint64_t companion_request_schema_version=1;
+constexpr std::size_t companion_response_bytes=65536;
+constexpr std::size_t companion_request_depth=64;
+constexpr std::size_t companion_request_nodes=262144;
+Json companion_json(std::string_view bytes,std::size_t maximum,std::size_t depth=companion_request_depth) {
+    if(bytes.empty() || bytes.size()>maximum)throw std::invalid_argument("Companion request JSON exceeds byte limit");
+    std::vector<std::optional<std::set<std::string>>> containers;
+    std::size_t nodes=0;
+    return Json::parse(bytes,[&](int,Json::parse_event_t event,Json& parsed){
+        const bool starts=event==Json::parse_event_t::object_start || event==Json::parse_event_t::array_start;
+        if(starts || event==Json::parse_event_t::key || event==Json::parse_event_t::value){
+            if(nodes==companion_request_nodes)throw std::invalid_argument("Companion request JSON exceeds node limit");
+            ++nodes;
+        }
+        if(starts){
+            if(containers.size()>=depth)throw std::invalid_argument("Companion request JSON exceeds nesting limit");
+            if(event==Json::parse_event_t::object_start)containers.emplace_back(std::in_place);
+            else containers.emplace_back(std::nullopt);
+        }else if(event==Json::parse_event_t::object_end || event==Json::parse_event_t::array_end)containers.pop_back();
+        else if(event==Json::parse_event_t::key && !containers.back()->insert(parsed.get<std::string>()).second)
+            throw std::invalid_argument("Duplicate Companion request JSON field");
+        return true;
+    });
+}
+std::uint64_t companion_integer(const Json& value,std::uint64_t minimum,std::uint64_t maximum) {
+    if(!value.is_number_integer() || (!value.is_number_unsigned() && value.get<std::int64_t>()<0))
+        throw std::invalid_argument("Companion request integer has invalid type or sign");
+    const auto result=value.get<std::uint64_t>();
+    if(result<minimum || result>maximum)throw std::invalid_argument("Companion request integer exceeds supported bounds");
+    return result;
+}
+std::string companion_text(const Json& value,std::size_t maximum,bool identity=false) {
+    if(!value.is_string() || value.get_ref<const Json::string_t&>().size()>maximum)
+        throw std::invalid_argument("Companion request string has invalid type or byte limit");
+    auto result=value.get<std::string>();
+    if(identity && (result.empty() || result.find('\0')!=std::string::npos || cpn::decode_utf8(result).error_offset))
+        throw std::invalid_argument("Invalid Companion request identity");
+    return result;
+}
+std::filesystem::path companion_path(const Json& value,std::size_t maximum) {
+    auto path=cpn::path_from_utf8(companion_text(value,maximum,true));
+    if(!path.is_absolute())throw std::invalid_argument("Companion storage path must be absolute");
+    return path;
+}
+template<class Bounds> struct CompanionBoundField {const char* name;std::size_t Bounds::* member;};
+constexpr CompanionBoundField<cpn::CompanionBounds> companion_payload_fields[]{
+    {"max_json_bytes",&cpn::CompanionBounds::max_json_bytes},{"max_json_depth",&cpn::CompanionBounds::max_json_depth},
+    {"max_json_nodes",&cpn::CompanionBounds::max_json_nodes},{"max_string_bytes",&cpn::CompanionBounds::max_string_bytes},
+    {"max_total_string_bytes",&cpn::CompanionBounds::max_total_string_bytes},{"max_name_bytes",&cpn::CompanionBounds::max_name_bytes},
+    {"max_url_bytes",&cpn::CompanionBounds::max_url_bytes},{"max_tests",&cpn::CompanionBounds::max_tests},
+    {"max_test_bytes",&cpn::CompanionBounds::max_test_bytes},{"max_total_test_bytes",&cpn::CompanionBounds::max_total_test_bytes},
+    {"max_batch_id_bytes",&cpn::CompanionBounds::max_batch_id_bytes}};
+constexpr CompanionBoundField<cpn::CompanionInboxBounds> companion_inbox_fields[]{
+    {"max_json_bytes",&cpn::CompanionInboxBounds::max_json_bytes},{"max_total_payload_bytes",&cpn::CompanionInboxBounds::max_total_payload_bytes},
+    {"max_records",&cpn::CompanionInboxBounds::max_records},{"max_pending",&cpn::CompanionInboxBounds::max_pending},
+    {"max_batches",&cpn::CompanionInboxBounds::max_batches},{"max_total_tests",&cpn::CompanionInboxBounds::max_total_tests},
+    {"max_json_depth",&cpn::CompanionInboxBounds::max_json_depth},{"max_json_nodes",&cpn::CompanionInboxBounds::max_json_nodes},
+    {"max_id_bytes",&cpn::CompanionInboxBounds::max_id_bytes},{"max_path_bytes",&cpn::CompanionInboxBounds::max_path_bytes}};
+template<class Bounds,std::size_t N> void companion_bound_values(const Json& value,Bounds& bounds,
+    const CompanionBoundField<Bounds>(&fields)[N],std::initializer_list<std::string_view> extra={}) {
+    if(!value.is_object())throw std::invalid_argument("Companion bounds must be an object");
+    const Bounds hard;
+    for(const auto& [key,item]:value.items()){
+        const auto found=std::find_if(std::begin(fields),std::end(fields),[&](const auto& field){return field.name==key;});
+        if(found!=std::end(fields))bounds.*(found->member)=static_cast<std::size_t>(companion_integer(item,1,hard.*(found->member)));
+        else if(std::find(extra.begin(),extra.end(),key)==extra.end())throw std::invalid_argument("Unknown Companion bound: "+key);
+    }
+}
+struct CompanionRequest {
+    std::string workspace_id;
+    cpn::CompanionInboxPaths paths;
+    cpn::CompanionInboxBounds bounds;
+};
+CompanionRequest companion_common(const Json& doc) {
+    using namespace companion_field;
+    (void)companion_integer(doc.at(schema_version),companion_request_schema_version,companion_request_schema_version);
+    CompanionRequest request;
+    if(doc.contains(bounds)){
+        const auto& values=doc.at(bounds);
+        companion_bound_values(values,request.bounds,companion_inbox_fields,{payload});
+        if(values.contains(payload)){
+            const auto& limits=values.at(payload);
+            companion_bound_values(limits,request.bounds.payload,companion_payload_fields,{"max_batch_size"});
+            if(limits.contains("max_batch_size"))request.bounds.payload.max_batch_size=
+                companion_integer(limits.at("max_batch_size"),1,cpn::CompanionBounds{}.max_batch_size);
+        }
+        if(request.bounds.max_id_bytes<64)throw std::invalid_argument("Companion identity capacity must hold a SHA-256 identity");
+    }
+    request.workspace_id=companion_text(doc.at(workspace_id),request.bounds.max_id_bytes,true);
+    const auto& location=doc.at(paths);
+    session_fields(location,{inbox_file,backup_file,lock_file});
+    request.paths={companion_path(location.at(inbox_file),request.bounds.max_path_bytes),
+        companion_path(location.at(backup_file),request.bounds.max_path_bytes),companion_path(location.at(lock_file),request.bounds.max_path_bytes)};
+    return request;
+}
+Json companion_request(cpn_bytes bytes,const Engine& engine,std::initializer_list<std::string_view> fields) {
+    if(!bytes.data || !bytes.size || bytes.size>engine.options.max_request_bytes)
+        throw std::invalid_argument("Invalid Companion request bytes");
+    auto result=companion_json(std::string_view(reinterpret_cast<const char*>(bytes.data),bytes.size),
+        static_cast<std::size_t>(engine.options.max_request_bytes));
+    session_fields(result,fields);return result;
+}
+std::chrono::milliseconds companion_timeout(const Json& doc) {
+    return std::chrono::milliseconds{doc.contains(companion_field::lock_timeout_ms)?
+        static_cast<std::int64_t>(companion_integer(doc.at(companion_field::lock_timeout_ms),0,60000)):5000};
+}
+cpn::ImportApplicationBounds companion_application_bounds(const Json& doc,const CompanionRequest& request) {
+    cpn::ImportApplicationBounds bounds;bounds.payload=request.bounds.payload;
+    if(doc.contains(companion_field::max_receipts))bounds.max_receipts=static_cast<std::size_t>(
+        companion_integer(doc.at(companion_field::max_receipts),1,cpn::ImportApplicationBounds{}.max_receipts));
+    return bounds;
+}
+cpn::ImportDocumentDefaults companion_defaults(const Json& doc,const cpn::SessionBounds& bounds) {
+    using namespace companion_field;
+    cpn::ImportDocumentDefaults result;
+    if(!doc.contains(defaults))return result;
+    const auto& value=doc.at(defaults);
+    session_fields(value,{source_text,language_id,toolchain_profile_id,document_preferences});
+    if(value.contains(source_text))result.source_text=companion_text(value.at(source_text),bounds.max_source_bytes);
+    if(cpn::decode_utf8(result.source_text).error_offset)throw std::invalid_argument("Invalid UTF-8 default source text");
+    for(const auto& [key,destination]:std::array{
+        std::pair{language_id,&result.language_id},std::pair{toolchain_profile_id,&result.toolchain_profile_id}}){
+        if(value.contains(key) && !value.at(key).is_null())*destination=companion_text(value.at(key),bounds.max_id_bytes,true);
+    }
+    if(value.contains(document_preferences)){
+        const auto& preferences=value.at(document_preferences);
+        if(!preferences.is_array() || preferences.size()>bounds.max_preferences_per_owner)
+            throw std::invalid_argument("Invalid default document preference array count/type");
+        std::set<std::pair<std::string,std::uint64_t>> identities;
+        std::size_t total=0;
+        for(const auto& preference:preferences){
+            session_fields(preference,{namespace_id,schema_version,object_json});
+            auto name=companion_text(preference.at(namespace_id),bounds.max_id_bytes,true);
+            const auto version=companion_integer(preference.at(schema_version),1,std::numeric_limits<std::uint64_t>::max());
+            auto object=companion_text(preference.at(object_json),bounds.max_preferences_bytes);
+            if(object.size()>bounds.max_total_preferences_bytes-total)throw std::invalid_argument("Default preferences exceed total byte capacity");
+            total+=object.size();
+            if(!companion_json(object,bounds.max_preferences_bytes,bounds.max_preferences_depth).is_object())
+                throw std::invalid_argument("Default preference must contain an opaque JSON object");
+            if(!identities.emplace(name,version).second)throw std::invalid_argument("Duplicate default preference namespace/version");
+            if(name==cpn::companion_document_namespace)throw std::invalid_argument("Defaults cannot supply an assigned Companion provenance");
+            result.document_preferences.push_back({std::move(name),version,std::move(object)});
+        }
+    }
+    return result;
+}
+Json companion_receipt(const cpn::ImportApplicationReceipt& receipt) {
+    return Json{{companion_field::inbox_id,receipt.inbox_id},{companion_field::import_id,receipt.import_id},
+        {companion_field::problem_id,receipt.problem_id},{companion_field::document_id,receipt.document_id},
+        {companion_field::payload_digest,receipt.payload_digest},{companion_field::test_ids,receipt.test_ids}};
+}
+// Build the finite write response without allocations after a file replacement.
+// Buffer quota AND string capacity are reserved before invoking the mutating service.
+class CompanionWriteResponse {
+public:
+    CompanionWriteResponse(){bytes_.reserve(companion_response_bytes);}
+    std::string_view render(const cpn::CompanionInboxWriteResult& result) {
+        using namespace companion_field;
+        append("{");key(schema_version);number(companion_request_schema_version);comma_key(status);string(cpn::companion_inbox_write_status_name(result.status));
+        comma_key(detail);string(std::string_view(result.detail).substr(0,4096));
+        comma_key(disk_digest);optional(result.disk_digest);
+        comma_key(inbox_replaced);append(result.inbox_replaced?"true":"false");
+        comma_key(backup_replaced);append(result.backup_replaced?"true":"false");
+        comma_key(item);
+        if(result.item){
+            const auto& value=*result.item;
+            append("{");key(sequence);number(value.sequence);comma_key(state);string(value.state==cpn::CompanionInboxState::pending?"Pending":"Applied");
+            comma_key(import_id);string(value.import_id);comma_key(problem_id);string(value.problem_id);
+            comma_key(document_id);string(value.document_id);comma_key(test_count);number(value.test_ids.size());
+            comma_key(previous_import_id);optional(value.previous_import_id);comma_key(payload_digest);string(value.payload_digest);
+            comma_key(ordinary_stdio_compatible);append(value.candidate.compatible_with_ordinary_stdio()?"true":"false");
+            comma_key(applied_session_digest);optional(value.applied_session_digest);
+            comma_key(applied_session_revision);if(value.applied_session_revision)number(*value.applied_session_revision);else append("null");
+            append("}");
+        }else append("null");
+        append("}");return bytes_;
+    }
+private:
+    void append(std::string_view value){
+        if(value.size()>companion_response_bytes-bytes_.size())throw std::length_error("Companion response exceeded its reserved capacity");
+        bytes_.append(value);
+    }
+    void number(std::uint64_t value){char text[20];const auto end=std::to_chars(std::begin(text),std::end(text),value).ptr;append({text,static_cast<std::size_t>(end-text)});}
+    void key(std::string_view name){string(name);append(":");}
+    void comma_key(std::string_view name){append(",");key(name);}
+    void optional(const std::optional<std::string>& value){if(value)string(*value);else append("null");}
+    void string(std::string_view value){
+        append("\"");
+        for(std::size_t i=0;i<value.size();){
+            const auto first=static_cast<unsigned char>(value[i]);
+            if(first=='"' || first=='\\'){char escaped[]{'\\',static_cast<char>(first)};append({escaped,2});++i;}
+            else if(first<0x20){constexpr char digits[]="0123456789abcdef";char escaped[]{'\\','u','0','0',digits[first>>4],digits[first&15]};append({escaped,6});++i;}
+            else if(first<0x80){append(value.substr(i++,1));}
+            else {
+                // Native error text may contain invalid locale bytes. Preserve valid UTF-8;
+                // represent invalid bytes explicitly as replacement scalars in diagnostics.
+                const std::size_t length=first>=0xc2 && first<=0xdf?2:first>=0xe0 && first<=0xef?3:first>=0xf0 && first<=0xf4?4:0;
+                bool valid=length && length<=value.size()-i;
+                if(valid)for(std::size_t j=1;j<length;++j)if((static_cast<unsigned char>(value[i+j])&0xc0)!=0x80)valid=false;
+                if(valid && length==3){const auto second=static_cast<unsigned char>(value[i+1]);if((first==0xe0 && second<0xa0) || (first==0xed && second>=0xa0))valid=false;}
+                if(valid && length==4){const auto second=static_cast<unsigned char>(value[i+1]);if((first==0xf0 && second<0x90) || (first==0xf4 && second>0x8f))valid=false;}
+                if(valid){append(value.substr(i,length));i+=length;}else{append("\\ufffd");++i;}
+            }
+        }
+        append("\"");
+    }
+    std::string bytes_;
+};
 }
 extern "C" {
 uint32_t cpn_abi_version(void){return CPN_ABI_VERSION;}
@@ -248,6 +511,134 @@ cpn_status cpn_engine_session_save_json(cpn_engine_handle handle,cpn_bytes reque
             {"recovery_replaced",saved.recovery_replaced},{"backup_replaced",saved.backup_replaced}};
         result["disk_digest"]=saved.disk_digest?Json(*saved.disk_digest):Json(nullptr);
         reserved.publish(result.dump(-1,' ',false,Json::error_handler_t::replace),output);
+        return error(destination,CPN_OK,{});
+    });
+}
+cpn_status cpn_engine_companion_page_json(cpn_engine_handle handle,cpn_bytes request,cpn_buffer* output,cpn_error* destination){
+    if(output)*output={};
+    return boundary(destination,[&]{
+        using namespace companion_field;
+        auto engine=lookup(handle);if(!engine)return error(destination,CPN_INVALID_HANDLE,"Unknown engine");
+        if(engine->operations.stop_requested())return error(destination,CPN_CLOSED,"Engine is closed");
+        if(!output)return error(destination,CPN_INVALID_ARGUMENT,"Companion buffer output is required");
+        const auto doc=companion_request(request,*engine,{schema_version,workspace_id,paths,bounds,after_sequence,max_items,max_page_bytes});
+        const auto context=companion_common(doc);
+        const auto after=companion_integer(doc.at(after_sequence),0,std::numeric_limits<std::uint64_t>::max());
+        const auto count=companion_integer(doc.at(max_items),1,cpn::CompanionInboxBounds{}.max_records);
+        const auto byte_limit=static_cast<std::size_t>(companion_integer(doc.at(max_page_bytes),1,individual_buffer_limit));
+        const auto loaded=cpn::CompanionInboxService(context.workspace_id,cpn::native_file_store(),context.bounds).load(context.paths);
+        if(engine->operations.stop_requested())return error(destination,CPN_CLOSED,"Engine is closed");
+        Json result{{schema_version,companion_request_schema_version},{status,cpn::companion_inbox_load_status_name(loaded.status)},
+            {detail,loaded.detail},{workspace_id,context.workspace_id},{inbox_id,nullptr},{revision,nullptr},
+            {disk_digest,loaded.disk_digest?Json(*loaded.disk_digest):Json(nullptr)},{next_after_sequence,after},{has_more,false},{items,Json::array()}};
+        std::vector<std::string> selected;
+        std::size_t selected_bytes=0;
+        if(loaded.snapshot){
+            const auto& snapshot=*loaded.snapshot;
+            result[inbox_id]=snapshot.inbox_id;result[revision]=snapshot.revision;
+            for(std::size_t index=0;index<snapshot.items.size();++index){
+                const auto& item=snapshot.items[index];
+                if(item.sequence<=after)continue;
+                if(selected.size()==count){result[has_more]=true;break;}
+                auto serialized=cpn::serialize_companion_inbox_item(item,snapshot.inbox_id,context.bounds);
+                const auto previous_cursor=result[next_after_sequence];
+                result[next_after_sequence]=item.sequence;result[has_more]=index+1<snapshot.items.size();
+                const auto envelope_bytes=result.dump(-1,' ',false,Json::error_handler_t::replace).size();
+                const auto separator=selected.empty()?0u:1u;
+                if(envelope_bytes>byte_limit || selected_bytes>byte_limit-envelope_bytes ||
+                    separator>byte_limit-envelope_bytes-selected_bytes || serialized.size()>byte_limit-envelope_bytes-selected_bytes-separator){
+                    result[next_after_sequence]=previous_cursor;result[has_more]=true;
+                    if(selected.empty())return error(destination,CPN_CAPACITY,"Companion item exceeds page byte limit; no item was consumed");
+                    break;
+                }
+                selected_bytes+=serialized.size()+separator;selected.push_back(std::move(serialized));
+            }
+        }
+        auto serialized=result.dump(-1,' ',false,Json::error_handler_t::replace);
+        if(serialized.size()>byte_limit || selected_bytes>byte_limit-serialized.size())
+            return error(destination,CPN_CAPACITY,"Companion page envelope exceeds byte limit; no item was consumed");
+        if(!selected.empty()){
+            // Canonical items already encode original_json as a string; do not parse their payloads again.
+            constexpr std::string_view marker="\"items\":[]";
+            const auto location=serialized.find(marker);
+            if(location==std::string::npos)throw std::logic_error("Companion page envelope has no item array");
+            std::string body;body.reserve(selected_bytes);
+            for(const auto& item:selected){if(!body.empty())body.push_back(',');body+=item;}
+            serialized.insert(location+marker.size()-1,body);
+        }
+        return allocate_buffer(handle,*engine,std::move(serialized),output,destination);
+    });
+}
+cpn_status cpn_engine_companion_accept_json(cpn_engine_handle handle,cpn_bytes request,cpn_buffer* output,cpn_error* destination){
+    if(output)*output={};
+    return boundary(destination,[&]{
+        using namespace companion_field;
+        auto engine=lookup(handle);if(!engine)return error(destination,CPN_INVALID_HANDLE,"Unknown engine");
+        if(engine->operations.stop_requested())return error(destination,CPN_CLOSED,"Engine is closed");
+        if(!output)return error(destination,CPN_INVALID_ARGUMENT,"Companion buffer output is required");
+        const auto doc=companion_request(request,*engine,{schema_version,workspace_id,paths,bounds,original_json,lock_timeout_ms});
+        const auto context=companion_common(doc);
+        const auto original=companion_text(doc.at(original_json),context.bounds.payload.max_json_bytes);
+        const auto timeout=companion_timeout(doc);
+        ReservedBuffer reserved;CompanionWriteResponse response;
+        const auto allocated=allocate_buffer(handle,*engine,std::string(companion_response_bytes,'\0'),&reserved.value,destination);
+        if(allocated!=CPN_OK)return allocated;
+        const auto accepted=cpn::CompanionInboxService(context.workspace_id,cpn::native_file_store(),context.bounds)
+            .accept(context.paths,original,timeout,engine->operations.get_token());
+        reserved.publish(response.render(accepted),output);
+        return error(destination,CPN_OK,{});
+    });
+}
+cpn_status cpn_engine_companion_prepare_json(cpn_engine_handle handle,cpn_bytes request,cpn_buffer* output,cpn_error* destination){
+    if(output)*output={};
+    return boundary(destination,[&]{
+        using namespace companion_field;
+        auto engine=lookup(handle);if(!engine)return error(destination,CPN_INVALID_HANDLE,"Unknown engine");
+        if(engine->operations.stop_requested())return error(destination,CPN_CLOSED,"Engine is closed");
+        if(!output)return error(destination,CPN_INVALID_ARGUMENT,"Companion buffer output is required");
+        const auto doc=companion_request(request,*engine,{schema_version,workspace_id,paths,bounds,import_id,session,defaults,max_receipts});
+        const auto context=companion_common(doc);
+        const auto identity=companion_text(doc.at(import_id),context.bounds.max_id_bytes,true);
+        const auto limits=companion_application_bounds(doc,context);
+        const auto initial=cpn::parse_workspace_session(doc.at(session).dump(-1,' ',false,Json::error_handler_t::strict),limits.session);
+        const auto initial_defaults=companion_defaults(doc,limits.session);
+        const auto loaded=cpn::CompanionInboxService(context.workspace_id,cpn::native_file_store(),context.bounds).load(context.paths);
+        if(engine->operations.stop_requested())return error(destination,CPN_CLOSED,"Engine is closed");
+        Json result{{schema_version,companion_request_schema_version},{inbox_status,cpn::companion_inbox_load_status_name(loaded.status)},
+            {status,cpn::companion_inbox_load_status_name(loaded.status)},{detail,loaded.detail},
+            {disk_digest,loaded.disk_digest?Json(*loaded.disk_digest):Json(nullptr)},{session,nullptr},{receipt,nullptr}};
+        if(loaded.snapshot){
+            const auto prepared=cpn::prepare_import_application(initial,*loaded.snapshot,identity,initial_defaults,limits);
+            result[status]=cpn::import_preparation_status_name(prepared.status);result[detail]=prepared.detail;
+            if(prepared.session)result[session]=Json::parse(cpn::serialize_workspace_session(*prepared.session,limits.session));
+            if(prepared.receipt)result[receipt]=companion_receipt(*prepared.receipt);
+        }
+        if(engine->operations.stop_requested())return error(destination,CPN_CLOSED,"Engine is closed");
+        return allocate_buffer(handle,*engine,result.dump(-1,' ',false,Json::error_handler_t::replace),output,destination);
+    });
+}
+cpn_status cpn_engine_companion_mark_applied_json(cpn_engine_handle handle,cpn_bytes request,cpn_buffer* output,cpn_error* destination){
+    if(output)*output={};
+    return boundary(destination,[&]{
+        using namespace companion_field;
+        auto engine=lookup(handle);if(!engine)return error(destination,CPN_INVALID_HANDLE,"Unknown engine");
+        if(engine->operations.stop_requested())return error(destination,CPN_CLOSED,"Engine is closed");
+        if(!output)return error(destination,CPN_INVALID_ARGUMENT,"Companion buffer output is required");
+        const auto doc=companion_request(request,*engine,{schema_version,workspace_id,paths,bounds,import_id,session_paths,lock_timeout_ms,max_receipts});
+        const auto context=companion_common(doc);
+        const auto identity=companion_text(doc.at(import_id),context.bounds.max_id_bytes,true);
+        const auto timeout=companion_timeout(doc);const auto limits=companion_application_bounds(doc,context);
+        const auto& location=doc.at(session_paths);
+        session_fields(location,{recovery_file,backup_file,lock_file});
+        const auto path_limit=std::min(context.bounds.max_path_bytes,limits.session.max_path_bytes);
+        const cpn::SessionPaths locations{companion_path(location.at(recovery_file),path_limit),
+            companion_path(location.at(backup_file),path_limit),companion_path(location.at(lock_file),path_limit)};
+        ReservedBuffer reserved;CompanionWriteResponse response;
+        const auto allocated=allocate_buffer(handle,*engine,std::string(companion_response_bytes,'\0'),&reserved.value,destination);
+        if(allocated!=CPN_OK)return allocated;
+        const auto applied=cpn::CompanionInboxService(context.workspace_id,cpn::native_file_store(),context.bounds)
+            .mark_applied(context.paths,locations,identity,timeout,engine->operations.get_token(),limits);
+        reserved.publish(response.render(applied),output);
         return error(destination,CPN_OK,{});
     });
 }

@@ -84,15 +84,48 @@ sequenceDiagram
 
 恢复格式、限额、请求示例和合作锁／外部写入限制见 [会话恢复](session.md)。会话保存请求仍受引擎 `max_request_bytes` 约束。
 
-## Companion 解码器
+## Companion 收件箱与导入接口
 
-C++ 接口 `parse_companion_payload(std::string_view, CompanionBounds)` 位于 `cpn/companion.hpp`，返回不含 UI 或网络类型的 `CompanionCandidate`。解码器验证已知字段、原始 UTF-8、所有层级重复键及内容预算，保留完整原始 payload 和未知元数据；空答案保持存在。交互／文件／regex／未知 testType 带有普通 stdio 不兼容理由，不能被后续导入界面静默作为普通题目运行。
+C++ `parse_companion_payload`、`CompanionInboxService` 与 `prepare_import_application` 提供严格解码、持久接纳和文档＋回执的单一候选，进入服务库及单一 Core 归档。C ABI 已增加以下四个符号，ABI 仍为 1；均同步调用，原生客户端必须在后台协调器执行。当前没有 HTTP／原生导入 UI，字段与来源语义见 [Companion 文档](companion.md)。
 
-该接口已进入 `cpn_services` 和单一 Core 归档，没有文件、网络或进程副作用。`CompanionInboxService` 另提供持久接纳、稳定导入身份、更新链和实际会话回执确认，`prepare_import_application` 返回文档与回执的单一候选。当前尚无对应 C ABI、HTTP 监听器或原生导入 UI，详细字段、边界和后续接纳流程见 [Companion 文档](companion.md)。
+共同请求是版本 1 对象：
+
+```json
+{
+  "schema_version": 1,
+  "workspace_id": "stable-workspace-id",
+  "paths": {
+    "inbox_file": "D:\\NativeWorkspace\\Recovery\\inbox.json",
+    "backup_file": "D:\\NativeWorkspace\\Recovery\\inbox-backup.json",
+    "lock_file": "D:\\NativeWorkspace\\Recovery\\inbox.lock"
+  }
+}
+```
+
+路径须为**当前调用平台**的绝对路径且不含 NUL；不能把 Windows 示例路径传给 macOS。每个接口在这个共同对象中增加相应字段：
+
+| C ABI 符号 | 增加的请求字段 | 响应与语义 |
+| --- | --- | --- |
+| `cpn_engine_companion_page_json` | 必需 `after_sequence`、`max_items`、`max_page_bytes` | `status`、`detail`、`inbox_id`、`workspace_id`、`revision`、`disk_digest`、`next_after_sequence`、`has_more`、`items`；完整分页包含原始载荷，不消费记录 |
+| `cpn_engine_companion_accept_json` | 必需 `original_json` 字符串；可选 `lock_timeout_ms` | 持久接纳／重复／拒绝状态、摘要、两类替换标志及有限 item 摘要；原文不能改成外层 JSON 对象 |
+| `cpn_engine_companion_prepare_json` | 必需 `import_id`、完整 `session`；可选 `defaults`、`max_receipts` | 从最新持久 Inbox 取记录，返回 `inbox_status`、准备 `status`、`detail`、摘要、完整候选 `session`、`receipt`；无文件写副作用 |
+| `cpn_engine_companion_mark_applied_json` | 必需 `import_id`、`session_paths`；可选 timeout／max_receipts | 通过实际恢复文件回执确认 Applied；写响应格式与 accept 相同，内存候选不能代替实际落盘证据 |
+
+`after_sequence` 为无符号 64 位整数，允许 0；`max_items` 为 1–256，`max_page_bytes` 为 1–128 MiB。所有 envelope、diagnostic、标点与 canonical item 的**实际完整 JSON 字节**都计入页预算。首项或空页 envelope 容不下返回 `CPN_CAPACITY`，不推进／消费；容下前缀则只以最后返回项的 sequence 推进 cursor，并置 `has_more`。Missing 返回空页及 nullable inbox 身份／revision。变化的 Applied 状态不增加 sequence，客户端刷新状态时应从 0 重读，而非仅在旧 cursor 后追加。
+
+`defaults` 接受 `source_text`、nullable `language_id`／`toolchain_profile_id`、`document_preferences`。偏好使用 `{namespace_id,schema_version,object_json}`，在读取 Inbox 前完整验型、预算和递归重复键；不因已有回执走 AlreadyApplied 就忽略坏 defaults。自身 Companion 来源偏好不能预先指定，其他原生偏好原文保留。语言／模板／执行配置由原生配置提供，远端 filename／Java 元数据不能直接成为工具链。
+
+`session_paths` 使用 `{recovery_file,backup_file,lock_file}`。原生流程必须先原子保存 prepare 返回的候选，检查保存响应，再 mark_applied；收到 `AlreadyApplied` 或 `ReceiptMissing` 时遵循持久回执语义，不自动重新创建已删除文档。
+
+可选 `bounds` 对象采用 `CompanionInboxBounds` 同名字段与 `payload` 子对象（`CompanionBounds` 同名字段）。每项只接受正整数，且不超过 C++ 默认值构成的硬上限；`max_id_bytes` 至少 64。`max_receipts` 为 1–256，timeout 为 0–60000 ms（默认 5000）。未知／递归重复字段、浮点版本或限额、负数／溢出和错误路径在副作用前拒绝。
+
+accept／mark 先同时预留 64 KiB ABI 配额和字符串存储，再调用服务；配额耗尽不会先写盘再隐藏结果。写响应以有限编码生成，不在替换后分配 JSON DOM；只含 item 的稳定身份／状态／摘要／`test_count`／普通 stdio 能力／确认证据，不返回完整载荷或 test ID 数组。诊断中的非法 locale 字节只在诊断显示层替换，载荷原文保持不变。`CPN_OK` 表示得到可解码响应，仍须检查 `status`、`inbox_replaced`、`backup_replaced`；`DurabilityUnknown` 不能按普通无副作用失败重试。
+
+所有响应采用既有 buffer ownership；读／准备在返回前再次检查关闭，写／确认使用引擎 stop token。并发 close 与请求允许 `CPN_CLOSED`／响应 `Cancelled` 的合法竞争，但不能释放尚在使用的对象或吞掉已发生的替换状态。
 
 ## 当前限制
 
 - 原生进程后端支持进程组／Windows Job Object、并发三管道、墙钟超时、取消、输出限制和最终排空。未实现内存硬限额；启动期限是软期限，不能中断阻塞的原生进程创建调用。
 - 比较循环分批响应取消；内存分配和释放仍同步，不是硬实时保证。
 - 每个任务创建独立 workspace，源码快照和产物自动清理。文件写入同目录临时文件后原子替换；POSIX 替换成功后目录持久化失败通过 `AtomicWriteError.destination_replaced` 区分。
-- 尚未包含 Companion 监听／导入 ABI／原生接入、LSP、格式化、压力／交互测试和发布接口；这些按完整实施计划继续推进。
+- 尚未包含 Companion 监听／原生接入、LSP、格式化、压力／交互测试和发布接口；这些按完整实施计划继续推进。
