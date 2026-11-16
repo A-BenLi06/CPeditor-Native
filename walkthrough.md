@@ -162,3 +162,15 @@ Core 规则区分空输入、缺少预期输出与预期输出为空、checker �
 - macOS普通及完整-Werror／ASan+UBSan构建成功，12/12 CTest通过。真实helper、受控异常／取消、预算故障、Unicode／NUL／0xFF、C ABI终态与释放均覆盖。
 - 子agent执行17次真实CLI验证；根另执行raw-byte AC／空答案／Unchecked以及7项严格schema／参数检查。checker崩溃／超时／超限保持独立错误，不伪装解答TLE／RE。
 - Windows真实运行、原生checker设置／诊断面板、checker编译、完整评分、压力／交互和其余高级服务仍未完成，未将此局部功能当作完整产品验收。
+
+## 2026-11-17T00:35:08+08:00 — 关联 GitHub 远端仓库
+
+### 改动与思路
+
+- 将 origin 关联至 https://github.com/A-BenLi06/CPeditor-Native.git，获取远端 main，并设置本地 main 的 upstream 和 origin/HEAD。
+- 更新 README 的仓库地址与同步状态；仅提交本次文档记录，保留主线程正在进行的原生应用改动及其暂存状态。
+
+### 验证与范围
+
+- git ls-remote 和 fetch 成功；远端 main 为 76b7d5b8710c71b5668bf77c539ed657a48e288f（Initial commit）。
+- git merge-base 确认当前本地与远端没有共同祖先。此次完成远端关联，不合并、不覆盖远端，也不推送尚未整合的代码；后续同步需要保留并整合双方历史。
