@@ -444,7 +444,7 @@
  	{
  		return PRectangle::FromInts(0, 0, wrapper->Width(), wrapper->Height()); // WinUI Todo
  	}
-+	return {};
++	return PRectangle::FromInts(0, 0, 0, 0);
  }
  
  void Window::Show(bool show) {

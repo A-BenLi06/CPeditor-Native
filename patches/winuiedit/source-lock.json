@@ -2,7 +2,7 @@
   "schema_version": 1,
   "source_commit": "d9f60dbca65c2af54ced590d873d9438de32ce77",
   "patch": "committed-snapshot.patch",
-  "patch_sha256": "a7f211465bb753e62c3ec6ca6ca8f4768d1d651403c3b3b0800173c667ef3cb1",
+  "patch_sha256": "51e8fe74093a396a178de58ec9882bfdb9a774a0f790d8a847fac3d34b7ef6b7",
   "files": [
     {
       "path": "WinUIEditor/CodeEditorControl.cpp",
@@ -52,7 +52,7 @@
     {
       "path": "scintilla/winui/PlatWin.cxx",
       "before_sha256": "6d797abe806d2feebbfea8988fbafbb1b826dc5f3d6567ad55b3bb1a68259727",
-      "after_sha256": "9e1afa82bfd938a170d80c278cfa6a3a40c8491c1d90d19f7b48b645e4936a22"
+      "after_sha256": "182354d2763e8bc94b06dccfb6c86f5b3ebf3af3f71ab59740e01d9c1f140f36"
     }
   ],
   "overlays": [

@@ -335,3 +335,9 @@ Core 规则区分空输入、缺少预期输出与预期输出为空、checker �
 
 - 根独立PowerShell7重新导出／应用完整补丁，所有固定文件与overlay SHA通过；C++20／-Werror的字节视图API类型检查通过。证据out/windows/research/root-cpp20-review.log及准备回执。
 - 完整WinUI编译仍等待本次提交触发的Windows CI；Windows会话与Companion ABI草稿分别继续独立审查，未纳入此修复提交。
+
+## 2026-11-17T02:29:51+08:00 — 空客户区的显式矩形构造
+
+- 82bc6d0 Windows CI 发现根新增return {}不能调用上游PRectangle的explicit构造函数。改用实际Geometry.h定义的PRectangle::FromInts(0,0,0,0)，保留空Wrapper时确定返回空矩形的语义。
+- 根使用实际固定Geometry.h对返回表达式及char8_t字节视图进行C++20／-Werror编译检查，重新PowerShell导出／应用补丁及全部after SHA校验均通过。证据out/windows/research/root-explicit-rectangle-review.log。
+- 更新PlatWin产物与patch SHA，参考子模块不修改；完整Windows结果等待后续CI，其他ABI／Windows会话草稿不纳入此修复提交。
