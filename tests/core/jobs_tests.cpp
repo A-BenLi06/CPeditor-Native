@@ -22,6 +22,13 @@ public:
     std::string read(const std::filesystem::path&, std::size_t) const override {
         throw std::logic_error("Read is not used by the injected batch executor");
     }
+    std::optional<std::string> read_optional(const std::filesystem::path&,std::size_t) const override {
+        throw std::logic_error("Optional read is not used by the injected batch executor");
+    }
+    std::unique_ptr<FileLock> acquire_lock(const std::filesystem::path&,
+        std::chrono::milliseconds,std::stop_token) const override {
+        throw std::logic_error("Lock is not used by the injected batch executor");
+    }
     void write_atomic(const std::filesystem::path& path, std::string_view text) const override {
         std::lock_guard lock(mutex_);
         writes_[path] = std::string{text};

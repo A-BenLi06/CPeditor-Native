@@ -71,6 +71,9 @@ CPN_API cpn_status cpn_engine_release_job(cpn_engine_handle, cpn_job_handle, cpn
 /* A successful drain acknowledges only events represented in its allocated buffer. */
 CPN_API cpn_status cpn_engine_drain_json(cpn_engine_handle, uint32_t max_events, cpn_buffer*, cpn_error*);
 CPN_API cpn_status cpn_engine_info_json(cpn_engine_handle, cpn_buffer*, cpn_error*);
+/* Recovery file I/O is synchronous; native clients call these from their background actor. */
+CPN_API cpn_status cpn_engine_session_load(cpn_engine_handle, cpn_bytes path_utf8, cpn_buffer*, cpn_error*);
+CPN_API cpn_status cpn_engine_session_save_json(cpn_engine_handle, cpn_bytes request_json, cpn_buffer*, cpn_error*);
 /* Buffers remain valid until this call, including after engine destruction. */
 CPN_API cpn_status cpn_buffer_release(cpn_buffer_handle, cpn_error*);
 

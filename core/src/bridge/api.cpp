@@ -2,12 +2,14 @@
 #include "cpn/api.h"
 #include "cpn/jobs.hpp"
 #include "cpn/json.hpp"
+#include "cpn/session.hpp"
 #include <nlohmann/json.hpp>
 #include <algorithm>
 #include <cstring>
 #include <limits>
 #include <map>
 #include <mutex>
+#include <set>
 #include <stdexcept>
 namespace {
 using Json=nlohmann::json;
@@ -17,12 +19,13 @@ struct Engine {
     Engine(cpn_engine_options value):options(value),jobs({value.max_workers,value.max_jobs}){}
     cpn_engine_options options;
     cpn::JobRegistry jobs;
+    std::stop_source operations;
     std::mutex drain_mutex;
 };
 struct Buffer {std::uint64_t owner;std::string bytes;};
 std::mutex handles_mutex;
 std::map<std::uint64_t,std::shared_ptr<Engine>> engines;
-std::map<std::uint64_t,std::shared_ptr<const Buffer>> buffers;
+std::map<std::uint64_t,std::shared_ptr<Buffer>> buffers;
 std::uint64_t next_handle=1;
 std::size_t buffer_bytes=0;
 cpn_status error(cpn_error* destination,cpn_status status,std::string_view message) noexcept {
@@ -35,6 +38,7 @@ cpn_status error(cpn_error* destination,cpn_status status,std::string_view messa
 }
 template<class F> cpn_status boundary(cpn_error* destination,F action) noexcept {
     try{return action();}
+    catch(const Json::exception& ex){return error(destination,CPN_INVALID_ARGUMENT,ex.what());}
     catch(const std::invalid_argument& ex){return error(destination,CPN_INVALID_ARGUMENT,ex.what());}
     catch(const std::exception& ex){return error(destination,CPN_INTERNAL_ERROR,ex.what());}
     catch(...){return error(destination,CPN_INTERNAL_ERROR,"Unknown core exception");}
@@ -67,6 +71,20 @@ cpn_status allocate_buffer(std::uint64_t owner,const Engine& engine,std::string 
     output->data=reinterpret_cast<const std::uint8_t*>(storage->bytes.data());output->size=storage->bytes.size();output->handle=handle;
     return error(destination,CPN_OK,{});
 }
+struct ReservedBuffer {
+    cpn_buffer value{};
+    bool published{false};
+    ~ReservedBuffer(){if(value.handle && !published)cpn_buffer_release(value.handle,nullptr);}
+    void publish(std::string_view bytes,cpn_buffer* output){
+        std::lock_guard guard(handles_mutex);
+        auto storage=buffers.at(value.handle);
+        if(bytes.size()>storage->bytes.size())throw std::length_error("Session response exceeds reserved buffer");
+        buffer_bytes-=storage->bytes.size()-bytes.size();
+        storage->bytes.resize(bytes.size());std::copy(bytes.begin(),bytes.end(),storage->bytes.begin());
+        value.size=bytes.size();value.data=reinterpret_cast<const std::uint8_t*>(storage->bytes.data());
+        *output=value;published=true;
+    }
+};
 Json event_json(const cpn::JobEvent& event){
     auto json=Json{{"job_id",event.job_id},{"sequence",event.sequence},{"state",cpn::job_state_name(event.state)},
         {"testcase_id",event.testcase_id}};
@@ -109,13 +127,13 @@ cpn_status cpn_engine_create(const cpn_engine_options* given,cpn_engine_handle* 
 }
 cpn_status cpn_engine_close(cpn_engine_handle handle,cpn_error* destination){
     return boundary(destination,[&]{auto engine=lookup(handle);if(!engine)return error(destination,CPN_INVALID_HANDLE,"Unknown engine");
-        engine->jobs.close();return error(destination,CPN_OK,{});});
+        engine->operations.request_stop();engine->jobs.close();return error(destination,CPN_OK,{});});
 }
 cpn_status cpn_engine_destroy(cpn_engine_handle handle,cpn_error* destination){
     return boundary(destination,[&]{std::shared_ptr<Engine> engine;
         {std::lock_guard guard(handles_mutex);auto found=engines.find(handle);if(found==engines.end())return error(destination,CPN_INVALID_HANDLE,"Unknown engine");
          engine=std::move(found->second);engines.erase(found);}
-        engine->jobs.close();return error(destination,CPN_OK,{});});
+        engine->operations.request_stop();engine->jobs.close();return error(destination,CPN_OK,{});});
 }
 cpn_status cpn_engine_submit_json(cpn_engine_handle handle,cpn_bytes json,cpn_job_handle* output,cpn_error* destination){
     if(output)*output=0;
@@ -169,6 +187,57 @@ cpn_status cpn_engine_info_json(cpn_engine_handle handle,cpn_buffer* output,cpn_
             {"capabilities",{{"managed_process_group",capabilities.managed_process_group},
                              {"memory_limit",capabilities.memory_limit},{"spawn_deadline",capabilities.spawn_deadline}}}};
         return allocate_buffer(handle,*engine,doc.dump(),output,destination);
+    });
+}
+cpn_status cpn_engine_session_load(cpn_engine_handle handle,cpn_bytes path,cpn_buffer* output,cpn_error* destination){
+    if(output)*output={};
+    return boundary(destination,[&]{auto engine=lookup(handle);if(!engine)return error(destination,CPN_INVALID_HANDLE,"Unknown engine");
+        if(!output || !path.data || !path.size || path.size>32768)return error(destination,CPN_INVALID_ARGUMENT,"Invalid recovery path bytes");
+        auto loaded=cpn::SessionService().load(cpn::path_from_utf8(std::string_view(reinterpret_cast<const char*>(path.data),path.size)));
+        auto doc=Json{{"schema_version",1},{"status",cpn::session_load_status_name(loaded.status)},{"detail",loaded.detail}};
+        doc["disk_digest"]=loaded.disk_digest?Json(*loaded.disk_digest):Json(nullptr);
+        doc["session"]=loaded.session?Json::parse(cpn::serialize_workspace_session(*loaded.session)):Json(nullptr);
+        return allocate_buffer(handle,*engine,doc.dump(-1,' ',false,Json::error_handler_t::replace),output,destination);
+    });
+}
+cpn_status cpn_engine_session_save_json(cpn_engine_handle handle,cpn_bytes request,cpn_buffer* output,cpn_error* destination){
+    if(output)*output={};
+    return boundary(destination,[&]{auto engine=lookup(handle);if(!engine)return error(destination,CPN_INVALID_HANDLE,"Unknown engine");
+        if(engine->operations.stop_requested())return error(destination,CPN_CLOSED,"Engine is closed");
+        if(!output || !request.data || !request.size || request.size>engine->options.max_request_bytes)
+            return error(destination,CPN_INVALID_ARGUMENT,"Invalid session request bytes");
+        std::vector<std::set<std::string>> keys;
+        const auto doc=Json::parse(request.data,request.data+request.size,[&](int depth,Json::parse_event_t event,Json& parsed){
+            if(depth>64)throw std::invalid_argument("Session request nesting exceeds limit");
+            if(event==Json::parse_event_t::object_start)keys.emplace_back();
+            else if(event==Json::parse_event_t::object_end)keys.pop_back();
+            else if(event==Json::parse_event_t::key && !keys.back().insert(parsed.get<std::string>()).second)
+                throw std::invalid_argument("Duplicate session request field");
+            return true;
+        });
+        if(!doc.is_object() || !doc.at("schema_version").is_number_integer() || doc.at("schema_version")!=1)
+            return error(destination,CPN_INVALID_ARGUMENT,"Unsupported session request version");
+        const auto& paths=doc.at("paths");
+        cpn::SessionPaths locations{cpn::path_from_utf8(paths.at("recovery_file").get<std::string>()),
+            cpn::path_from_utf8(paths.at("backup_file").get<std::string>()),cpn::path_from_utf8(paths.at("lock_file").get<std::string>())};
+        auto session=cpn::parse_workspace_session(doc.at("session").dump());
+        std::optional<std::string> digest;
+        if(doc.contains("expected_disk_digest") && !doc.at("expected_disk_digest").is_null())digest=doc.at("expected_disk_digest").get<std::string>();
+        std::int64_t timeout=5000;
+        if(doc.contains("lock_timeout_ms")){
+            const auto& value=doc.at("lock_timeout_ms");
+            if(!value.is_number_integer() || value<0 || value>60000)return error(destination,CPN_INVALID_ARGUMENT,"Invalid session lock timeout");
+            timeout=value.get<std::int64_t>();
+        }
+        ReservedBuffer reserved;
+        const auto allocated=allocate_buffer(handle,*engine,std::string(65536,'\0'),&reserved.value,destination);
+        if(allocated!=CPN_OK)return allocated;
+        const auto saved=cpn::SessionService().save(locations,session,digest,std::chrono::milliseconds(timeout),engine->operations.get_token());
+        auto result=Json{{"schema_version",1},{"status",cpn::session_save_status_name(saved.status)},{"detail",saved.detail.substr(0,4096)},
+            {"recovery_replaced",saved.recovery_replaced},{"backup_replaced",saved.backup_replaced}};
+        result["disk_digest"]=saved.disk_digest?Json(*saved.disk_digest):Json(nullptr);
+        reserved.publish(result.dump(-1,' ',false,Json::error_handler_t::replace),output);
+        return error(destination,CPN_OK,{});
     });
 }
 cpn_status cpn_buffer_release(cpn_buffer_handle handle,cpn_error* destination){

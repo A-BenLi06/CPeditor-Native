@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 #include <cstddef>
+#include <chrono>
 #include <filesystem>
 #include <memory>
 #include <stdexcept>
+#include <optional>
+#include <stop_token>
 #include <string>
 #include <string_view>
 namespace cpn {
@@ -14,10 +17,18 @@ public:
     // true means rename committed; persistence to storage could not be confirmed.
     const bool destination_replaced;
 };
+class FileLock {
+public:
+    virtual ~FileLock() = default;
+};
 class FileStore {
 public:
     virtual ~FileStore() = default;
     virtual std::string read(const std::filesystem::path&, std::size_t max_bytes) const = 0;
+    virtual std::optional<std::string> read_optional(const std::filesystem::path&, std::size_t max_bytes) const = 0;
+    // Cooperating writers retain the lock file and use the same path. Does not constrain external writers.
+    virtual std::unique_ptr<FileLock> acquire_lock(const std::filesystem::path&,
+        std::chrono::milliseconds timeout, std::stop_token = {}) const = 0;
     virtual void write_atomic(const std::filesystem::path&, std::string_view) const = 0;
     virtual std::filesystem::path create_workspace() const = 0;
     virtual void remove_workspace(const std::filesystem::path&) const noexcept = 0;

@@ -72,9 +72,17 @@ sequenceDiagram
 
 `JobEvent` 状态为 `Queued`、`Building`、`Running`、`Checking`、`Completed`、`Cancelled` 或 `Failed`。终态包含 `result`，其中保留 `document_id`、`revision`、`source_digest`、`profile_id`、编译状态和按稳定测试 ID 标记的结果。解答 AC／WA／CE 仍表示任务正常完成了处理；基础设施错误与取消具有独立分类。UI 必须按源码身份判断结果是否仍适用于当前文档。
 
+## 会话接口
+
+`cpn_engine_session_load` 接收 UTF-8 恢复文件路径，返回含 `status`、`session`、`disk_digest` 与 `detail` 的版本 1 JSON。`cpn_engine_session_save_json` 接收恢复／备份／锁路径、完整会话和上次读取的磁盘摘要，返回文件替换状态。两者使用相同的 ABI 缓冲区释放规则，应在后台协调器中调用；保存受引擎关闭取消信号控制。
+
+保存前预留 64 KiB 返回缓冲区配额；容量不足不会先写文件再隐藏结果。调用成功的 `CPN_OK` 表示有可解码响应，是否保存成功须继续检查响应 `status` 和 `recovery_replaced`。`DurabilityUnknown` 表示原子替换已经发生但持久化未能确认，不能按普通“未保存”重试。
+
+恢复格式、限额、请求示例和合作锁／外部写入限制见 [会话恢复](session.md)。会话保存请求仍受引擎 `max_request_bytes` 约束。
+
 ## 当前限制
 
 - 原生进程后端支持进程组／Windows Job Object、并发三管道、墙钟超时、取消、输出限制和最终排空。未实现内存硬限额；启动期限是软期限，不能中断阻塞的原生进程创建调用。
 - 比较循环分批响应取消；内存分配和释放仍同步，不是硬实时保证。
 - 每个任务创建独立 workspace，源码快照和产物自动清理。文件写入同目录临时文件后原子替换；POSIX 替换成功后目录持久化失败通过 `AtomicWriteError.destination_replaced` 区分。
-- 尚未包含会话、Companion、外部 checker、LSP、格式化、压力／交互测试和发布接口；这些按完整实施计划继续推进。
+- 尚未包含 Companion、外部 checker、LSP、格式化、压力／交互测试和发布接口；这些按完整实施计划继续推进。

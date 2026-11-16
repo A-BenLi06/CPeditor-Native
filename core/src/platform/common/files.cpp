@@ -8,6 +8,7 @@
 #include <random>
 #include <stdexcept>
 #include <system_error>
+#include <thread>
 #ifdef _WIN32
 #define NOMINMAX
 #include <windows.h>
@@ -15,10 +16,25 @@
 #include <cerrno>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <sys/file.h>
 #include <unistd.h>
 #endif
 namespace cpn {
 namespace {
+class NativeFileLock final : public FileLock {
+public:
+#ifdef _WIN32
+    explicit NativeFileLock(HANDLE handle):handle_(handle){}
+    ~NativeFileLock() override {OVERLAPPED position{};UnlockFileEx(handle_,0,1,0,&position);CloseHandle(handle_);}
+private:
+    HANDLE handle_;
+#else
+    explicit NativeFileLock(int handle):handle_(handle){}
+    ~NativeFileLock() override {::flock(handle_,LOCK_UN);::close(handle_);}
+private:
+    int handle_;
+#endif
+};
 std::string unique_suffix() {
     static std::atomic<std::uint64_t> counter{0};
     std::random_device random;
@@ -26,6 +42,62 @@ std::string unique_suffix() {
 }
 class NativeFileStore final : public FileStore {
 public:
+    std::optional<std::string> read_optional(const std::filesystem::path& path,std::size_t max_bytes) const override {
+        (void)path_to_utf8(path);
+        std::error_code failure;
+        const auto state=std::filesystem::symlink_status(path,failure);
+        if(!std::filesystem::exists(state)){
+            if(failure && failure!=std::errc::no_such_file_or_directory)throw std::system_error(failure);
+            return std::nullopt;
+        }
+        if(failure)throw std::system_error(failure);
+        return read(path,max_bytes);
+    }
+    std::unique_ptr<FileLock> acquire_lock(const std::filesystem::path& path,
+        std::chrono::milliseconds timeout,std::stop_token stop) const override {
+        (void)path_to_utf8(path);
+        const auto maximum=std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::duration::max()).count()/4;
+        if(timeout.count()<0 || timeout.count()>maximum)throw std::invalid_argument("Invalid lock timeout");
+        if(stop.stop_requested())throw std::system_error(std::make_error_code(std::errc::operation_canceled));
+        const auto deadline=std::chrono::steady_clock::now()+timeout;
+#ifdef _WIN32
+        const auto handle=CreateFileW(path.c_str(),GENERIC_READ|GENERIC_WRITE,FILE_SHARE_READ|FILE_SHARE_WRITE,
+            nullptr,OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL|FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
+        if(handle==INVALID_HANDLE_VALUE)throw std::system_error(GetLastError(),std::system_category(),"Open lock file");
+        bool locked=false;
+        try{
+            BY_HANDLE_FILE_INFORMATION info{};
+            if(!GetFileInformationByHandle(handle,&info))throw std::system_error(GetLastError(),std::system_category(),"Inspect lock file");
+            if(info.dwFileAttributes&(FILE_ATTRIBUTE_REPARSE_POINT|FILE_ATTRIBUTE_DIRECTORY))throw std::invalid_argument("Lock path must be a regular file");
+            for(;;){
+                if(stop.stop_requested())throw std::system_error(std::make_error_code(std::errc::operation_canceled));
+                OVERLAPPED position{};
+                if(LockFileEx(handle,LOCKFILE_EXCLUSIVE_LOCK|LOCKFILE_FAIL_IMMEDIATELY,0,1,0,&position)){locked=true;return std::make_unique<NativeFileLock>(handle);}
+                const auto failure=GetLastError();
+                if(failure!=ERROR_LOCK_VIOLATION)throw std::system_error(failure,std::system_category(),"LockFileEx");
+                if(std::chrono::steady_clock::now()>=deadline)throw std::system_error(std::make_error_code(std::errc::timed_out));
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+        }catch(...){if(locked){OVERLAPPED position{};UnlockFileEx(handle,0,1,0,&position);}CloseHandle(handle);throw;}
+#else
+        const auto handle=::open(path.c_str(),O_RDWR|O_CREAT|O_CLOEXEC|O_NOFOLLOW,0600);
+        if(handle<0)throw std::system_error(errno,std::generic_category(),"Open lock file");
+        bool locked=false;
+        try{
+            struct stat info{};
+            if(::fstat(handle,&info)<0)throw std::system_error(errno,std::generic_category(),"Inspect lock file");
+            if(!S_ISREG(info.st_mode))throw std::invalid_argument("Lock path must be a regular file");
+            for(;;){
+                if(stop.stop_requested())throw std::system_error(std::make_error_code(std::errc::operation_canceled));
+                if(::flock(handle,LOCK_EX|LOCK_NB)==0){locked=true;return std::make_unique<NativeFileLock>(handle);}
+                const auto failure=errno;
+                if(failure!=EWOULDBLOCK && failure!=EAGAIN && failure!=EINTR)throw std::system_error(failure,std::generic_category(),"flock");
+                if(std::chrono::steady_clock::now()>=deadline)throw std::system_error(std::make_error_code(std::errc::timed_out));
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+        }catch(...){if(locked)::flock(handle,LOCK_UN);::close(handle);throw;}
+#endif
+    }
     std::string read(const std::filesystem::path& path, std::size_t max_bytes) const override {
         (void)path_to_utf8(path);
         std::ifstream stream(path,std::ios::binary);
