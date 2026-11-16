@@ -6,6 +6,7 @@
 #include <nlohmann/json.hpp>
 #include <algorithm>
 #include <cstring>
+#include <initializer_list>
 #include <limits>
 #include <map>
 #include <mutex>
@@ -13,6 +14,14 @@
 #include <stdexcept>
 namespace {
 using Json=nlohmann::json;
+void session_fields(const Json& object,std::initializer_list<std::string_view> allowed) {
+    if (!object.is_object()) throw std::invalid_argument("Session request field must be an object");
+    for (const auto& [key,value] : object.items()) {
+        (void)value;
+        if (std::find(allowed.begin(),allowed.end(),key)==allowed.end())
+            throw std::invalid_argument("Unknown session request field: "+key);
+    }
+}
 constexpr std::size_t total_buffer_limit=256*1024*1024;
 constexpr std::size_t individual_buffer_limit=128*1024*1024;
 struct Engine {
@@ -217,7 +226,9 @@ cpn_status cpn_engine_session_save_json(cpn_engine_handle handle,cpn_bytes reque
         });
         if(!doc.is_object() || !doc.at("schema_version").is_number_integer() || doc.at("schema_version")!=1)
             return error(destination,CPN_INVALID_ARGUMENT,"Unsupported session request version");
+        session_fields(doc,{"schema_version","paths","session","expected_disk_digest","lock_timeout_ms"});
         const auto& paths=doc.at("paths");
+        session_fields(paths,{"recovery_file","backup_file","lock_file"});
         cpn::SessionPaths locations{cpn::path_from_utf8(paths.at("recovery_file").get<std::string>()),
             cpn::path_from_utf8(paths.at("backup_file").get<std::string>()),cpn::path_from_utf8(paths.at("lock_file").get<std::string>())};
         auto session=cpn::parse_workspace_session(doc.at("session").dump());

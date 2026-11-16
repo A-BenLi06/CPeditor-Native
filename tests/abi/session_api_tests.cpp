@@ -27,6 +27,14 @@ int main(){
             {"session",Json::parse(cpn::serialize_workspace_session(session))},{"expected_disk_digest",nullptr}};
         cpn_buffer held{};expect(cpn_engine_info_json(engine,&held,nullptr)==CPN_OK,"hold buffer quota");
         auto json=request.dump();cpn_buffer result{};
+        for (const auto path_field : {false,true}) {
+            auto malformed=request;
+            if (path_field) malformed["paths"]["recovery_flie"]="ignored typo";
+            else malformed["expected_disk_digset"]="ignored typo";
+            const auto bytes=malformed.dump();
+            expect(cpn_engine_session_save_json(engine,view(bytes),&result,nullptr)==CPN_INVALID_ARGUMENT && !result.handle,"unknown session wrapper/path fields rejected before I/O or buffer quota");
+            expect(!files->read_optional(recovery,1024*1024),"invalid wrapper cannot write recovery");
+        }
         expect(cpn_engine_session_save_json(engine,view(json),&result,nullptr)==CPN_CAPACITY,"save reserves response before I/O");
         expect(!files->read_optional(recovery,1024*1024),"capacity failure cannot write recovery");
         cpn_buffer_release(held.handle,nullptr);

@@ -174,3 +174,9 @@ Core 规则区分空输入、缺少预期输出与预期输出为空、checker �
 
 - git ls-remote 和 fetch 成功；远端 main 为 76b7d5b8710c71b5668bf77c539ed657a48e288f（Initial commit）。
 - git merge-base 确认当前本地与远端没有共同祖先。此次完成远端关联，不合并、不覆盖远端，也不推送尚未整合的代码；后续同步需要保留并整合双方历史。
+
+## 2026-11-17T00:36:24+08:00 — 会话请求信封严格校验
+
+- 独立检查发现会话本体已严格校验，但C ABI保存信封和paths对象仍忽略未知字段。新增允许字段校验，拼错expected token或文件路径键在任何磁盘操作和buffer配额分配之前被拒绝。
+- 新回归在已占用全部buffer配额的情况下提交未知外层／paths字段，确认返回InvalidArgument、无buffer且未写恢复文件，不能被Capacity错误掩盖。
+- 普通及完整严格警告ASan／UBSan构建的session_api、C header检查均2/2通过；其他未改逻辑沿用上一变更12/12证据。同步更新中文会话文档。
