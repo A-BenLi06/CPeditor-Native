@@ -357,3 +357,10 @@ Core 规则区分空输入、缺少预期输出与预期输出为空、checker �
 - 独立只读审查910个分页边界普通／ASan+UBSan均通过，含转义workspace身份、跨两位sequence、整页末项has_more尺寸；原真实ABI套件另复验通过且主源码SHA未改变，证据out/companion-abi/review/verification.json。
 - 套件含配额满不写盘、坏输入／defaults、原文未知数值词法、4096样例有限写回应、实际回执／删除防重放／未来偏好／旧恢复／更新、销毁后buffer和真实持锁下close。Apple ASan不支持LSan，detect_leaks=0，不声称泄漏检测或Windows原生验收通过。
 - 本提交仅C ABI／CMake／契约与记录；Windows会话及HTTP草稿未纳入。
+
+## 2026-11-17T02:45:53+08:00 — 补齐 WinUIEdit 提示箭头与折叠文本的 C++20 字节接口
+
+- 真实 Windows CI 501ad0d 的 x64 Debug／Release 均通过 Core 15/15 与正式 Runner 桥接；编辑器编译仍有 CallTip 两处 UTF-8 绘制与 CodeEditorHandler 折叠文本的 char8_t 类型错误。固定编译源码范围内的三处 u8 使用已逐一检查，前一轮只修复 ScintillaWin，未覆盖这两个文件。
+- 提示箭头用显式长度的 u8string_view → string_view；折叠文本按真实 ScintillaCall::SetDefaultFoldDisplayText(const char *) 契约保留字面量的 NUL 结尾和静态生命周期，不关闭 char8_t 或降低语言标准。新增两个文件的 before／after SHA，更新完整 patch SHA；研究子模块不修改。
+- 根独立 PowerShell 7 全量导出／应用补丁与所有 SHA 通过；实际 CallTip.cxx 在 C++20／完整严格警告／-Werror 下编译通过，实际 ScintillaCall 方法签名及七字节／终止符检查通过。CodeEditorHandler 全文件语法检查通过，保留上游三个未处理 Unset 的 Clang 警告，不声称该完整文件 -Werror 通过。证据位于 out/windows/research/root-calltip-utf8-review-final.log 与 utf8-patch-files；原 CI 失败日志保留在 out/windows/ci/43929600541。
+- 完整 WinUI 编译继续由本提交触发的 Windows CI 验证；Windows 10 目标机脚本与 IME／UU／虚拟桌面实测仍待执行。Windows 恢复、HTTP 与 macOS 导入草稿不纳入此修复提交。

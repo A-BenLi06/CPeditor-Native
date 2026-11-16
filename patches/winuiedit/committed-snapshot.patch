@@ -448,3 +448,31 @@
  }
  
  void Window::Show(bool show) {
+diff --git a/WinUIEditor/CodeEditorHandler.cpp b/WinUIEditor/CodeEditorHandler.cpp
+index 2a3927a..05bbc9b 100644
+--- a/WinUIEditor/CodeEditorHandler.cpp
++++ b/WinUIEditor/CodeEditorHandler.cpp
+@@ -420,7 +420,8 @@ namespace WinUIEditor
+ 		_call->MarkerDefine(static_cast<int>(MarkerOutline::FolderMidTail), MarkerSymbol::TCorner);
+ 		_call->MarkerEnableHighlight(false);
+ 
+-		_call->SetDefaultFoldDisplayText(u8"\u00a0\u22ef\u00a0"); // ... nbsp + centered vertically + nbsp
++		constexpr auto foldDisplayText = u8"\u00a0\u22ef\u00a0";
++		_call->SetDefaultFoldDisplayText(reinterpret_cast<const char *>(foldDisplayText)); // UTF-8, null-terminated
+ 		_call->FoldDisplayTextSetStyle(Scintilla::FoldDisplayTextStyle::Standard);
+ 
+ 		_call->SetAutomaticFold(static_cast<Scintilla::AutomaticFold>(static_cast<int>(Scintilla::AutomaticFold::Show) | static_cast<int>(Scintilla::AutomaticFold::Click) | static_cast<int>(Scintilla::AutomaticFold::Change)));
+diff --git a/scintilla/src/CallTip.cxx b/scintilla/src/CallTip.cxx
+index 68fd3b6..7ab5227 100644
+--- a/scintilla/src/CallTip.cxx
++++ b/scintilla/src/CallTip.cxx
+@@ -111,7 +111,8 @@ void DrawArrow(Surface *surface, const PRectangle &rc, bool upArrow, ColourRGBA
+ 	// WinUI
+ 	const auto height{ rc.Height() * 0.5 };
+ 	const auto font{ Scintilla::Internal::GetChevronFontFromSurface(*surface, height) };
+-	const auto text{ upArrow ? u8"\uEDDB" : u8"\uEDDC" };
++	const std::u8string_view textUTF8{ upArrow ? u8"\uEDDB" : u8"\uEDDC" };
++	const std::string_view text{ reinterpret_cast<const char *>(textUTF8.data()), textUTF8.size() };
+ 	const XYPOSITION textWidth = surface->WidthTextUTF8(font.get(), text);
+ 	const auto padding{ (rc.Width() - textWidth) / 2 };
+ 	const PRectangle rcText{ rc.left + padding, rc.top, rc.right - padding, rc.bottom };

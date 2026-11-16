@@ -2,7 +2,7 @@
   "schema_version": 1,
   "source_commit": "d9f60dbca65c2af54ced590d873d9438de32ce77",
   "patch": "committed-snapshot.patch",
-  "patch_sha256": "51e8fe74093a396a178de58ec9882bfdb9a774a0f790d8a847fac3d34b7ef6b7",
+  "patch_sha256": "8eded7b9a21ca147878ba4cbcdebeba06e29e28fee728e1b939b7283ecc79247",
   "files": [
     {
       "path": "WinUIEditor/CodeEditorControl.cpp",
@@ -53,6 +53,16 @@
       "path": "scintilla/winui/PlatWin.cxx",
       "before_sha256": "6d797abe806d2feebbfea8988fbafbb1b826dc5f3d6567ad55b3bb1a68259727",
       "after_sha256": "182354d2763e8bc94b06dccfb6c86f5b3ebf3af3f71ab59740e01d9c1f140f36"
+    },
+    {
+      "path": "WinUIEditor/CodeEditorHandler.cpp",
+      "before_sha256": "fa30f9d7cc9fb830a48046e1c9ad8a786f3a46098d5da30ee2121fc7111207d0",
+      "after_sha256": "1a2c05512584d051f9c827eed62ae9cd3ed352eb2627280a698b4c365f38560c"
+    },
+    {
+      "path": "scintilla/src/CallTip.cxx",
+      "before_sha256": "ee57394de791867bf58967cabf18451d757f77c594440ca045fd3b5badadfec1",
+      "after_sha256": "eef727793413ca5f8307dc1deb0acee3facbacd9e57a57bad42c778770507be3"
     }
   ],
   "overlays": [
