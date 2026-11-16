@@ -84,3 +84,21 @@ Core 规则区分空输入、缺少预期输出与预期输出为空、checker �
 - macOS 27.0.1 arm64：Swift build、9 项模型／真实原生编辑器测试、脚本 --verify、ad-hoc codesign 与实际 app 启动通过；根 CUA 验证中文／emoji 粘贴、ST 菜单撤销及最新 CEV 菜单撤销，恢复源码与保存状态。
 - Windows：9 个 XML、34 条工程引用、7 个 XAML handler、18 个资源键、2 profiles、4 包版本、6 PNG 静态检查通过。没有 Windows SDK／PowerShell 主机，未执行 Windows 编译、部署或 UI。
 - M0 目标平台验收尚未通过：macOS 14／Intel、系统中文候选窗口、辅助功能、DPI／Spaces、UU／Windows 虚拟桌面及性能数据仍待采集。WinUIEdit 未公开 composition 事务，native-buffer 诊断不会被描述为已提交 Core 快照。
+
+## 2026-11-16T23:18:49+08:00 — 原生进程、批量判题与有界 C ABI
+
+### 改动与思路
+
+- 实现 POSIX 进程组／Windows Job Object、结构化 argv、并发 stdin/stdout/stderr、超时／取消、有限输出保留和最终排空；进程创建失败与启动后 I/O 错误分开分类。
+- 实现严格工具链 profile、独立临时 workspace、原子 FileStore、批量单次编译／多样例比较；保留稳定源码／测试 ID、revision、SHA-256、空答案与无答案以及原始 NUL 字节。保存失败前后的提交状态通过 AtomicWriteError 明确区分，路径拒绝 NUL／无效 UTF-8，POSIX 覆盖文件保留权限。
+- 修复数字截断／版本溢出、重复字段、文件名别名、非法占位符／变量、检查取消和异常覆盖成功编译状态等实际审查问题；诊断内容有界，比较／解码按批次响应取消。
+- 实现固定 worker JobRegistry，提交前预留容量，进度合并／轮转排空、可靠终态、精确 ack、显式 release 与并发关闭；每个接受任务预留异常终态。
+- 实现 ABI 1：C 头、整数句柄、异常边界、请求复制、有限 JSON 事件／输出缓冲区和匹配释放；无效／过期句柄及容量不足均返回结构化错误，成功分配后才消费事件。添加完整静态聚合库 libcpn_core.a 供 Swift 等原生客户端。
+- CLI 使用共享结果序列化，修复非法缩进字节与 stdout 写失败检查；添加数据驱动 Clang／GCC Windows／Python profiles 和中文当前 API 文档。
+
+### 验证与限制
+
+- macOS 27.0.1 arm64／Apple Clang 21，以 macOS 14 deployment target 构建；普通 CMake 与完整 -Werror／ASan+UBSan 构建均成功，8/8 CTest 入口通过（C header、API、jobs、files、JSON、domain、process、batch）。
+- 真实进程测试 20 项通过；并发 gate 测试覆盖容量、排队取消、旧 ack、终态、异常、固定 worker／并发关闭及清理。子 agent TSan 检查覆盖 JobRegistry 与其测试，未把它报告为全 Core TSan。
+- CLI 真实 C++ 编译／3 样例均 AC，输出按 UTF-8 解析成功，revision、固定摘要及原始 stdout（含空样例）一致。ABI 验证包含调用方修改请求、容量拒绝不消费终态、buffer 在 engine destroy 后继续读取／释放及双重释放错误。
+- Windows 后端源码已完成，但没有 Windows 编译／运行证据。内存硬限制与硬启动期限明确不支持；POSIX 进程组不能保证清理主动脱离进程组的进程。完整原生面板、会话／Companion／高级服务和分发仍在实施。

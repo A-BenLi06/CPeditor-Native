@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <optional>
+#include <stop_token>
 #include <string_view>
 #include <vector>
 
@@ -16,8 +17,9 @@ struct Utf8Scalar {
 struct Utf8Decode {
     std::vector<Utf8Scalar> scalars;
     std::optional<std::size_t> error_offset;
+    bool cancelled{false};
 };
-[[nodiscard]] Utf8Decode decode_utf8(std::string_view);
+[[nodiscard]] Utf8Decode decode_utf8(std::string_view, std::stop_token = {});
 
 enum class PositionEncoding { utf8, utf16, utf32 };
 struct TextPosition {

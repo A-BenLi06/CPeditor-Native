@@ -2,10 +2,13 @@
 #include "cpn/checker.hpp"
 #include "cpn/digest.hpp"
 #include "cpn/text.hpp"
+#include <atomic>
+#include <chrono>
 #include <iostream>
 #include <stdexcept>
 #include <string>
 #include <tuple>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -52,6 +55,23 @@ void positions() {
             if(const auto position=index->position(offset,encoding))
                 expect(index->byte_offset(*position,encoding)==offset,"position round trip");
 }
+void cancellation() {
+    using namespace std::chrono_literals;
+    std::stop_source already_cancelled;already_cancelled.request_stop();
+    for(const auto mode:{cpn::ComparisonMode::byte_exact,cpn::ComparisonMode::cp_editor_strict,cpn::ComparisonMode::cp_editor_ignore_trailing_spaces})
+        expect(cpn::compare_outputs("","",mode,already_cancelled.get_token()).verdict==cpn::ComparisonVerdict::cancelled,"pre-cancelled comparison");
+    expect(cpn::decode_utf8("",already_cancelled.get_token()).cancelled,"pre-cancelled empty UTF-8 decode");
+    for(const auto mode:{cpn::ComparisonMode::byte_exact,cpn::ComparisonMode::cp_editor_strict,cpn::ComparisonMode::cp_editor_ignore_trailing_spaces}) {
+        const auto size=mode==cpn::ComparisonMode::byte_exact?64*1024*1024:4*1024*1024;
+        const std::string output(size,' '),expected(size,' ');
+        std::stop_source stop;std::atomic<bool> started{false};
+        std::jthread canceller([&]{while(!started.load(std::memory_order_acquire))std::this_thread::yield();std::this_thread::sleep_for(1ms);stop.request_stop();});
+        const auto begin=std::chrono::steady_clock::now();started.store(true,std::memory_order_release);
+        const auto result=cpn::compare_outputs(output,expected,mode,stop.get_token());
+        expect(result.verdict==cpn::ComparisonVerdict::cancelled,"in-progress comparison cancellation");
+        expect(std::chrono::steady_clock::now()-begin<3s,"comparison cancellation completes promptly");
+    }
+}
 void digests() {
     expect(cpn::sha256("")=="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","SHA256 empty");
     expect(cpn::sha256("abc")=="ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad","SHA256 abc");
@@ -59,6 +79,6 @@ void digests() {
 }
 }
 int main() {
-    try { checkers();positions();digests();std::cout<<"domain tests passed\n";return 0; }
+    try { checkers();positions();cancellation();digests();std::cout<<"domain tests passed\n";return 0; }
     catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}
 }

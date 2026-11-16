@@ -5,9 +5,14 @@
 #include <cstdint>
 
 namespace cpn {
-Utf8Decode decode_utf8(std::string_view input) {
+Utf8Decode decode_utf8(std::string_view input, std::stop_token stop) {
     Utf8Decode result;
+    std::size_t next_check = 0;
     for (std::size_t i = 0; i < input.size();) {
+        if (i >= next_check) {
+            if (stop.stop_requested()) { result.cancelled = true; return result; }
+            next_check = i + std::min<std::size_t>(4096, input.size() - i);
+        }
         const auto first = static_cast<unsigned char>(input[i]);
         std::size_t length = 0;
         char32_t value = 0;
@@ -31,6 +36,7 @@ Utf8Decode decode_utf8(std::string_view input) {
         result.scalars.push_back({value, i, length});
         i += length;
     }
+    result.cancelled = stop.stop_requested();
     return result;
 }
 

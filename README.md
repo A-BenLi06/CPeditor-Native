@@ -2,7 +2,7 @@
 
 面向原生算法竞赛编辑器的架构设计与源码研究：**Windows 使用 WinUI 3 + C++/WinRT，macOS 使用 SwiftUI + AppKit，两端共享不依赖 Qt 的 C++20 竞赛引擎**。
 
-当前仓库包含架构规范、完整的上游 CP Editor 参考源码和正在实施的原生应用/共享引擎。C++20 领域规则已可构建并通过测试；完整应用、目标平台性能与发布验收尚未完成。当前证据见 [实施状态](docs/status.md)。
+当前仓库包含架构规范、完整的上游 CP Editor 参考源码和正在实施的原生应用/共享引擎。C++20 领域、原生进程、批量判题和有界 C ABI 已可独立构建并通过测试；完整应用、目标平台性能与发布验收尚未完成。当前证据见 [实施状态](docs/status.md)。
 
 ## 文档入口
 
@@ -10,6 +10,7 @@
 | --- | --- |
 | [实施状态](docs/status.md) | 当前已完成部分、实际验证证据与剩余工作 |
 | [总体架构](docs/architecture.md) | 组件边界、平台集成、依赖方向和拟议仓库布局 |
+| [当前 Core API](docs/core-api.md) | 已实现的 C/C++ 接口、请求格式、任务与缓冲区限额 |
 | [Core 契约](docs/core-contracts.md) | 源码快照、任务生命周期、进程限制、判题结果、桥接所有权和持久化 |
 | [上游源码审查](docs/upstream-audit.md) | 有源码依据的迁移清单及兼容性差异 |
 | [编辑器评估](docs/editor-evaluation.md) | 已核实的依赖、许可证、编辑器取舍和原型验收条件 |
@@ -50,7 +51,9 @@ CP Editor 源文件头允许按 GPL 第 3 版或更高版本使用。参考项�
 ```powershell
 cmake --preset dev
 cmake --build --preset dev
-ctest --preset dev -R "^domain$"
+ctest --preset dev
 ```
 
-该检查覆盖当前文本/比较/摘要规则。原生进程与应用功能按实施状态逐步接入，不把局部测试通过视为完整项目验收。
+该检查覆盖文本／比较／摘要、真实子进程、文件事务、配置／JSON、批量判题、并发任务和 C ABI。Windows 需要已配置的 MSVC 开发环境和 Ninja；macOS 需要 Xcode 命令行工具。原生界面、最低系统和发布仍按实施状态继续验收。
+
+macOS 应用入口为 `./script/build_and_run.sh --verify`，Windows 原型入口与前提见 [Windows 说明](apps/windows/README.md)。[macOS 说明](apps/macos/README.md)记录双编辑器及真实 UI 验证范围。无界面工具可通过 `out/core/dev/cpn-cli --help` 查看配置、源码和样例参数，语言／工具链定义位于 `resources/profiles`。
