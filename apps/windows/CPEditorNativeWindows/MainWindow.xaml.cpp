@@ -63,13 +63,13 @@ MainWindow::MainWindow() {
     });
 }
 HWND MainWindow::WindowHandle() {
-    HWND handle{}; check_hresult(this->as<IWindowNative>()->get_WindowHandle(&handle)); return handle;
+    HWND handle{}; check_hresult(get_strong().as<IWindowNative>()->get_WindowHandle(&handle)); return handle;
 }
 hstring MainWindow::CurrentError() {
     try { throw; }
     catch (hresult_error const& error) { return error.message(); }
     catch (std::exception const& error) { return to_hstring(error.what()); }
-    catch (...) { return to_hstring(HRESULT_FROM_WIN32(ERROR_UNHANDLED_EXCEPTION)); }
+    catch (...) { return hresult_error{HRESULT_FROM_WIN32(ERROR_UNHANDLED_EXCEPTION)}.message(); }
 }
 fire_and_forget MainWindow::Root_Loaded(IInspectable const&, RoutedEventArgs const&) {
     auto lifetime = get_strong();
@@ -209,7 +209,7 @@ MainWindow::FinalRevisionLease::~FinalRevisionLease() noexcept {
         try { owner.UpdateControls(); } catch (...) {}
     }
 }
-std::shared_ptr<MainWindow::Document> MainWindow::CurrentDocument() const {
+std::shared_ptr<MainWindow::Document> MainWindow::CurrentDocument() {
     const auto selected = Tabs().SelectedItem();
     for (auto const& document : documents_) if (selected == document->tab) return document;
     return {};

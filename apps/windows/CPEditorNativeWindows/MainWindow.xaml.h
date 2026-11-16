@@ -140,7 +140,7 @@ private:
     [[nodiscard]] winrt::hstring RenderBytes(std::string_view) const;
     [[nodiscard]] bool IsReservedSourcePath(std::filesystem::path const&) const;
     [[nodiscard]] HWND WindowHandle();
-    [[nodiscard]] std::shared_ptr<Document> CurrentDocument() const;
+    [[nodiscard]] std::shared_ptr<Document> CurrentDocument();
     [[nodiscard]] static winrt::hstring CurrentError();
     cpn::windows::UiStrings strings_;
     cpn::windows::EditorConfiguration configuration_;

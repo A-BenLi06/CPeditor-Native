@@ -1,6 +1,4 @@
-#ifndef CPN_PORTABLE_ADAPTER_TEST
 #include "pch.h"
-#endif
 #include "RecoveryModel.h"
 #include "cpn/json.hpp"
 #include <algorithm>

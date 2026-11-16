@@ -1,4 +1,5 @@
 #pragma once
+#ifndef CPN_PORTABLE_ADAPTER_TEST
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
@@ -41,3 +42,5 @@
 #include <string>
 #include <string_view>
 #include <vector>
+
+#endif

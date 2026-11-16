@@ -1,6 +1,4 @@
-#ifndef CPN_PORTABLE_ADAPTER_TEST
 #include "pch.h"
-#endif
 #include "SourceStore.h"
 #include "cpn/digest.hpp"
 #include "cpn/text.hpp"

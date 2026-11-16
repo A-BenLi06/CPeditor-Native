@@ -414,3 +414,10 @@ Core 规则区分空输入、缺少预期输出与预期输出为空、checker �
 - 对照固定上游 CppDemoWinUI3 标准 ProjectReference，删除宿主 BuildReference=false，让 MSBuild 在投影之前解析／构建编辑器引用并增量复用既有产物。保留经验证的 AdditionalProperties 与输出路径约束，不复制生成头或屏蔽投影错误。
 - 宿主显式添加 Ws2_32.lib／Mswsock.lib，与共享 Core 的网络服务依赖保持一致，为正在独立审查的监听 ABI 所拉入的网络对象提供正确链接。只纳入这一依赖行及工程引用修复，不纳入 Companion UI 草稿。
 - 根工程 XML／标准引用／输出约束／链接依赖静态检查及 whitespace 检查通过；本机未执行 WinUI/MSBuild。下次真实 CI 验证投影和宿主编译，目标Windows10／IME／UU实测仍待执行。
+
+## 2026-11-17T03:52:44+08:00 — 修正 MSVC 预编译头与 WinRT 宿主调用
+
+- 7e58970 的 Windows x64 Debug／Release 已将 WinUIEditor.winmd 纳入投影，宿主进入真实 C++ 编译。下一错误为 /Yu 跳过包含 pch.h 前的条件指令导致裸 endif、实现类不存在 this->as、只读声明调用非 const XAML getter，以及 HRESULT 转 to_hstring 的重载歧义。原日志保留在 out/windows/ci/43940614408/failed.log。
+- 可移植桥接源码统一首行无条件包含 pch.h，将测试模式的原生依赖条件集中放在 pch.h 内，保持 MSVC PCH 解析顺序与可移植测试一致；不关闭原生 PCH或编译器错误。WindowHandle 通过 get_strong 的 COM指针查询 IWindowNative；CurrentDocument 使用与生成控件 getter 相符的非const方法；未知异常返回原生hresult_error诊断。
+- 根实际对六个既有桥接与两个新增 Companion 源文件执行C++20／macOS14／完整严格警告／-Werror语法检查通过，记录out/windows/research/root-pch-portable-syntax.log；新文件与新 SelectedCompanionItem 的同类调整仍留在Companion草稿，不纳入本提交。
+- 本次精确暂存HEAD中的独立宿主调用hunk及既有PCH修复；没有纳入 Windows Companion／macOS／共享Core在途变更。完整Windows原生编译及目标机UI/IME/UU仍由后续CI和验证脚本确认。

@@ -1,6 +1,4 @@
-#ifndef CPN_PORTABLE_ADAPTER_TEST
 #include "pch.h"
-#endif
 #include "CoreWire.h"
 #include "cpn/json.hpp"
 #include <limits>

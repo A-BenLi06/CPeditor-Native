@@ -1,6 +1,4 @@
-#ifndef CPN_PORTABLE_ADAPTER_TEST
 #include "pch.h"
-#endif
 #include "SessionWorker.h"
 #include <condition_variable>
 #include <deque>
