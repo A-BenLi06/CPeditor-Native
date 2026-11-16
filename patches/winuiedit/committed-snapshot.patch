@@ -164,7 +164,17 @@
    <package id="Microsoft.WindowsAppSDK" version="1.7.260224002" targetFramework="native" />
 --- a/scintilla/winui/ScintillaWin.cxx
 +++ b/scintilla/winui/ScintillaWin.cxx
-@@ -861,6 +861,8 @@
+@@ -442,7 +442,8 @@
+ 		const XYPOSITION height{ (rcWhole.right - rcWhole.left) * 1.1 };
+ 		const auto font{ GetChevronFontFromSurface(*surface, height) };
+ 
+-		const auto text{ open ? u8"\uE972" : u8"\uE974" };
++		const std::u8string_view encodedText{ open ? u8"\uE972" : u8"\uE974" };
++		const std::string_view text{ reinterpret_cast<const char *>(encodedText.data()), encodedText.size() };
+ 		const XYPOSITION width = surface->WidthTextUTF8(font.get(), text);
+ 		const PRectangle rc(rcWhole.left, rcWhole.top, rcWhole.right, rcWhole.bottom);
+ 		PRectangle rcText = rc;
+@@ -861,6 +862,8 @@
  	// Todo: conflated with the incorrectly spelled version
  	void ScintillaWinUI::Finalize()
  	{
@@ -173,7 +183,7 @@
  		ScintillaBase::Finalise();
  		StopTimers();
  		SetIdle(false);
-@@ -1115,7 +1117,12 @@
+@@ -1115,7 +1118,12 @@
  	{
  		if (_lock == NONE)
  		{
@@ -186,7 +196,7 @@
  			return true;
  		}
  		return false;
-@@ -1123,9 +1130,10 @@
+@@ -1123,9 +1131,10 @@
  
  	void ScintillaWinUI::TsfCoreUnlock()
  	{
@@ -199,7 +209,7 @@
  	}
  
  	IFACEMETHODIMP ScintillaWinUI::UnadviseSink(IUnknown *)
-@@ -1139,6 +1147,7 @@
+@@ -1139,6 +1148,7 @@
  		{
  			return E_INVALIDARG;
  		}
@@ -207,7 +217,7 @@
  		if (_tfTextStoreACPSink == nullptr)
  		{
  			return E_UNEXPECTED;
-@@ -1179,17 +1188,26 @@
+@@ -1179,17 +1189,26 @@
  		{
  			if (dwLockFlags & (TS_LF_READWRITE & ~TS_LF_READ))
  			{
@@ -234,7 +244,7 @@
  				_lock = _lockAsync;
  				_lockAsync = NONE;
  				_tfTextStoreACPSink->OnLockGranted(_lock);
-@@ -1198,16 +1216,30 @@
+@@ -1198,16 +1217,30 @@
  			_multiInsert = 0;
  			_multiCorrect = 0; // Todo: Should we update text if this is set? Arguably yes, based on how TSFCore does it. Check the log and see what GetText is called. Maybe not? Lots of queued notifications
  
@@ -267,7 +277,7 @@
  		while (!msgq.empty())
  		{
  #ifdef EnableTsfDebugMessages
-@@ -1890,7 +1922,8 @@
+@@ -1890,7 +1923,8 @@
  #ifdef EnableTsfDebugMessages
  		DebugOut(L"OnEndComposition\n");
  #endif
@@ -277,7 +287,7 @@
  		return S_OK;
  	}
  
-@@ -1899,12 +1932,24 @@
+@@ -1899,12 +1933,24 @@
  #ifdef EnableTsfDebugMessages
  		DebugOut(L"OnStartComposition\n");
  #endif
@@ -308,7 +318,7 @@
  	}
  
  	IFACEMETHODIMP ScintillaWinUI::OnUpdateComposition(ITfCompositionView *pComposition, ITfRange *pRangeNew)
-@@ -2355,6 +2400,12 @@
+@@ -2355,6 +2401,12 @@
  
  	void ScintillaWinUI::NotifyParent(Scintilla::NotificationData scn)
  	{
@@ -321,7 +331,7 @@
  		if (_lock != NONE)
  		{
  			// Todo: notification queue might defeat the point of "before" notifications
-@@ -2447,6 +2498,66 @@
+@@ -2447,6 +2499,66 @@
  	void ScintillaWinUI::AddToPopUp(const char *label, int cmd, bool enabled)
  	{
  	}
@@ -428,3 +438,13 @@
  
  		bool hasOKText{ false };
  
+--- a/scintilla/winui/PlatWin.cxx
++++ b/scintilla/winui/PlatWin.cxx
+@@ -134,6 +134,7 @@
+ 	{
+ 		return PRectangle::FromInts(0, 0, wrapper->Width(), wrapper->Height()); // WinUI Todo
+ 	}
++	return {};
+ }
+ 
+ void Window::Show(bool show) {

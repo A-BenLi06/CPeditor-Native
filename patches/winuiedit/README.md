@@ -18,7 +18,7 @@
 
 ## 构建修正
 
-固定源码的 `packages.config` 与 CppWinRT imports 版本不一致；补丁统一为 `2.0.240405.15`，保留实际使用的 WIL `1.0.260126.7`，声明 C++20，保留 WebView2 `1.0.4022.49` 包与 import，并显式开启 `WebView2UseWinRT`，使 WinUI XAML WinMD 所引用的 `Microsoft.Web.WebView2.Core` 类型能进入 C++/WinRT 投影。构建脚本通过标准 MSBuild 属性选择 WinUI 3，不修改 `UseWinUI3.txt`。
+固定源码的 `packages.config` 与 CppWinRT imports 版本不一致；补丁统一为 `2.0.240405.15`，保留实际使用的 WIL `1.0.260126.7`，声明 C++20，保留 WebView2 `1.0.4022.49` 包与 import，并显式开启 `WebView2UseWinRT`，使 WinUI XAML WinMD 所引用的 `Microsoft.Web.WebView2.Core` 类型能进入 C++/WinRT 投影。C++20 中的 `u8` 字面量先保存为 `u8string_view`，再以显式长度的字节视图交给 Scintilla UTF-8 API；不关闭 `char8_t` 或退回旧语言标准。空原生窗口句柄的客户区查询返回空矩形，避免未定义返回值。构建脚本通过标准 MSBuild 属性选择 WinUI 3，不修改 `UseWinUI3.txt`。
 
 ## 已执行的检查
 
@@ -31,3 +31,5 @@
 更新上游时先确认新提交的 TSF/CoreText 调用次序和队列行为，再针对新版本维护补丁、overlay 与 before/after SHA256。不要仅修改 source-lock 绕过不匹配。已有构建副本身份变化或文件被修改时，准备脚本要求新输出目录；保留旧副本供追踪。
 
 Windows Server 2022 CI 发现 WinUI XAML 元数据解析需要 WebView2 WinMD。宿主工程声明相同依赖；该 SDK 依赖不改变编辑区使用原生 Scintilla 的路径。此次修正未修改输入状态机或将缺失类型从投影中隐藏。
+
+统一 diff 的 context 前缀空格和其后上游制表符属于补丁语法；父仓库对 `.patch` 使用专用 whitespace 属性。准备脚本仍在实际应用补丁时用 `--whitespace=error-all` 检查新增源码行，并保留 before／after SHA 校验。

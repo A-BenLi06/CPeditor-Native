@@ -1,2 +1,4 @@
 # Source-lock hashes cover exact bytes, including mixed line endings in patches.
 /patches/winuiedit/** -text
+# Unified-diff context has a required leading space; prepare validates source lines.
+/patches/winuiedit/*.patch whitespace=-blank-at-eol,-space-before-tab

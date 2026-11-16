@@ -322,3 +322,16 @@ Core 规则区分空输入、缺少预期输出与预期输出为空、checker �
 
 - 根独立执行 PowerShell7 prepare-winuiedit，导出新副本并应用补丁，所有before/after/overlay SHA均通过；证据 out/windows/research/root-webview2-review.log 与准备回执。包含CRLF的.patch按core.whitespace=cr-at-eol检查，保持原字节。
 - 两端原生构建结果等待本次提交触发CI；现有Core通过不等同WinUI运行、目标Windows 10、IME／UU／DPI或发布验收。
+
+## 2026-11-17T02:21:24+08:00 — Scintilla 平台层 C++20 字符与空窗口返回
+
+### 改动与思路
+
+- 7e2678f Windows CI 已通过WinRT元数据阶段，Debug编辑器编译发现两处char8_t字面量不能传std::string_view。补丁明确保留UTF-8字符类型和长度，并以char字节视图交给Scintilla API；不关闭char8_t或降低C++20标准。
+- 同轮编译发现GetClientPosition在空Wrapper路径没有返回值，补丁返回空矩形，保持有Wrapper时原客户区计算。新增PlatWin.cxx before/after锁与更新Scintilla产物／patch SHA，参考子模块不修改。
+- `.patch` 的diff context有必需前导空格，其后上游tab会被父仓库普通缩进规则误识别。添加专用whitespace属性；实际源码新增行仍在prepare中用--whitespace=error-all验证，不降低源码完整性校验。
+
+### 验证与范围
+
+- 根独立PowerShell7重新导出／应用完整补丁，所有固定文件与overlay SHA通过；C++20／-Werror的字节视图API类型检查通过。证据out/windows/research/root-cpp20-review.log及准备回执。
+- 完整WinUI编译仍等待本次提交触发的Windows CI；Windows会话与Companion ABI草稿分别继续独立审查，未纳入此修复提交。

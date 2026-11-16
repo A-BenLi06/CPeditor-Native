@@ -2,7 +2,7 @@
   "schema_version": 1,
   "source_commit": "d9f60dbca65c2af54ced590d873d9438de32ce77",
   "patch": "committed-snapshot.patch",
-  "patch_sha256": "f9f37ebc99f2b242ad1c07faba6a7e0dab72f59d8292de0c8c079455ce25ca33",
+  "patch_sha256": "a7f211465bb753e62c3ec6ca6ca8f4768d1d651403c3b3b0800173c667ef3cb1",
   "files": [
     {
       "path": "WinUIEditor/CodeEditorControl.cpp",
@@ -42,12 +42,17 @@
     {
       "path": "scintilla/winui/ScintillaWin.cxx",
       "before_sha256": "8609a239af361949811979efbddc270dd05ee6d6b8a3fe3884dceb17508e6aa5",
-      "after_sha256": "2b628c8c71efd935fa54a7f9b04c60bd600bde1b4dcc99bbd4e3f3ef991b295f"
+      "after_sha256": "042397ec8ca0373bb83770c0c162967601287c2379a01a4f0a263a0a11981541"
     },
     {
       "path": "scintilla/winui/ScintillaWin.h",
       "before_sha256": "e5d6508e524bd55a0806d74d369ccad2102b080872d5e269f8881193b25216d1",
       "after_sha256": "157b0e7371f536473e4cb45bfd7afbc0f59104c3bc89920dda0b31a23932c59d"
+    },
+    {
+      "path": "scintilla/winui/PlatWin.cxx",
+      "before_sha256": "6d797abe806d2feebbfea8988fbafbb1b826dc5f3d6567ad55b3bb1a68259727",
+      "after_sha256": "9e1afa82bfd938a170d80c278cfa6a3a40c8491c1d90d19f7b48b645e4936a22"
     }
   ],
   "overlays": [
