@@ -69,3 +69,18 @@ Core 规则区分空输入、缺少预期输出与预期输出为空、checker �
 - ctest --preset dev -R '^domain$' 通过 1/1 测试入口，覆盖比较模式、混合换行、Unicode 空白、NUL、无效 UTF-8、代理对/组合字符位置往返和 SHA-256 标准向量（含百万字节多块输入）。
 - Qt 6.10 的 QChar 公开实现确认空白定义包含分隔类别及 U+0085 等控制例外；仍需后续实际 Qt 导出样本验证完整迁移。
 - 尚未通过 Windows 目标构建/运行、macOS 双编辑器 UI、完整进程/C ABI、性能或发布验证；这些保持进行中。
+
+## 2026-11-16T23:13:50+08:00 — 两端原生编辑器原型与运行入口
+
+### 改动与思路
+
+- 添加真实 WinUI 3/C++/WinRT/WinUIEdit Windows 宿主、固定 NuGet 依赖、UTF-8 文件事务／快照诊断、英文 resw 及 PowerShell 7 工具发现和构建启动脚本。
+- 添加 macOS SwiftUI/AppKit 双编辑器对照应用，固定 CodeEditorView/STTextView 及传递包锁，保留独立缓冲区与 UndoManager；添加英文原生资源、中文说明和第三方许可。
+- CodeEditorView 的组合输入通知早于 marked 状态更新，通过原生主线程事务结束后的 capture 修复，未插入计时延迟或强制结束输入。真实 UI 又发现撤销菜单接收者缺失，修复标准 AppKit undo:/redo: 响应链，并持续挂载文本组件以保留切换文档后的原生历史。
+- 添加可复现的 app 打包／启动／验证脚本及 Codex Run 入口。脚本保护未保存文档；根 agent 通过原生菜单处理本次创建的临时测试文本，未覆盖源码样本。
+
+### 验证与限制
+
+- macOS 27.0.1 arm64：Swift build、9 项模型／真实原生编辑器测试、脚本 --verify、ad-hoc codesign 与实际 app 启动通过；根 CUA 验证中文／emoji 粘贴、ST 菜单撤销及最新 CEV 菜单撤销，恢复源码与保存状态。
+- Windows：9 个 XML、34 条工程引用、7 个 XAML handler、18 个资源键、2 profiles、4 包版本、6 PNG 静态检查通过。没有 Windows SDK／PowerShell 主机，未执行 Windows 编译、部署或 UI。
+- M0 目标平台验收尚未通过：macOS 14／Intel、系统中文候选窗口、辅助功能、DPI／Spaces、UU／Windows 虚拟桌面及性能数据仍待采集。WinUIEdit 未公开 composition 事务，native-buffer 诊断不会被描述为已提交 Core 快照。

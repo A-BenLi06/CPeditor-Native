@@ -1,0 +1,104 @@
+<?xml version='1.0' encoding='utf-8'?>
+<root>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms</value>
+  </resheader>
+  <data xml:space="preserve" name="AppTitle">
+    <value>CP Editor Native</value>
+  </data>
+  <data xml:space="preserve" name="PackageDisplayName">
+    <value>CP Editor Native</value>
+  </data>
+  <data xml:space="preserve" name="PackageDescription">
+    <value>Native code editor for competitive programming.</value>
+  </data>
+  <data xml:space="preserve" name="Untitled">
+    <value>Untitled</value>
+  </data>
+  <data xml:space="preserve" name="UnsavedSuffix">
+    <value> *</value>
+  </data>
+  <data xml:space="preserve" name="WindowTitleFormat">
+    <value>{0} — {1}{2}</value>
+  </data>
+  <data xml:space="preserve" name="StatusFormat">
+    <value>{0}  |  Revision {1}  |  UTF-8: {2} bytes  |  Caret: {3}  |  Anchor: {4}</value>
+  </data>
+  <data xml:space="preserve" name="ErrorTitle">
+    <value>Unable to complete the action</value>
+  </data>
+  <data xml:space="preserve" name="OpenError">
+    <value>The file could not be opened.</value>
+  </data>
+  <data xml:space="preserve" name="SaveError">
+    <value>The file could not be saved.</value>
+  </data>
+  <data xml:space="preserve" name="ConfigurationError">
+    <value>The editor could not be initialized.</value>
+  </data>
+  <data xml:space="preserve" name="ErrorDetailsFormat">
+    <value>{0}
+
+{1}</value>
+  </data>
+  <data xml:space="preserve" name="Close">
+    <value>Close</value>
+  </data>
+  <data xml:space="preserve" name="UnsavedChangesTitle">
+    <value>Save changes?</value>
+  </data>
+  <data xml:space="preserve" name="UnsavedChangesContent">
+    <value>Do you want to save the changes to {0}?</value>
+  </data>
+  <data xml:space="preserve" name="Save">
+    <value>Save</value>
+  </data>
+  <data xml:space="preserve" name="Discard">
+    <value>Discard</value>
+  </data>
+  <data xml:space="preserve" name="Cancel">
+    <value>Cancel</value>
+  </data>
+  <data xml:space="preserve" name="SnapshotFiles">
+    <value>Editor snapshot</value>
+  </data>
+  <data xml:space="preserve" name="InitializationFailed">
+    <value>Editor initialization failed.</value>
+  </data>
+  <data xml:space="preserve" name="ProfileCpp">
+    <value>C++</value>
+  </data>
+  <data xml:space="preserve" name="ProfilePlain">
+    <value>Plain text</value>
+  </data>
+  <data xml:space="preserve" name="NewCommand.Label">
+    <value>New</value>
+  </data>
+  <data xml:space="preserve" name="OpenCommand.Label">
+    <value>Open</value>
+  </data>
+  <data xml:space="preserve" name="SaveCommand.Label">
+    <value>Save</value>
+  </data>
+  <data xml:space="preserve" name="SaveAsCommand.Label">
+    <value>Save as</value>
+  </data>
+  <data xml:space="preserve" name="ExportCommand.Label">
+    <value>Export snapshot</value>
+  </data>
+  <data xml:space="preserve" name="Profiles.PlaceholderText">
+    <value>Language</value>
+  </data>
+  <data xml:space="preserve" name="Profiles.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name">
+    <value>Language</value>
+  </data>
+</root>

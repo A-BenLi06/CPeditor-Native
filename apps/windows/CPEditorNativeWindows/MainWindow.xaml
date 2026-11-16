@@ -1,0 +1,32 @@
+<Window
+    x:Class="CPEditorNativeWindows.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:editor="using:WinUIEditor">
+    <Grid x:Name="Root" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <CommandBar x:Name="Commands" DefaultLabelPosition="Right" IsEnabled="False">
+            <AppBarButton x:Uid="NewCommand" Icon="Page2" Click="New_Click" />
+            <AppBarButton x:Uid="OpenCommand" Icon="OpenFile" Click="Open_Click" />
+            <AppBarButton x:Uid="SaveCommand" Icon="Save" Click="Save_Click" />
+            <AppBarButton x:Uid="SaveAsCommand" Icon="SaveLocal" Click="SaveAs_Click" />
+            <AppBarSeparator />
+            <AppBarButton x:Uid="ExportCommand" Icon="Download" Click="Export_Click" />
+            <CommandBar.Content>
+                <ComboBox x:Name="Profiles" x:Uid="Profiles" Margin="12,4"
+                          MinWidth="150" IsEnabled="False"
+                          SelectionChanged="Profile_SelectionChanged" />
+            </CommandBar.Content>
+        </CommandBar>
+        <editor:CodeEditorControl x:Name="CodeEditor" Grid.Row="1" IsEnabled="False"
+                                  Loaded="Editor_Loaded" />
+        <Border Grid.Row="2" Padding="12,6"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+            <TextBlock x:Name="Status" TextTrimming="CharacterEllipsis" />
+        </Border>
+    </Grid>
+</Window>
