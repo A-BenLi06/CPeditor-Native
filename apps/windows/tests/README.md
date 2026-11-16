@@ -120,3 +120,47 @@ pwsh -File ./tools/windows/verify.ps1 -Configuration Debug -Platform x64
 第 12 组确定性事务回归使用应用实际的 `PersistenceGate`，以 promise 控制真实 SourceStore 保存 B 的完成时刻；等待期间构造编辑器 C、样例 C，再确认最后事务无法先越过待完成写入。B 保存点完成并通过 generation 后才冻结完整 C，真实 Core 保存 MAX 并完整恢复源码、样例与 B 的磁盘保存点。回归还覆盖 pending Open、旧 generation 拒绝、损坏目标导致提交前失败解除能力，以及 MAX 副本已落盘但 locator 写入失败时保留两份原件和已消费预算。三套日志为 `session-tests-final-normal.log`、`session-tests-final-asan.log`、`session-tests-final-tsan.log`。这验证事务策略及真实 I/O，不等同于 WinUI 输入与控件事件的运行验证。
 
 第 13 组使用真实窗口共用的 `TestTextChange` 和 `FinalPersistenceLease`，确定性控制“C 已同步记录、界面刷新仍待派发”后才冻结最终候选，并通过真实 C ABI 保存、加载及 Native prepare 校验输入、期望输出与样例 revision。另覆盖 MAX 最后合法样例变更、后续拒绝不溢出、二进制展示不能回写、重复通知不推进版本，以及 gate 取得后模拟界面异常的 RAII 解除、竞争 lease 与幂等释放。三套严格重编和真实运行日志为 `session-tests-sync-normal.log`、`session-tests-sync-asan.log`、`session-tests-sync-tsan.log`，机器证据为 `session-synchronous-validation.json`。这些回归验证实际共享模型和 I/O；WinUI `BeforeTextChanging` / `TextChanging` 的派发时序须由原生输入验收补充。
+
+## Companion 原生桥接回归
+
+`CompanionTests.cpp` 直接编译正式 `CompanionModel.cpp`／`CompanionWorker.cpp`，并复用 `RecoveryModel`、`SessionWorker`、`SourceStore`、`RunnerConfiguration` 与完整 Core。它不使用持久化或 HTTP mock，Windows 使用 `wmain`、Winsock 和中文／emoji 路径；macOS 使用 POSIX socket。测试配置路径从命令参数读取。
+
+前五组回归覆盖：
+
+1. 配置、稳定 storage owner、重复／未来 owner 拒绝、Inbox 正文与硬链接别名保护、有界 UTF-8／NUL 预览、未来 provenance 的 Run 门禁。
+2. 真实 accept／duplicate／page／prepare／mark C ABI：完整原始 JSON、超出 uint64 的未知数字词素、NUL／CRLF 样例、空期望输出；prepare 期间旧文档／样例 C 的最新编辑保留；伪造 ID 与覆盖旧文档候选拒绝；真实恢复文件 receipt 之前不标记 Applied；已有 receipt 关闭文档后重放不重建；交互题保留并禁普通 Run。
+3. 真实 MAX-1 已保存 owner → 新文档／receipt／用户编辑一次保存到 MAX；实际 `PersistenceGate` 排除全部待完成 Open／apply；保存 receipt 但未 mark 时模拟重启，MAX 只确认已有 receipt；MAX 不再追加。
+4. engine 初始不监听；显式 start/info、真实 HTTP accept／持久 page、端口冲突 BindFailed、同一 engine 重试、stop/join、重新 start 与两个线程并发 close。
+5. 实际文件锁控制正在等待的 accept、有界命令队列拒绝超额、close 取消存储等待、结算排队 future，取消不创建 Inbox 正文。
+
+普通、完整 Core 与桥接双侧 instrument 的 ASan/UBSan／TSan 已在 macOS ARM64 实际执行，均退出 0；原始日志位于 `out/windows/research/companion-tests-normal.log`、`companion-tests-asan.log`、`companion-tests-tsan.log`。主机、含 UTC 偏移时间戳、命令、源码与 Core 归档 SHA-256 分别记录于 `companion-normal-validation.json`、`companion-asan-validation.json`、`companion-tsan-validation.json`。Apple ASan 使用 `detect_leaks=0`，不构成泄漏检测。静态 XAML／handler／资源／project 检查记录在 `companion-static-validation.json`，明确 `native_compile=false`／`native_ui_run=false`。
+
+普通复现命令（macOS，在仓库根目录）：
+
+```sh
+cmake -S . -B out/windows/research/companion-bridge -DBUILD_TESTING=OFF -DCMAKE_BUILD_TYPE=Debug
+cmake --build out/windows/research/companion-bridge --target cpn_core --parallel 4
+clang++ -std=c++20 -Wall -Wextra -Wpedantic -Werror \
+  -DCPN_PORTABLE_ADAPTER_TEST \
+  -Icore/include -Ithird_party/json/include -Iapps/windows/CPEditorNativeWindows \
+  apps/windows/CPEditorNativeWindows/CompanionModel.cpp \
+  apps/windows/CPEditorNativeWindows/CompanionWorker.cpp \
+  apps/windows/CPEditorNativeWindows/RecoveryModel.cpp \
+  apps/windows/CPEditorNativeWindows/SessionWorker.cpp \
+  apps/windows/CPEditorNativeWindows/SourceStore.cpp \
+  apps/windows/CPEditorNativeWindows/RunnerConfiguration.cpp \
+  apps/windows/tests/CompanionTests.cpp \
+  out/windows/research/companion-bridge/libcpn_core.a \
+  -o out/windows/research/companion-tests
+out/windows/research/companion-tests \
+  apps/windows/CPEditorNativeWindows/companion-settings.json \
+  apps/windows/CPEditorNativeWindows/recovery-settings.json
+```
+
+ASan/UBSan 将 Core 的 `CMAKE_CXX_FLAGS` 与桥接 clang 参数都设为 `-fsanitize=address,undefined -fno-omit-frame-pointer`；TSan 两侧都设为 `-fsanitize=thread -fno-omit-frame-pointer`。两种模式各自使用独立完整 Core 归档。Windows 编译需链接 `Ws2_32.lib`／`Mswsock.lib`，并遵循 Debug `/MDd`、Release `/MD` 与 Core 相同的 CRT 配置。
+
+上述便携回归不包含 C++/WinRT MainWindow／WinUI 控件。新增面板的编译、编辑与 Undo 保留、样例事件派发、首个 owner 的自动保存、MAX 最终 UI 能力、实际关闭及监听生命周期仍需 Windows 目标机脚本及人工场景验收；在对应证据出现前，不报告这些原生行为已验证。
+
+第六组使用正式 `RecoveryModel::logical_content()` 与 `CompanionModel::can_create_storage_binding()`，通过真实 C ABI 持久文件回归恢复启动和首次绑定预算：Loaded 普通版本／MAX-1／MAX 的未修改状态保持原磁盘内容与 token；实际补齐缺失本机偏好的归一化仍保存到 successor；首次 owner 在 MAX-1／MAX 写入前拒绝、不增加偏好、不创建 Inbox、不启动监听；MAX-2 则实际保存 owner 到 MAX-1，接收题目并将文档／receipt 一次保存到 MAX、完成 Applied。
+
+修复后的完整六组普通、ASan/UBSan、TSan 证据为 `out/windows/research/companion-boundary-tests-normal.log`、`companion-boundary-tests-asan.log`、`companion-boundary-tests-tsan.log`；精确编译／运行命令、UTC 偏移时间戳、实际主机、源码及归档 SHA-256 对应 `companion-boundary-normal-validation.json`、`companion-boundary-asan-validation.json`、`companion-boundary-tsan-validation.json`。三种桥接均使用 `-mmacosx-version-min=14.0`，ASan 仍明确 `detect_leaks=0`。对应 `companion-boundary-static-validation.json` 检查 baseline 在 prepare 之前捕获、预算 guard 在 owner 安装之前，以及 23 个 handler／156 条资源；静态检查不代表 Windows 原生执行。

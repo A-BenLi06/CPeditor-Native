@@ -15,12 +15,13 @@ $outputRoot = Join-Path $repositoryRoot "out/windows/$Platform/$Configuration"
 New-Item -ItemType Directory -Path $outputRoot -Force | Out-Null
 $reportPath = Join-Path $outputRoot 'build-result.json'
 $report = [ordered]@{
-    schemaVersion = 3; generatedAt = [DateTimeOffset]::Now.ToString('o')
+    schemaVersion = 4; generatedAt = [DateTimeOffset]::Now.ToString('o')
     host = Get-CpnWindowsHost; configuration = $Configuration; platform = $Platform
     stages = [Collections.Generic.List[object]]::new()
     coreBuildCompleted = $false; coreTestsExecuted = $false; coreTestsPassed = $false
     bridgeBuildCompleted = $false; bridgeTestsExecuted = $false; bridgeTestsPassed = $false
     sessionBuildCompleted = $false; sessionTestsExecuted = $false; sessionTestsPassed = $false
+    companionBuildCompleted = $false; companionTestsExecuted = $false; companionTestsPassed = $false
     sourceEditorBuildCompleted = $false; appBuildCompleted = $false
     deploymentRequested = $Deploy.IsPresent -or $Launch.IsPresent; deploymentCompleted = $false
     activationRequested = $false; uiValidationCompleted = $false; failure = $null
@@ -109,6 +110,28 @@ try {
         $report.sessionTestsPassed = $true
     } else {
         $report.sessionTestsSkippedReason = '输出架构与执行主机不一致；会话桥接仅完成构建，未执行。'
+    }
+    $companionTestExe = Join-Path $outputRoot 'companion-tests.exe'
+    $companionObjects = Join-Path $outputRoot 'companion-tests/obj'
+    New-Item -ItemType Directory -Path $companionObjects -Force | Out-Null
+    Invoke-CpnNativeStage -Name 'companion-build' -Executable $toolchain.compiler -Arguments @(
+        '/nologo', '/std:c++20', '/EHsc', '/W4', '/utf-8', $runtimeLibrary, '/DCPN_PORTABLE_ADAPTER_TEST',
+        "/I$(Join-Path $repositoryRoot 'core/include')", "/I$(Join-Path $repositoryRoot 'third_party/json/include')", "/I$bridgeSource",
+        (Join-Path $bridgeSource 'CompanionModel.cpp'), (Join-Path $bridgeSource 'CompanionWorker.cpp'),
+        (Join-Path $bridgeSource 'RecoveryModel.cpp'), (Join-Path $bridgeSource 'SessionWorker.cpp'),
+        (Join-Path $bridgeSource 'SourceStore.cpp'), (Join-Path $bridgeSource 'RunnerConfiguration.cpp'),
+        (Join-Path $repositoryRoot 'apps/windows/tests/CompanionTests.cpp'),
+        "/Fo$companionObjects\", "/Fe:$companionTestExe", '/link', $coreLibrary, 'Ws2_32.lib', 'Mswsock.lib'
+    ) -Report $report -OutputRoot $outputRoot
+    $report.companionBuildCompleted = $true
+    if ($nativeTestPlatform) {
+        $report.companionTestsExecuted = $true
+        Invoke-CpnNativeStage -Name 'companion-tests' -Executable $companionTestExe `
+            -Arguments @((Join-Path $bridgeSource 'companion-settings.json'), (Join-Path $bridgeSource 'recovery-settings.json')) `
+            -Report $report -OutputRoot $outputRoot
+        $report.companionTestsPassed = $true
+    } else {
+        $report.companionTestsSkippedReason = '输出架构与执行主机不一致；Companion 桥接仅完成构建，未执行。'
     }
     $sourceLockPath = Join-Path $repositoryRoot 'patches/winuiedit/source-lock.json'
     $sourceLock = Get-Content -LiteralPath $sourceLockPath -Raw | ConvertFrom-Json

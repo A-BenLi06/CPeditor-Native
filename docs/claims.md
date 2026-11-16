@@ -1,6 +1,6 @@
 # 实施任务登记
 
-登记时间：2026-11-17T04:00:35+08:00。
+登记时间：2026-11-17T04:10:39+08:00。
 
 | 所有者 | 独占范围 | 工作 | 状态 |
 | --- | --- | --- | --- |
@@ -11,6 +11,7 @@
 | companion_design | 新增 companion.hpp／companion.cpp／companion_tests.cpp、contracts/fixtures/companion、docs/companion.md | 共享纯 Companion 解码器 | 纯解码器、收件箱、HTTP及生命周期 ABI 已集成并通过完整 Core 验收；原生接入继续独立验收 |
 | companion_inbox | 新增 companion_inbox.hpp／companion_inbox.cpp／companion_inbox_tests.cpp 及独立夹具 | 有界持久收件箱、去重／更新与原子会话导入回执 | 实现／历史回归审查及完整 Core 验收通过，服务文件已释放；四个 C ABI 已实现并普通／ASan+UBSan 集成通过；HTTP与生命周期 ABI已实现，原生导入继续验收 |
 | companion_abi | api.h、api.cpp、companion_api_tests.cpp | 四个共享收件箱 C ABI 与预留写响应 | 实现／作者独立验收和根 15/15 集成通过；独立 910 个分页边界普通／ASan+UBSan 审查通过，文件已释放 |
+| windows_companion | apps/windows；root维护tools/windows | 原生Inbox、显式监听及回执确认 | 作者停止写入；根普通／完整ASan+UBSan六组、作者TSan六组通过；独立原两P2探针修复复验通过；PowerShell报告与20场景11项检查通过。新WinUI面板等下一轮CI及目标机UI，文件已释放 |
 | listener_abi | api.h、api.cpp、companion_listener_api_tests.cpp 与副作用边界修复 | 每引擎有界监听生命周期与有限写回应 | 根普通／完整严格警告 ASan+UBSan 17/17通过；独立44项按真实绑定／发布／inode替换的分配故障检查通过，SHA一致；原失败证据保留，文件已释放 |
 | companion_http | 新 companion_listener.hpp／.cpp／companion_listener_tests.cpp | 有界可取消回环 HTTP 与持久接纳 | 服务已停止写入并集成；root／独立审查修复自身 worker 重入 start 死锁；完整普通／ASan+UBSan 16/16 及 TSan HTTP 1/1 通过，文件已释放 |
 

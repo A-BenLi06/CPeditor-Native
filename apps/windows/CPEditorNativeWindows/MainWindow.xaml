@@ -28,24 +28,56 @@
                 <ColumnDefinition Width="2*" MinWidth="300" />
             </Grid.ColumnDefinitions>
             <Grid x:Name="EditorDeck" />
-            <Grid Grid.Column="1" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
-                </Grid.RowDefinitions>
-                <StackPanel Spacing="8" Margin="12">
-                    <ComboBox x:Name="Toolchains" x:Uid="Toolchains" HorizontalAlignment="Stretch"
-                              SelectionChanged="Toolchain_SelectionChanged" />
-                    <ComboBox x:Name="Comparisons" x:Uid="Comparisons" HorizontalAlignment="Stretch"
-                              SelectionChanged="Comparison_SelectionChanged" />
-                    <StackPanel Orientation="Horizontal" Spacing="8">
-                        <Button x:Name="RunButton" x:Uid="RunAll" Click="Run_Click" IsEnabled="False" />
-                        <Button x:Name="CancelButton" x:Uid="CancelRun" Click="Cancel_Click" IsEnabled="False" />
-                        <Button x:Name="AddTestButton" x:Uid="AddTest" Click="AddTest_Click" IsEnabled="False" />
-                    </StackPanel>
-                </StackPanel>
-                <Grid x:Name="TestDeck" Grid.Row="1" />
-            </Grid>
+            <TabView Grid.Column="1" IsAddTabButtonVisible="False" CanDragTabs="False" CanReorderTabs="False">
+                <TabViewItem x:Uid="TestsTab" IsClosable="False">
+                    <Grid Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <StackPanel Spacing="8" Margin="12">
+                            <ComboBox x:Name="Toolchains" x:Uid="Toolchains" HorizontalAlignment="Stretch"
+                                      SelectionChanged="Toolchain_SelectionChanged" />
+                            <ComboBox x:Name="Comparisons" x:Uid="Comparisons" HorizontalAlignment="Stretch"
+                                      SelectionChanged="Comparison_SelectionChanged" />
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Button x:Name="RunButton" x:Uid="RunAll" Click="Run_Click" IsEnabled="False" />
+                                <Button x:Name="CancelButton" x:Uid="CancelRun" Click="Cancel_Click" IsEnabled="False" />
+                                <Button x:Name="AddTestButton" x:Uid="AddTest" Click="AddTest_Click" IsEnabled="False" />
+                            </StackPanel>
+                        </StackPanel>
+                        <Grid x:Name="TestDeck" Grid.Row="1" />
+                    </Grid>
+                </TabViewItem>
+                <TabViewItem x:Uid="CompanionTab" IsClosable="False">
+                    <Grid Padding="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="2*" />
+                            <RowDefinition Height="3*" />
+                        </Grid.RowDefinitions>
+                        <StackPanel Spacing="8">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Button x:Name="ImportCompanionButton" x:Uid="ImportCompanion" Click="ImportCompanion_Click" IsEnabled="False" />
+                                <Button x:Name="RefreshCompanionButton" x:Uid="RefreshCompanion" Click="RefreshCompanion_Click" IsEnabled="False" />
+                                <Button x:Name="MoreCompanionButton" x:Uid="MoreCompanion" Click="MoreCompanion_Click" IsEnabled="False" />
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Button x:Name="StartCompanionButton" x:Uid="StartCompanion" Click="StartCompanion_Click" IsEnabled="False" />
+                                <Button x:Name="StopCompanionButton" x:Uid="StopCompanion" Click="StopCompanion_Click" IsEnabled="False" />
+                                <Button x:Name="ApplyCompanionButton" x:Uid="ApplyCompanion" Click="ApplyCompanion_Click" IsEnabled="False" />
+                            </StackPanel>
+                            <TextBlock x:Name="CompanionListenerStatus" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                        </StackPanel>
+                        <TextBlock x:Name="CompanionNotice" Grid.Row="1" Margin="0,8" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                        <ListView x:Name="CompanionItems" Grid.Row="2" SelectionMode="Single" SelectionChanged="Companion_SelectionChanged" />
+                        <ScrollViewer Grid.Row="3" VerticalScrollBarVisibility="Auto" Margin="0,8,0,0">
+                            <TextBlock x:Name="CompanionPreview" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                        </ScrollViewer>
+                    </Grid>
+                </TabViewItem>
+            </TabView>
         </Grid>
         <Border Grid.Row="3" Padding="12,6" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
             <StackPanel Spacing="6">

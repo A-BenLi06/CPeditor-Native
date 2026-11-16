@@ -8,6 +8,7 @@
 #include "RecoveryModel.h"
 #include "SourceStore.h"
 #include "PersistenceGate.h"
+#include "CompanionModel.h"
 #include <deque>
 
 namespace winrt::CPEditorNativeWindows::implementation {
@@ -24,6 +25,13 @@ struct MainWindow : MainWindowT<MainWindow> {
     winrt::fire_and_forget AddTest_Click(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     winrt::fire_and_forget RetryRecovery_Click(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     winrt::fire_and_forget SaveRecoveryAs_Click(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    winrt::fire_and_forget ImportCompanion_Click(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    winrt::fire_and_forget RefreshCompanion_Click(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    winrt::fire_and_forget MoreCompanion_Click(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    winrt::fire_and_forget ApplyCompanion_Click(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    winrt::fire_and_forget StartCompanion_Click(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    winrt::fire_and_forget StopCompanion_Click(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void Companion_SelectionChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
     void Tabs_SelectionChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
     winrt::fire_and_forget Tabs_CloseRequested(Microsoft::UI::Xaml::Controls::TabView const&, Microsoft::UI::Xaml::Controls::TabViewTabCloseRequestedEventArgs const&);
     void Profile_SelectionChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
@@ -79,14 +87,17 @@ private:
         std::optional<cpn::windows::RunRequest> pending_run;
         std::optional<cpn::windows::RunOutput> result;
         std::wstring notice;
+        cpn::windows::CompanionRunCapability run_capability{cpn::windows::CompanionRunCapability::ordinary};
     };
     struct PersistentOperation {
         explicit PersistentOperation(MainWindow&);
         ~PersistentOperation();
+        void finish() noexcept;
         PersistentOperation(PersistentOperation const&) = delete;
         PersistentOperation& operator=(PersistentOperation const&) = delete;
         MainWindow& owner;
         std::uint64_t generation;
+        bool active{true};
     };
     struct FinalRevisionLease {
         explicit FinalRevisionLease(MainWindow& value) : owner(value), capability(value.persistence_gate_) {}
@@ -97,6 +108,18 @@ private:
         cpn::windows::FinalPersistenceLease capability;
     };
     enum class Command { New, Open, Save, SaveAs, Export };
+    enum class CompanionCommand { Import, Refresh, More, Apply, Start, Stop };
+    Windows::Foundation::IAsyncAction CompanionAsync(CompanionCommand);
+    Windows::Foundation::IAsyncOperation<bool> EnsureCompanionStorageAsync();
+    Windows::Foundation::IAsyncAction ReadCompanionPageAsync(bool reset);
+    Windows::Foundation::IAsyncAction ApplyCompanionAsync(cpn::CompanionInboxItem);
+    void InitializeCompanionStorage();
+    void ValidateCompanionStorage() const;
+    void RenderCompanionItems();
+    void UpdateCompanionControls();
+    [[nodiscard]] cpn::CompanionInboxItem const* SelectedCompanionItem();
+    [[nodiscard]] winrt::hstring CompanionStatus(std::string const&, std::string const& detail = {}) const;
+    void InstallCompanionDelta(cpn::windows::CompanionDelta const&, cpn::WorkspaceSession const& base);
     Windows::Foundation::IAsyncAction ExecuteAsync(Command);
     Windows::Foundation::IAsyncOperation<bool> ConfirmDiscardAsync(std::shared_ptr<Document>);
     Windows::Foundation::IAsyncOperation<bool> SaveDocumentAsync(std::shared_ptr<Document>, bool);
@@ -109,6 +132,7 @@ private:
     winrt::fire_and_forget DocumentChanged(std::shared_ptr<Document>);
     static winrt::fire_and_forget CloseRunnerBackground(std::shared_ptr<cpn::windows::CoreRunner>);
     static winrt::fire_and_forget CloseSessionBackground(std::shared_ptr<cpn::windows::SessionWorker>);
+    static winrt::fire_and_forget CloseCompanionBackground(std::shared_ptr<cpn::windows::CompanionWorker>);
     void ScheduleDocumentChanged(std::weak_ptr<Document> const&);
     void ReceiveCoreEvent(cpn::windows::RunEvent);
     void StartRunner();
@@ -148,6 +172,14 @@ private:
     std::vector<std::shared_ptr<Document>> documents_;
     std::shared_ptr<cpn::windows::CoreRunner> runner_;
     cpn::windows::RecoveryConfiguration recovery_configuration_;
+    cpn::windows::CompanionConfiguration companion_configuration_;
+    std::shared_ptr<cpn::windows::CompanionWorker> companion_worker_;
+    std::optional<cpn::windows::CompanionBinding> companion_binding_;
+    cpn::windows::CompanionPagingState companion_page_;
+    cpn::windows::CompanionListenerResponse companion_listener_;
+    std::wstring companion_notice_;
+    bool companion_available_{};
+    bool companion_operating_{};
     std::shared_ptr<cpn::windows::SessionWorker> session_worker_;
     std::shared_ptr<cpn::windows::SourceStore> source_store_;
     cpn::SessionPaths recovery_paths_;

@@ -116,6 +116,10 @@ std::string RecoveryModel::serialize_location(std::filesystem::path const& path,
         throw std::invalid_argument("Recovery location preference exceeds its byte limit.");
     return result;
 }
+std::string RecoveryModel::logical_content(cpn::WorkspaceSession session) {
+    session.revision = 0;
+    return cpn::serialize_workspace_session(session);
+}
 PreparedRecovery RecoveryModel::prepare(cpn::WorkspaceSession session, RecoveryConfiguration const& config,
     RunnerConfiguration const& defaults, std::vector<std::string> const& profiles, std::string const& default_profile) {
     (void)cpn::serialize_workspace_session(session);

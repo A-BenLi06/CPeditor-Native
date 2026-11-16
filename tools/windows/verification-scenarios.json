@@ -164,14 +164,72 @@
     {
       "id": "revision-exhaustion",
       "name": "最终版本恢复与只读边界",
-      "method": "从带版本契约构造workspace、document、test revision分别为MAX-1及MAX的合法恢复文件，在WinUI窗口完成最后一次合法编辑/样例变更和恢复写入后重启；最大workspace导航、Run、复制、导出、另存恢复副本并关闭。 在MAX-1准备提交时挂起已有Open/Source Save，在完成前编辑C和样例C；确认等待完成后同段冻结/捕获。模拟提交前失败及MAX副本已写入但locator失败。 延后样例界面刷新，先同步输入C与期望C，再触发最终恢复；从test MAX-1连续输入，确认第二次输入在BeforeTextChanging即拒绝。对gate取得后的控件刷新注入异常，再执行Open/Save。",
-      "expected": "MAX会话完整恢复；达到文档上限后源码只读但可选择复制，达到test上限后相关控件修改前只读/停用；真正变更的workspace successor耗尽明确报错，不饱和复用revision；未变化最大会话核对磁盘后可关闭，导航不消耗版本。 真实异步命令先完成且admission generation有效；最后候选包含C与B保存点，冻结期间只允许临时导航；提交前失败解除，已替换MAX不开放无法持久化的C。 最终候选包含同步的样例C和精确revision，不依赖异步TextChanged；TextChanging不修改visual tree；预算拒绝不抛溢出。控件刷新异常后未提交gate由RAII释放，不永久冻结。",
+      "method": "从带版本契约构造workspace、document、test revision分别为MAX-1及MAX的合法恢复文件，在WinUI窗口完成最后一次合法编辑/样例变更和恢复写入后重启；最大workspace导航、Run、复制、导出、另存恢复副本并关闭。 在MAX-1准备提交时挂起已有Open/Source Save，在完成前编辑C和样例C；确认等待完成后同段冻结/捕获。模拟提交前失败及MAX副本已写入但locator失败。 延后样例界面刷新，先同步输入C与期望C，再触发最终恢复；从test MAX-1连续输入，确认第二次输入在BeforeTextChanging即拒绝。对gate取得后的控件刷新注入异常，再执行Open/Save。 另从未改Loaded MAX-1重启，确认没有自动写MAX；无持久Inbox owner时首次Import在MAX-1写前拒绝，MAX-2可先持久owner再用最后版本导入；有owner的MAX-1可最终Apply并确认Applied。",
+      "expected": "MAX会话完整恢复；达到文档上限后源码只读但可选择复制，达到test上限后相关控件修改前只读/停用；真正变更的workspace successor耗尽明确报错，不饱和复用revision；未变化最大会话核对磁盘后可关闭，导航不消耗版本。 真实异步命令先完成且admission generation有效；最后候选包含C与B保存点，冻结期间只允许临时导航；提交前失败解除，已替换MAX不开放无法持久化的C。 最终候选包含同步的样例C和精确revision，不依赖异步TextChanged；TextChanging不修改visual tree；预算拒绝不抛溢出。控件刷新异常后未提交gate由RAII释放，不永久冻结。 未改的Loaded原件建立实际before-prepare基线，不消耗版本；真实normalization变化仍保存。首owner不足预算时不写部分身份；MAX最终回执确认不产生新文档。",
       "evidence": [
         "原始与恢复后会话JSON和SHA256",
         "MAX-1到MAX操作录屏",
         "ReadOnly/复制/导出及关闭日志",
         "WinUI/IME实际主机版本与输入路径",
         "TextBox同步事件与延后界面刷新、异常后gate释放日志"
+      ]
+    },
+    {
+      "id": "companion-import",
+      "name": "Companion 原件导入与样例保真",
+      "method": "在独立恢复位置启动，使用 Inbox 的 Import JSON 选择 contracts/fixtures/companion/basic.json、含 CRLF／NUL／空 Expected 的载荷和畸形 JSON；观察 Pending，再显式 Apply。",
+      "expected": "只接纳完整有效载荷；原始 UTF-8、未知字段和大整数保留。应用后的文档、样例及回执来自同一候选；无效载荷不覆盖既有 Inbox／会话；来源 URL、文件名和限制不触发打开或编译。",
+      "evidence": [
+        "原载荷／Inbox／恢复文件 SHA256",
+        "应用前后样例 bytes_base64 与稳定 ID",
+        "状态和操作录像"
+      ]
+    },
+    {
+      "id": "companion-repeat-update",
+      "name": "重复、更新与删除防重放",
+      "method": "重复接纳相同载荷，编辑已导入源码并新增样例后接纳同来源的更新载荷；删除旧导入文档，重启并重新 Apply 已保存回执。",
+      "expected": "相同载荷不创建第二份文档；更新创建独立文档并保留旧源码和新增样例。持久回执在文档删除后仍有效，重启确认不重建已删除文档；刷新和分页不混合两个 Inbox revision。",
+      "evidence": [
+        "两轮载荷与 Inbox revision／digest",
+        "新旧文档及回执身份",
+        "重启前后会话 JSON",
+        "操作录像"
+      ]
+    },
+    {
+      "id": "companion-persistence",
+      "name": "应用持久化失败与稳定收件箱",
+      "method": "占用恢复锁或注入写入失败后 Apply，在后台保存期间继续编辑源码／样例，再解除冲突或另存恢复位置；重启后检查原 Inbox。另测 Inbox／恢复／source 的符号链接或硬链接别名。",
+      "expected": "只有实际恢复文件包含匹配回执才标 Applied；保存失败仍 Pending且保留新编辑。另存恢复不迁移或遗失已保存的 Inbox owner，重启继续读取同一 Inbox；跨身份备份及存储别名被拒绝，原件保留。",
+      "evidence": [
+        "锁持有者及取消记录",
+        "恢复与 Inbox实际替换标志",
+        "另存 locator／storage owner／重启路径",
+        "操作录像与原件 SHA256"
+      ]
+    },
+    {
+      "id": "companion-source-capability",
+      "name": "不支持来源的普通运行门禁",
+      "method": "导入 contracts/fixtures/companion/unsupported.json，并测试交互／文件 I/O来源及自身未知未来 provenance；Apply 后切换标签、重启并尝试 Run All。",
+      "expected": "不支持或无法验证的来源不能提交普通 stdio 任务；解释来源能力且保留原文。手建普通文档仍按已配置工具链运行；既有任务结果不覆盖其他标签。",
+      "evidence": [
+        "provenance 原文与重启记录",
+        "Run按钮／命令门禁录像",
+        "Core任务提交记录"
+      ]
+    },
+    {
+      "id": "companion-http",
+      "name": "真实扩展与回环监听生命周期",
+      "method": "显式启动监听，用实际显示端口发送 Competitive Companion 载荷；另占用配置端口启动，确认失败诊断；停止后检查连接拒绝，再在正文未完和持锁接纳时关闭应用。",
+      "expected": "只绑定127.0.0.1／可用::1；202仅在持久 Accepted／Duplicate之后返回，文件导入不自动开启服务。端口冲突可见且无其他监听遗留；停止／关闭取消并 join。TIME_WAIT造成重新绑定失败时显示真实诊断，不宣称立即复用。",
+      "evidence": [
+        "扩展版本与实际 HTTP 请求／响应",
+        "Get-NetTCPConnection 地址／owner／端口",
+        "Inbox原件与接纳状态",
+        "端口冲突、取消和线程结束记录"
       ]
     }
   ]

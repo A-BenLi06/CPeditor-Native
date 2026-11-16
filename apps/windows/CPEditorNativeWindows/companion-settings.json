@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "storageNamespace": "org.cpeditor.native.windows.companion.storage",
+  "inboxSuffix": ".companion.json",
+  "backupSuffix": ".companion.previous.json",
+  "lockSuffix": ".companion.lock",
+  "sourceTemplate": "",
+  "maximumImportBytes": 16777216,
+  "pageItems": 8,
+  "pageBytes": 67108864,
+  "previewBytes": 512,
+  "previewSamples": 8,
+  "lockTimeoutMilliseconds": 5000,
+  "maximumCommands": 16,
+  "maximumRequestBytes": 67108864,
+  "maximumRetainedOutputBytes": 67108864,
+  "listenerOptions": { "port": 10045, "enable_ipv6": true },
+  "statusLabels": {
+    "Accepted": "CompanionAccepted", "Duplicate": "CompanionDuplicate",
+    "Applied": "CompanionApplied", "AlreadyApplied": "CompanionAlreadyApplied",
+    "DurabilityUnknown": "CompanionDurabilityUnknown", "Started": "CompanionListening",
+    "AlreadyStarted": "CompanionListening", "Stopped": "CompanionStopped", "NotStarted": "CompanionStopped"
+  },
+  "issueLabels": {
+    "Interactive": "CompanionIssueInteractive", "TestType": "CompanionIssueTestType",
+    "InputMode": "CompanionIssueInputMode", "OutputMode": "CompanionIssueOutputMode"
+  }
+}

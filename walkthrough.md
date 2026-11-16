@@ -436,3 +436,19 @@ Core 规则区分空输入、缺少预期输出与预期输出为空、checker �
 - 根完整普通和 C／C++ 全归档严格警告 -Werror ASan／UBSan 各17/17通过，日志 out/core/verification/listener-root-ctest-final3.log 与 listener-root-sanitize-ctest-final3.log。
 - 独立44项检查全通过，含6次链接和38次执行；故障以实际绑定端口、已发布buffer和真实文件inode替换定位，覆盖四类发布、三个实际替换、7个绑定后分配点、停止与写后未知持久性。根复核所有源SHA与证据一致，原失败保留在 out/research/listener-abi-review，最终 verification-fixed.json。
 - Apple ASan detect_leaks=0，不声称LSan、最低系统或Windows原生验收。macOS／Windows Companion UI仍在独立复验，未纳入此提交；Windows完整宿主CI和目标Windows10／IME／UU／DPI／虚拟桌面继续分别验证。
+
+
+## 2026-11-17T04:10:39+08:00 — Windows 原生收件箱、显式监听与验证脚本集成
+
+### 改动与思路
+
+- CompanionModel集中配置、存储owner、来源能力、有界预览和导入delta校验；CompanionWorker用有界后台队列执行真实C ABI并关闭join。MainWindow增加独立Inbox页、文件导入、刷新／分页、显式start／stop与Apply；只有真实恢复回执持久化之后才mark Applied。英文产品文案放原生resw，配置与状态映射使用版本化JSON。
+- 持久Inbox owner与恢复另存位置解耦，源／恢复／Inbox所有别名保护、来源普通Run门禁、异步prepare后合并最新用户编辑、关闭协调器和最后版本lease均接入。Apply同步delta完成后释放自身operation，最后恢复保存仍有独占捕获条件。
+- 独立复审发现未改Loaded MAX-1启动会自动耗尽版本及首owner用掉最终预算。基线改从实际before-prepare记录生成，真实normalization仍消耗successor；首未持久owner在等待实际在途保存结束后先检查两版本预算，不留只保存身份却无法导入的部分结果。
+- PowerShell build schema4与verify schema3新增Companion编译／执行／通过字段并纳入自动成功条件，失败仍保留阶段结果。新增5项Companion人工场景，完整20项默认not_run／passed:null；Activation仅为启动请求。中文Windows说明及状态同步。
+
+### 验证与范围
+
+- 根实际严格普通／完整Core两侧ASan+UBSan六组编译与执行通过，证据 out/windows/research/root-companion；作者完整TSan六组通过，companion-boundary-tsan-validation.json。独立原两P2的普通／ASan探针复验通过，覆盖实际Loaded内容不写、真实normalization写MAX、未持久owner无副作用拒绝和已持久owner最后Apply／回执／mark／重放，证据companion-review/fixed-verification.json。
+- 独立Windows脚本11项检查通过，包括4文件PowerShell7 parser、隔离macOS真实拒绝、成功／三字段失败／跨架构／阶段失败fixture和AST架构门禁；源码SHA一致，证据script-companion-audit/verification.json。fixture只替换隔离build输出，不代表MSVC或UI。
+- 上一真实6fc3606 CI的WindowsServer2022 x64 Debug／Release已通过Core17/17、Runner／Session、WinUIEdit与完整宿主，报告归档out/windows/ci/43945292954。本提交新增WinUI面板尚待本次CI；目标Windows10、真实扩展、IME／UU／DPI／虚拟桌面仍须脚本实测，不把macOS便携检查当作Windows验收。

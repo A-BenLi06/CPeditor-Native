@@ -129,6 +129,8 @@
     <ClInclude Include="SessionWorker.h" />
     <ClInclude Include="RecoveryModel.h" />
     <ClInclude Include="SourceStore.h" />
+    <ClInclude Include="CompanionModel.h" />
+    <ClInclude Include="CompanionWorker.h" />
   </ItemGroup>
   <ItemGroup>
     <ApplicationDefinition Include="App.xaml" />
@@ -155,6 +157,9 @@
     <ClCompile Include="SessionWorker.cpp" />
     <ClCompile Include="RecoveryModel.cpp" />
     <ClCompile Include="SourceStore.cpp" />
+    <ClCompile Include="CompanionModel.cpp" />
+    <ClCompile Include="CompanionWorker.cpp" />
+    <ClCompile Include="MainWindow.Companion.cpp" />
   </ItemGroup>
   <ItemGroup>
     <Midl Include="App.idl">
@@ -186,6 +191,7 @@
     </Content>
     <Content Include="runner-settings.json" />
     <Content Include="recovery-settings.json" />
+    <Content Include="companion-settings.json" />
   </ItemGroup>
   <ItemGroup>
     <Image Include="Assets\Square150x150Logo.scale-200.png" />

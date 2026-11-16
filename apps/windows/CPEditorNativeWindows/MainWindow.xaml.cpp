@@ -59,6 +59,8 @@ MainWindow::MainWindow() {
             if (runner) CloseRunnerBackground(std::move(runner));
             auto session = std::exchange(self->session_worker_, {});
             if (session) CloseSessionBackground(std::move(session));
+            auto companion = std::exchange(self->companion_worker_, {});
+            if (companion) CloseCompanionBackground(std::move(companion));
         }
     });
 }
@@ -83,6 +85,11 @@ fire_and_forget MainWindow::Root_Loaded(IInspectable const&, RoutedEventArgs con
         runner_configuration_ = cpn::windows::RunnerConfiguration::parse(to_string(co_await FileIO::ReadTextAsync(file)));
         file = co_await StorageFile::GetFileFromApplicationUriAsync(Uri{L"ms-appx:///recovery-settings.json"});
         recovery_configuration_ = cpn::windows::RecoveryConfiguration::parse(to_string(co_await FileIO::ReadTextAsync(file)));
+        file = co_await StorageFile::GetFileFromApplicationUriAsync(Uri{L"ms-appx:///companion-settings.json"});
+        companion_configuration_ = cpn::windows::CompanionConfiguration::parse(to_string(co_await FileIO::ReadTextAsync(file)));
+        for (auto const& [status, resource] : companion_configuration_.status_labels) { (void)status; (void)strings_.get(to_hstring(resource)); }
+        for (auto const& [issue, resource] : companion_configuration_.issue_labels) { (void)issue; (void)strings_.get(to_hstring(resource)); }
+        companion_worker_ = std::make_shared<cpn::windows::CompanionWorker>(companion_configuration_.worker);
         for (auto& choice : runner_configuration_.toolchains) {
             file = co_await StorageFile::GetFileFromApplicationUriAsync(Uri{L"ms-appx:///Toolchains/" + to_hstring(choice.file)});
             choice.profile = nlohmann::json::parse(to_string(co_await FileIO::ReadTextAsync(file)));
@@ -104,6 +111,7 @@ fire_and_forget MainWindow::Root_Loaded(IInspectable const&, RoutedEventArgs con
         apartment_context ui; std::exception_ptr failure, location_failure;
         cpn::SessionLoadResult loaded; std::optional<cpn::windows::PreparedRecovery> prepared;
         std::optional<cpn::WorkspaceSession> frozen;
+        std::optional<std::string> loaded_content;
         co_await resume_background();
         try {
             try {
@@ -113,6 +121,9 @@ fire_and_forget MainWindow::Root_Loaded(IInspectable const&, RoutedEventArgs con
             std::filesystem::create_directories(recovery_file.parent_path());
             loaded = cpn::windows::RecoveryModel::load_response(worker->load(cpn::path_to_utf8(recovery_file)).get());
             if (loaded.status == cpn::SessionLoadStatus::loaded) {
+                // The baseline describes the real persisted state BEFORE native
+                // normalization. Startup only spends a revision if capture changes it.
+                loaded_content = cpn::windows::RecoveryModel::logical_content(*loaded.session);
                 if (cpn::windows::RevisionPolicy::exhausted(loaded.session->revision)) frozen = *loaded.session;
                 prepared = cpn::windows::RecoveryModel::prepare(std::move(*loaded.session), recovery_config, runner_defaults, profiles, default_profile);
             }
@@ -141,6 +152,7 @@ fire_and_forget MainWindow::Root_Loaded(IInspectable const&, RoutedEventArgs con
         recovery_disk_digest_ = loaded.disk_digest;
         if (prepared) {
             recovery_revision_ = prepared->session.revision;
+            recovery_saved_content_ = std::move(loaded_content);
             recovery_frozen_session_ = std::move(frozen); recovery_selected_baseline_ = prepared->session.selected_document_id;
             workspace_preserved_preferences_ = std::move(prepared->session.editor_preferences);
             auto selected = prepared->session.selected_document_id;
@@ -165,14 +177,11 @@ fire_and_forget MainWindow::Root_Loaded(IInspectable const&, RoutedEventArgs con
         recovery_timer_.Interval(recovery_configuration_.autosave_interval);
         const auto weak = get_weak();
         recovery_tick_ = recovery_timer_.Tick(auto_revoke, [weak](auto const&, auto const&) { if (auto self = weak.get()) self->SaveRecoveryAsync(); });
-        if (recovery_frozen_session_) {
-            auto baseline = CaptureWorkspace(); if (!baseline) throw_hresult(E_PENDING);
-            baseline->revision = 0; recovery_saved_content_ = cpn::serialize_workspace_session(*baseline);
-        }
-        recovery_initialized_ = true; StartRunner(); ScheduleRecoverySave(true); UpdateRecoveryControls();
+        recovery_initialized_ = true; InitializeCompanionStorage(); StartRunner(); ScheduleRecoverySave(true); UpdateRecoveryControls();
     } catch (...) { error = CurrentError(); }
     initializing_ = false; SetBusy(false);
     if (!error.empty()) co_await ShowErrorAsync(L"RecoveryError", error);
+    if (companion_available_) co_await CompanionAsync(CompanionCommand::Refresh);
 }
 void MainWindow::StartRunner() {
     core_ready_ = false; delivery_failure_reported_ = false;
@@ -194,6 +203,9 @@ fire_and_forget MainWindow::CloseRunnerBackground(std::shared_ptr<cpn::windows::
 fire_and_forget MainWindow::CloseSessionBackground(std::shared_ptr<cpn::windows::SessionWorker> worker) {
     co_await resume_background(); worker->close();
 }
+fire_and_forget MainWindow::CloseCompanionBackground(std::shared_ptr<cpn::windows::CompanionWorker> worker) {
+    co_await resume_background(); worker->close();
+}
 void MainWindow::SetBusy(bool value) {
     busy_ = value; UpdateControls();
     if (!value && recovery_pending_) ScheduleRecoverySave();
@@ -202,7 +214,8 @@ MainWindow::PersistentOperation::PersistentOperation(MainWindow& value) : owner(
     if (!owner.WorkspaceMutable()) throw hresult_error{E_PENDING, owner.strings_.get(L"PersistentOperationUnavailable")};
     generation = owner.persistence_gate_.begin_operation();
 }
-MainWindow::PersistentOperation::~PersistentOperation() { owner.persistence_gate_.end_operation(); }
+void MainWindow::PersistentOperation::finish() noexcept { if (active) { owner.persistence_gate_.end_operation(); active = false; } }
+MainWindow::PersistentOperation::~PersistentOperation() { finish(); }
 MainWindow::FinalRevisionLease::~FinalRevisionLease() noexcept {
     if (capability.acquired()) {
         capability.release();
@@ -234,6 +247,7 @@ void MainWindow::AddRestoredDocument(cpn::SessionDocument record, cpn::windows::
     if (documents_.size() >= runner_configuration_.maximum_documents)
         throw hresult_error{E_BOUNDS, strings_.get(L"DocumentLimit")};
     auto document = std::make_shared<Document>();
+    document->run_capability = cpn::windows::CompanionModel::run_capability(record);
     document->path = record.original_path.value_or(std::filesystem::path{});
     document->profile = std::wstring{to_hstring(record.language_id.value_or(to_string(hstring{configuration_.default_profile})))};
     document->toolchain = record.toolchain_profile_id.value_or(runner_configuration_.default_toolchain(to_string(hstring{document->profile})));
@@ -254,9 +268,23 @@ void MainWindow::AddRestoredDocument(cpn::SessionDocument record, cpn::windows::
     document->loaded = document->control.Loaded(auto_revoke, [weak, weak_document](auto const&, auto const&) {
         if (auto self = weak.get()) if (auto value = weak_document.lock()) self->InitializeDocument(std::move(value));
     });
-    documents_.push_back(document);
-    EditorDeck().Children().Append(document->control); TestDeck().Children().Append(document->test_view);
-    Tabs().TabItems().Append(document->tab); Tabs().SelectedItem(document->tab); SelectDocument(document);
+    const auto previous_tab = Tabs().SelectedItem();
+    documents_.reserve(documents_.size() + 1);
+    try {
+        documents_.push_back(document);
+        EditorDeck().Children().Append(document->control); TestDeck().Children().Append(document->test_view);
+        Tabs().TabItems().Append(document->tab); Tabs().SelectedItem(document->tab); SelectDocument(document);
+    } catch (...) {
+        const auto failure = std::current_exception(); document->closed = true; document->loaded.revoke();
+        if (document->adapter) document->adapter->dispose();
+        std::uint32_t index{};
+        try { if (EditorDeck().Children().IndexOf(document->control, index)) EditorDeck().Children().RemoveAt(index); } catch (...) {}
+        try { if (TestDeck().Children().IndexOf(document->test_view, index)) TestDeck().Children().RemoveAt(index); } catch (...) {}
+        try { if (Tabs().TabItems().IndexOf(document->tab, index)) Tabs().TabItems().RemoveAt(index); } catch (...) {}
+        std::erase(documents_, document);
+        try { Tabs().SelectedItem(previous_tab); SelectDocument(CurrentDocument()); } catch (...) {}
+        std::rethrow_exception(failure);
+    }
     ScheduleRecoverySave();
 }
 fire_and_forget MainWindow::InitializeDocument(std::shared_ptr<Document> document) {
@@ -449,6 +477,8 @@ void MainWindow::UpdateDocument(std::shared_ptr<Document> const& document) {
     auto const state = runner_configuration_.state_labels.find(document->run_state);
     auto state_text = state == runner_configuration_.state_labels.end() ? strings_.get(L"RunUnknown") : strings_.get(to_hstring(state->second));
     std::wstring run_status{state_text};
+    if (document->run_capability != cpn::windows::CompanionRunCapability::ordinary)
+        run_status += L"\n" + std::wstring{strings_.get(document->run_capability == cpn::windows::CompanionRunCapability::unsupported ? L"CompanionRunUnsupported" : L"CompanionRunUnavailable")};
     if (document->cancel_requested) run_status += L"  " + std::wstring{strings_.get(L"CancellationRequested")};
     if (document->result) {
         const bool stale = !available || document->result->revision != document->adapter->revision() ||
@@ -540,13 +570,16 @@ void MainWindow::UpdateControls() {
         }
     }
     RunButton().IsEnabled(initialized_ && core_ready_ && !shutting_down_ && !persistence_gate_.final_active() && editor_ready &&
-        !document->test_text_tracking_failed && !document->run_active);
+        !document->test_text_tracking_failed && !document->run_active && document->run_capability == cpn::windows::CompanionRunCapability::ordinary);
     CancelButton().IsEnabled(!shutting_down_ && document && document->run_active && !document->cancel_requested);
     AddTestButton().IsEnabled(metadata_mutable);
     UpdateRecoveryControls();
+    UpdateCompanionControls();
 }
 void MainWindow::SubmitPendingRun(std::shared_ptr<Document> const& document) {
     if (!document->pending_run || !document->adapter) return;
+    if (document->run_capability != cpn::windows::CompanionRunCapability::ordinary)
+        throw hresult_error{E_NOTIMPL, strings_.get(document->run_capability == cpn::windows::CompanionRunCapability::unsupported ? L"CompanionRunUnsupported" : L"CompanionRunUnavailable")};
     if (document->test_text_tracking_failed) throw hresult_error{E_FAIL, strings_.get(L"TestTextTrackingFailed")};
     if (!document->adapter->tracking_available()) throw hresult_error{E_FAIL, strings_.get(L"SnapshotTrackingFailed")};
     if (!document->adapter->committed_available()) return;
@@ -565,6 +598,8 @@ fire_and_forget MainWindow::Run_Click(IInspectable const&, RoutedEventArgs const
     auto lifetime = get_strong(); auto document = CurrentDocument(); hstring error;
     if (!document || !document->adapter || !core_ready_ || shutting_down_ || document->run_active || persistence_gate_.final_active()) co_return;
     try {
+        if (document->run_capability != cpn::windows::CompanionRunCapability::ordinary)
+            throw hresult_error{E_NOTIMPL, strings_.get(document->run_capability == cpn::windows::CompanionRunCapability::unsupported ? L"CompanionRunUnsupported" : L"CompanionRunUnavailable")};
         if (!document->adapter->tracking_available()) throw hresult_error{E_FAIL, strings_.get(L"SnapshotTrackingFailed")};
         if (document->test_text_tracking_failed) throw hresult_error{E_FAIL, strings_.get(L"TestTextTrackingFailed")};
         cpn::windows::RunRequest request; request.token = identity(); request.comparison = document->comparison;
@@ -939,6 +974,11 @@ bool MainWindow::IsReservedSourcePath(std::filesystem::path const& path) const {
         if (CompareStringOrdinal(candidate.c_str(), -1, target.c_str(), -1, TRUE) == CSTR_EQUAL) return true;
         if (std::filesystem::exists(candidate) && std::filesystem::exists(target) && std::filesystem::equivalent(candidate, target)) return true;
     }
+    if (companion_binding_) for (auto const* reserved : {&companion_binding_->paths.inbox_file, &companion_binding_->paths.backup_file, &companion_binding_->paths.lock_file}) {
+        const auto target = cpn::windows::SourceStore::resolve(*reserved);
+        if (CompareStringOrdinal(candidate.c_str(), -1, target.c_str(), -1, TRUE) == CSTR_EQUAL ||
+            (std::filesystem::exists(candidate) && std::filesystem::exists(target) && std::filesystem::equivalent(candidate, target))) return true;
+    }
     return false;
 }
 std::optional<std::filesystem::path> MainWindow::PickSavePath(hstring label, std::filesystem::path filename, std::wstring extension) {
@@ -1073,7 +1113,7 @@ fire_and_forget MainWindow::Tabs_CloseRequested(TabView const&, TabViewTabCloseR
 fire_and_forget MainWindow::OnClosing(Microsoft::UI::Windowing::AppWindow const&, Microsoft::UI::Windowing::AppWindowClosingEventArgs const& args) {
     auto lifetime = get_strong(); if (closing_allowed_) co_return; args.Cancel(true);
     // Pending Open/Save owns live documents. Its completion must run before another close attempt.
-    if (busy_ || shutting_down_ || persistence_gate_.operation_active()) co_return;
+    if (busy_ || shutting_down_ || companion_operating_ || persistence_gate_.operation_active()) co_return;
     recovery_flushing_ = true;
     SetBusy(true); hstring error; bool proceed = false; bool workers_stopped = false;
     try {
@@ -1084,11 +1124,12 @@ fire_and_forget MainWindow::OnClosing(Microsoft::UI::Windowing::AppWindow const&
             for (auto const& document : documents_) CancelRun(document);
             shutting_down_ = true; core_ready_ = false; UpdateControls();
             if (recovery_timer_) recovery_timer_.Stop();
-            auto runner = runner_; auto worker = session_worker_; const auto expected = recovery_disk_digest_;
+            auto runner = runner_; auto worker = session_worker_; auto companion = companion_worker_; const auto expected = recovery_disk_digest_;
             const auto recovery_file = recovery_paths_.recovery_file;
             apartment_context ui; std::exception_ptr failure; cpn::SessionLoadResult persisted;
             co_await resume_background();
             try {
+                if (companion) companion->close();
                 if (runner) runner->close();
                 // Check persistence after the potentially slow runner shutdown, before closing the Session worker.
                 persisted = cpn::windows::RecoveryModel::load_response(worker->load(cpn::path_to_utf8(recovery_file)).get());
@@ -1115,6 +1156,8 @@ fire_and_forget MainWindow::OnClosing(Microsoft::UI::Windowing::AppWindow const&
             }
             try {
                 session_worker_ = std::make_shared<cpn::windows::SessionWorker>(recovery_configuration_.options);
+                companion_worker_ = std::make_shared<cpn::windows::CompanionWorker>(companion_configuration_.worker);
+                companion_listener_ = {}; UpdateCompanionControls();
                 StartRunner();
             } catch (...) { error = CurrentError(); recovery_blocked_ = true; }
         }

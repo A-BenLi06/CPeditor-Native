@@ -38,6 +38,7 @@ struct PreparedRecovery {
     bool workspace_opaque{};
 };
 struct RecoveryModel {
+    [[nodiscard]] static std::string logical_content(cpn::WorkspaceSession);
     [[nodiscard]] static std::filesystem::path parse_location(std::string_view, RecoveryConfiguration const&);
     [[nodiscard]] static std::string serialize_location(std::filesystem::path const&, RecoveryConfiguration const&);
     [[nodiscard]] static PreparedRecovery prepare(cpn::WorkspaceSession, RecoveryConfiguration const&,

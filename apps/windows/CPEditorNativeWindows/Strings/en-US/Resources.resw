@@ -381,4 +381,52 @@ stderr:
   <data name="TestTextTrackingFailed" xml:space="preserve">
     <value>Sample text tracking failed. Running and recovery are blocked to preserve the recorded data.</value>
   </data>
+  <data name="TestsTab.Header" xml:space="preserve"><value>Samples</value></data>
+  <data name="CompanionTab.Header" xml:space="preserve"><value>Companion Inbox</value></data>
+  <data name="ImportCompanion.Content" xml:space="preserve"><value>Import JSON…</value></data>
+  <data name="RefreshCompanion.Content" xml:space="preserve"><value>Refresh</value></data>
+  <data name="MoreCompanion.Content" xml:space="preserve"><value>Load more</value></data>
+  <data name="ApplyCompanion.Content" xml:space="preserve"><value>Apply to workspace</value></data>
+  <data name="StartCompanion.Content" xml:space="preserve"><value>Start listener</value></data>
+  <data name="StopCompanion.Content" xml:space="preserve"><value>Stop listener</value></data>
+  <data name="CompanionReady" xml:space="preserve"><value>Ready to import problems. Start the listener to receive from Competitive Companion.</value></data>
+  <data name="CompanionStorageUnavailable" xml:space="preserve"><value>Companion storage is unavailable. Existing data was preserved.</value></data>
+  <data name="CompanionAwaitingRecovery" xml:space="preserve"><value>The problem remains pending. Save recovery successfully, then apply again.</value></data>
+  <data name="CompanionStatusFormat" xml:space="preserve"><value>Companion: {0}</value></data>
+  <data name="CompanionPending" xml:space="preserve"><value>Pending</value></data>
+  <data name="CompanionApplied" xml:space="preserve"><value>Applied</value></data>
+  <data name="CompanionRowFormat" xml:space="preserve"><value>{0}  |  {1}  |  {2} samples</value></data>
+  <data name="CompanionListenerFormat" xml:space="preserve"><value>Listening on localhost:{0}</value></data>
+  <data name="CompanionMetadataFormat" xml:space="preserve"><value>{0}
+Group: {1}
+URL: {2}
+Samples: {3}
+Import: {4}</value></data>
+  <data name="CompanionBatchFormat" xml:space="preserve"><value>Batch: {0}  |  {1} problems</value></data>
+  <data name="CompanionIssueUnknown" xml:space="preserve"><value>Ordinary input/output is unavailable: {0}</value></data>
+  <data name="CompanionIssueInteractive" xml:space="preserve"><value>Interactive problem: {0}. Ordinary sample runs are unavailable.</value></data>
+  <data name="CompanionIssueTestType" xml:space="preserve"><value>Test type {0} requires a different run mode.</value></data>
+  <data name="CompanionIssueInputMode" xml:space="preserve"><value>Input mode {0} requires file or custom input handling.</value></data>
+  <data name="CompanionIssueOutputMode" xml:space="preserve"><value>Output mode {0} requires file or custom output handling.</value></data>
+  <data name="CompanionPreviewTruncated" xml:space="preserve"><value>Sample preview is limited; the complete bytes are preserved in the inbox.</value></data>
+  <data name="CompanionSampleFormat" xml:space="preserve"><value>Sample {0}
+Input:
+{1}
+Expected output:
+{2}</value></data>
+  <data name="CompanionPayloadFormat" xml:space="preserve"><value>Original payload: {0} bytes
+{1}</value></data>
+  <data name="CompanionRevisionUnavailable" xml:space="preserve"><value>The workspace has no capacity for another imported document. The problem stays in the inbox.</value></data>
+  <data name="CompanionRefreshRequired" xml:space="preserve"><value>Refresh the inbox before applying this problem.</value></data>
+  <data name="CompanionPreserved" xml:space="preserve"><value>The action could not be completed. Existing inbox data and workspace receipts were preserved.</value></data>
+  <data name="CompanionError" xml:space="preserve"><value>Companion import</value></data>
+  <data name="CompanionAccepted" xml:space="preserve"><value>Accepted into the inbox. Apply it to open a document.</value></data>
+  <data name="CompanionDuplicate" xml:space="preserve"><value>This identical problem is already in the inbox.</value></data>
+  <data name="CompanionAlreadyApplied" xml:space="preserve"><value>This import was already applied; its saved receipt prevents duplicate documents.</value></data>
+  <data name="CompanionDurabilityUnknown" xml:space="preserve"><value>The file was replaced, but its durable storage could not be confirmed. Refresh before retrying.</value></data>
+  <data name="CompanionListening" xml:space="preserve"><value>The Companion listener is running.</value></data>
+  <data name="CompanionStopped" xml:space="preserve"><value>The Companion listener is stopped.</value></data>
+  <data name="CompanionRunUnsupported" xml:space="preserve"><value>This problem requires interactive or file input/output. Ordinary sample runs are unavailable.</value></data>
+  <data name="CompanionRunUnavailable" xml:space="preserve"><value>This problem has unsupported source metadata. Ordinary sample runs are unavailable until its metadata can be interpreted.</value></data>
+  <data name="CompanionStorageRevisionUnavailable" xml:space="preserve"><value>This workspace cannot save new Companion storage and an imported problem within its remaining revision budget. Existing data is unchanged.</value></data>
 </root>

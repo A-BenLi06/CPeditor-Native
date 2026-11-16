@@ -1,6 +1,6 @@
 # Windows 原生应用与共享 Core 接入
 
-这是 WinUI 3 + C++/WinRT + WinUIEdit 的原生应用工程。当前源码已编写多标签、每文档独立编辑器、committed 快照、源文件摘要保护、样例编辑、工具链选择、Run All / Cancel、会话恢复和共享 C ABI 协调。便携桥接测试已在 macOS 执行；本次会话恢复变更尚未在 Windows 编译、部署或运行，因此本文描述的原生行为仍需目标机验证。
+这是 WinUI 3 + C++/WinRT + WinUIEdit 的原生应用工程。当前源码已编写多标签、每文档独立编辑器、committed 快照、源文件摘要保护、样例编辑、工具链选择、Run All / Cancel、会话恢复和共享 C ABI 协调。便携桥接测试已在 macOS 执行；会话恢复已在 Windows Server 2022 x64 Debug／Release CI 编译通过；本轮新增 Companion 面板的编译等待下一轮 CI。部署、运行及目标 Windows10 原生行为仍需实测。
 
 主要目标是 Windows 10 22H2 专业工作站版。实际开发与本轮便携验证主机为 macOS ARM64，不能将其结果记为 Windows、WinUI、输入法、DPI 或 UU 远程验证通过。
 
@@ -138,3 +138,26 @@ pwsh -File ./tools/windows/verify.ps1 -Configuration Debug -Platform x64 -Deploy
 最终事务由 `FinalPersistenceLease` 在取得 gate 的同一调用内登记所有权，然后才刷新界面；界面更新或后续捕获抛异常时，RAII 解除尚未提交的 gate。正常完成先释放 lease 再更新控件，失败的第二个 lease 不能解除第一个 lease。
 
 控件和应用构建显式设置 MSBuild 标准属性 `GenerateProjectSpecificOutputFolder=false`，应用的项目引用保持同一属性和控件输出目录。Restore 后用独立 `/getProperty` 阶段记录并核对 `OutDir`、`TargetDir`、`TargetPath`，应用另核对 `AppxLayoutDir`；DLL、WinMD、PRI 和应用 EXE 均按明确路径校验，不能递归选择旧产物。该属性查询需要 MSBuild 17.8 或更新版本。真实 CI 曾显示控件输出被追加 `WinUIEditor` 子目录；本次修复已通过 PowerShell 属性/路径回归与语法校验，重新执行 Windows CI 后才能确认实际布局。
+
+## Companion 持久 Inbox 与显式监听
+
+本次加入 Windows 原生 `Companion Inbox` 标签页：读取本地 JSON、刷新、加载下一页、应用到工作区，以及手动开启／停止 Competitive Companion 的本机 HTTP 监听器。应用默认英文；按钮、状态、模式解释及预览格式均位于 `Strings/en-US/Resources.resw`。`companion-settings.json` 集中定义存储命名空间、文件后缀、源码模板、容量、分页、预览与监听配置。启动不会自动开启监听。
+
+`CompanionWorker` 使用专用、有界后台队列与 C ABI engine，承担分页、accept、prepare、mark_applied、listener start/stop/info。JSON 解析、载荷验证及 I/O 在后台执行；UI 更新回到 DispatcherQueue。窗口关闭取消并 join 该 engine 的监听器与命令，不让存储等待阻塞主线程。正式 Windows 项目链接 `Ws2_32.lib`／`Mswsock.lib`。
+
+第一次接收载荷或启动监听前，完整恢复文件必须实际保存稳定的 Inbox 三路径 owner。之后验证真实磁盘 token 与保存的 owner，不为尚未保存的用户编辑提前消费工作区 revision。`Save Recovery As…` 保留这个 owner，因此恢复位置改变不会生成另一套 Inbox 或遗失 Pending。源文件打开、保存、快照导出与新恢复事务均拒绝 Inbox 正文、备份或锁文件的路径别名；校验包含 Windows 大小写、符号链接解析和已有硬链接。
+
+导入采用两段持久事务：先把原始载荷写入 Inbox，再把新文档及 receipt 一起写入完整工作区恢复文件，最后从真实已保存文件验证 receipt 并标记 Applied。prepare 的候选在后台完整验证；安装时仅追加新文档与 receipt，保留现有编辑控件、Undo、活跃运行及 await 期间的最新编辑。挂载失败会回滚新增文档。恢复冲突、等待输入法提交或 mark 失败时保持 Pending；再次应用已有 receipt 只确认标记，关闭过的文档不会被重建。
+
+MAX-1 最后一次追加使用现有 `PersistenceGate`：先结束自身 apply scope，最终保存仍等待全部其他 Open／Save 操作。新文档和等待期间的修改使用一次合法 successor 保存到 MAX。MAX 恢复仍可读取 Inbox、预览、停止监听与确认已有的已保存 receipt；不新增工作区文档。
+
+分页显示使用稳定 import ID、严格递增 sequence、Inbox revision 与磁盘摘要；加载下一页发现快照变化会从零刷新，而不会混合两次快照。预览按配置限制样例数及每字段字节数，UTF-8 截断不拆分标量，NUL／非法 UTF-8 使用十六进制展示，原始载荷和空期望输出的字节仍完整保存。来源限制是元数据，不直接成为本机运行限额。
+
+来源 Run 门禁与共享 Core 的 `read_companion_document_provenance()` 一致：交互、非普通 testType、文件／其他 I/O 模式以及未来或无法解读的来源版本均保留在文档中，并显示普通 Run 不可用的原因；这些题目仍能导入、编辑、恢复和导出。
+
+目前已在 **macOS ARM64** 严格编译并实际运行应用共用模型／worker及完整 Core，普通、ASan/UBSan、TSan 六组回归均退出 0。XAML／project XML、事件处理函数及资源引用完成静态检查。**本次新增 WinUI 面板尚未在 Windows 编译和运行；控件派发、原生窗口关闭、IME、DPI、UU 与多虚拟桌面行为仍须目标机验证。** 具体命令、原始日志和覆盖边界见 `tests/README.md`；这些证据不把原生界面验收标为通过。
+
+恢复启动以加载时、原生 prepare 之前的实际磁盘逻辑内容建立基线。未修改的 Loaded／MAX-1／MAX 不为启动本身递增；真正补齐本机偏好等归一化变化仍需合法 successor。新 Inbox owner 若尚未实际持久且只剩最终 revision 或已耗尽，会在 owner 安装、载荷接收或监听启动之前明确拒绝，保留工作区和 Inbox；已有持久 owner 仍允许 MAX-1 的最后一次合法题目应用。首次绑定在等待中的恢复保存结束后重新检查实际剩余预算，不使用延时或关闭自动保存来回避边界。
+
+
+Windows CI `6fc3606` 已在 Server 2022 x64 Debug／Release 通过 Core 17/17、Runner／Session、WinUIEdit及完整宿主编译和产物检查。该版本尚未包含本轮新增Companion面板；后者由本次提交的CI继续验证。`verify.ps1` 已集成正式CompanionTests，自动通过必须同时完成Core、Runner、Session、Companion与原生宿主；20项人工场景保持未执行，包含导入保真、重复／更新、持久失败／另存、来源能力及真实扩展监听。
