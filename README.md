@@ -33,7 +33,7 @@ git -C references/cpeditor show 7.0.2:CMakeLists.txt
 git submodule status --recursive
 ```
 
-首次检出本仓库时，使用 `git clone --recurse-submodules <repository-url>`。远端仓库为 [A-BenLi06/CPeditor-Native](https://github.com/A-BenLi06/CPeditor-Native)，Git 远端名为 `origin`，本地 `main` 追踪 `origin/main`。当前本地与远端初始化提交的历史独立，代码同步前需要整合两边历史。为保证研究可复现，不要使用 `git submodule update --remote`：更新参考源码需要审查并提交 gitlink 变更，同时记录到 walkthrough。
+首次检出本仓库时，使用 `git clone --recurse-submodules <repository-url>`。远端仓库为 [A-BenLi06/CPeditor-Native](https://github.com/A-BenLi06/CPeditor-Native)，Git 远端名为 `origin`，本地 `main` 追踪 `origin/main`。本地与远端初始化提交的历史已通过保留双方父提交的合并整合；后续提交按已配置上游推送。为保证研究可复现，不要使用 `git submodule update --remote`：更新参考源码需要审查并提交 gitlink 变更，同时记录到 walkthrough。
 
 当前上游快照声明版本为 7.3.0，使用 Qt 6。用户提供的评估基于 7.0.2 标签和 Qt 5。设计同时参考二者，并在源码审查中保留版本区别。
 

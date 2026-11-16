@@ -243,3 +243,9 @@ Core 规则区分空输入、缺少预期输出与预期输出为空、checker �
 - 子agent普通及-Werror ASan／UBSan独立测试通过；4个fixture包含官方builder默认值回归与现代／旧载荷／不支持模式。未知字段、递归与escaped重复键、raw UTF8／surrogate／NFD／NUL、UINT64来源数据及每项预算均覆盖。
 - 根另在out/core/companion-review及companion-review-sanitize进行干净完整CMake构建，两套均13/13 CTest通过；sanitizer两侧完整instrument，显式detect_leaks=0，当前平台不支持LSan。
 - 尚未实现HTTP监听、导入收件箱／ABI、稳定ID分配、原生导入UI或实际扩展联调；解码器通过不计为完整Companion功能／目标Windows／产品完成。
+
+## 2026-11-17T01:15:41+08:00 — 保留双方历史并恢复上游同步
+
+- 发现并读取新提交的AGENTS要求：每次创建提交后立即推送到当前上游。补推Windows／Companion两个本地提交时，普通git push实际被non-fast-forward拒绝，完整本地提交保留。
+- 获取origin/main并确认远端只有初始化GPLv3 LICENSE；采用保留双方父提交的merge整合独立历史，不覆盖远端历史。唯一add/add冲突为同一GPLv3全文的空白差异；独立按空白分词逐字核对相同后保留远端完整文本。自有源码GPL-3.0-or-later声明和第三方来源不改变。
+- 更新README同步说明，合并只纳入LICENSE／README／本记录，不暂存原生checker正在进行的改动。完成合并提交后立即普通push，最终同步状态以实际推送和远端HEAD核对为准。
