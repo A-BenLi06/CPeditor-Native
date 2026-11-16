@@ -103,6 +103,46 @@ function Invoke-CpnNativeStage {
     }
     if ($nativeExit -ne 0) { throw "$Name 失败，退出码：$nativeExit。日志：$logPath" }
 }
+function Read-CpnMSBuildOutputProperties {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string] $LogPath,
+          [Parameter(Mandatory)][string] $ExpectedTargetDir,
+          [Parameter(Mandatory)][string] $ExpectedTargetPath,
+          [string] $ExpectedAppxLayoutDir)
+    try { $evaluation = Get-Content -LiteralPath $LogPath -Raw | ConvertFrom-Json -AsHashtable -ErrorAction Stop }
+    catch { throw "MSBuild 属性求值日志不是有效 JSON：$LogPath。$($_.Exception.Message)" }
+    if ($evaluation -isnot [Collections.IDictionary] -or -not $evaluation.Contains('Properties') -or
+        $evaluation.Properties -isnot [Collections.IDictionary]) {
+        throw "MSBuild 属性求值日志缺少 Properties 对象：$LogPath"
+    }
+    $properties = $evaluation.Properties
+    if (-not $properties.Contains('GenerateProjectSpecificOutputFolder') -or
+        $properties.GenerateProjectSpecificOutputFolder -isnot [string] -or
+        -not [string]::Equals($properties.GenerateProjectSpecificOutputFolder, 'false', [StringComparison]::OrdinalIgnoreCase)) {
+        throw "MSBuild 必须显式关闭项目名输出子目录：GenerateProjectSpecificOutputFolder=false。日志：$LogPath"
+    }
+    $expectedPaths = [ordered]@{ OutDir = $ExpectedTargetDir; TargetDir = $ExpectedTargetDir; TargetPath = $ExpectedTargetPath }
+    if ($PSBoundParameters.ContainsKey('ExpectedAppxLayoutDir')) { $expectedPaths.AppxLayoutDir = $ExpectedAppxLayoutDir }
+    foreach ($name in $expectedPaths.Keys) {
+        if (-not $properties.Contains($name) -or $properties[$name] -isnot [string] -or
+            [string]::IsNullOrWhiteSpace($properties[$name]) -or -not [IO.Path]::IsPathFullyQualified($properties[$name])) {
+            throw "MSBuild 属性 $name 必须是完整的绝对路径。日志：$LogPath"
+        }
+        try {
+            $actualPath = [IO.Path]::GetFullPath($properties[$name])
+            $expectedPath = [IO.Path]::GetFullPath($expectedPaths[$name])
+            if ($name -ne 'TargetPath') {
+                $actualPath = [IO.Path]::TrimEndingDirectorySeparator($actualPath)
+                $expectedPath = [IO.Path]::TrimEndingDirectorySeparator($expectedPath)
+            }
+        } catch { throw "MSBuild 属性 $name 路径无效。日志：$LogPath。$($_.Exception.Message)" }
+        # 此断言服务于 Windows 构建；目录比较遵循 Windows 的大小写规则。
+        if (-not [string]::Equals($actualPath, $expectedPath, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "MSBuild 属性 $name 与预期路径不一致：实际 $actualPath；预期 $expectedPath。日志：$LogPath"
+        }
+    }
+    return $properties
+}
 function Get-CpnPackageHashes {
     param([Parameter(Mandatory)][string] $PackagesConfig, [Parameter(Mandatory)][string] $PackagesRoot)
     [xml] $packages = Get-Content -LiteralPath $PackagesConfig -Raw
@@ -115,4 +155,4 @@ function Get-CpnPackageHashes {
         }
     })
 }
-Export-ModuleMember -Function Get-CpnWindowsHost, Get-CpnWindowsToolchain, Invoke-CpnNativeStage, Get-CpnPackageHashes
+Export-ModuleMember -Function Get-CpnWindowsHost, Get-CpnWindowsToolchain, Invoke-CpnNativeStage, Read-CpnMSBuildOutputProperties, Get-CpnPackageHashes

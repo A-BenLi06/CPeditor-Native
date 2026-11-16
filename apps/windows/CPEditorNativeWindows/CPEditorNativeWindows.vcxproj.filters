@@ -16,7 +16,13 @@
     <ClInclude Include="CoreWire.h" />
     <ClInclude Include="CoreRunner.h" />
     <ClInclude Include="SaveBaseline.h" />
+    <ClInclude Include="RevisionPolicy.h" />
+    <ClInclude Include="PersistenceGate.h" />
+    <ClInclude Include="TestTextChange.h" />
     <ClInclude Include="RunnerConfiguration.h" />
+    <ClInclude Include="SessionWorker.h" />
+    <ClInclude Include="RecoveryModel.h" />
+    <ClInclude Include="SourceStore.h" />
   </ItemGroup>
   <ItemGroup>
     <ApplicationDefinition Include="App.xaml" />
@@ -34,6 +40,9 @@
     <ClCompile Include="CoreWire.cpp" />
     <ClCompile Include="CoreRunner.cpp" />
     <ClCompile Include="RunnerConfiguration.cpp" />
+    <ClCompile Include="SessionWorker.cpp" />
+    <ClCompile Include="RecoveryModel.cpp" />
+    <ClCompile Include="SourceStore.cpp" />
   </ItemGroup>
   <ItemGroup>
     <Midl Include="App.idl" />
@@ -54,6 +63,7 @@
     <Content Include="..\..\..\third_party\WinUIEdit\scintilla\License.txt" />
     <Content Include="..\..\..\third_party\WinUIEdit\lexilla\License.txt" />
     <Content Include="runner-settings.json" />
+    <Content Include="recovery-settings.json" />
   </ItemGroup>
   <ItemGroup>
     <Image Include="Assets\Square150x150Logo.scale-200.png" />

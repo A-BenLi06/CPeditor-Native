@@ -1,4 +1,4 @@
-<?xml version='1.0' encoding='utf-8'?>
+<?xml version="1.0" encoding="utf-8"?>
 <root>
   <resheader name="resmimetype">
     <value>text/microsoft-resx</value>
@@ -311,5 +311,74 @@ stderr:
   </data>
   <data xml:space="preserve" name="CoreDeliveryFailed">
     <value>The run coordinator could not deliver an event. Reopen the application to restart it.</value>
+  </data>
+  <data name="RetryRecovery.Content" xml:space="preserve">
+    <value>Retry Recovery Save</value>
+  </data>
+  <data name="SaveRecoveryAs.Content" xml:space="preserve">
+    <value>Save Recovery As…</value>
+  </data>
+  <data name="RecoveryFiles" xml:space="preserve">
+    <value>Recovery files</value>
+  </data>
+  <data name="RecoveryError" xml:space="preserve">
+    <value>Recovery</value>
+  </data>
+  <data name="RecoveryPreserved" xml:space="preserve">
+    <value>Recovery could not be saved. Existing files were preserved.</value>
+  </data>
+  <data name="RecoveryAwaitingCommittedText" xml:space="preserve">
+    <value>Recovery is waiting for committed editor text.</value>
+  </data>
+  <data name="RecoverySaving" xml:space="preserve">
+    <value>Saving recovery…</value>
+  </data>
+  <data name="RecoverySaved" xml:space="preserve">
+    <value>Recovery saved.</value>
+  </data>
+  <data name="RecoveryPreferencesLimited" xml:space="preserve">
+    <value>Recovery saved. This version cannot persist some native settings; existing preferences were preserved.</value>
+  </data>
+  <data name="RecoveryChooseNewLocation" xml:space="preserve">
+    <value>Choose a new, unused recovery location.</value>
+  </data>
+  <data name="RecoveryCloseBlocked" xml:space="preserve">
+    <value>Recovery could not be saved. Keep this window open, retry the save, or save recovery to a new location.</value>
+  </data>
+  <data name="ReservedRecoveryPath" xml:space="preserve">
+    <value>This path is reserved for recovery data.</value>
+  </data>
+  <data name="SourceSaveConflict" xml:space="preserve">
+    <value>The file changed on disk or could not be locked. Save to a different file or reopen the disk version.</value>
+  </data>
+  <data name="SourceDurabilityUnknown" xml:space="preserve">
+    <value>The file was replaced, but its durable storage could not be confirmed.</value>
+  </data>
+  <data name="BinaryTestInput" xml:space="preserve">
+    <value>Input (binary bytes preserved; read only)</value>
+  </data>
+  <data name="BinaryTestExpected" xml:space="preserve">
+    <value>Expected output (binary bytes preserved; read only)</value>
+  </data>
+  <data name="RecoveryCopyPreservedFormat" xml:space="preserve">
+    <value>A recovery copy was saved at {0}. Its startup location could not be confirmed; the previous location remains active.</value>
+  </data>
+  <data name="WorkspaceRevisionExhausted" xml:space="preserve">
+    <value>This workspace reached its revision limit. Saved data is read only; selection, copying, running, and export remain available.</value>
+  </data>
+  <data name="DocumentRevisionExhausted" xml:space="preserve">
+    <value>An editing revision reached its limit. The affected content or settings are read only and can still be copied or exported.</value>
+  </data>
+  <data name="FinalRevisionAwaitingOperations" xml:space="preserve">
+    <value>The final recovery revision is waiting for an existing open or save operation to finish.</value>
+  </data>
+  <data name="FinalRevisionCommitting" xml:space="preserve">
+    <value>Committing the final recovery revision. Persistent data is temporarily read only.</value>
+  </data>
+  <data name="PersistentOperationUnavailable" xml:space="preserve">
+    <value>This persistent operation has no current workspace capability. Its completed disk result remains preserved.</value>
+  </data>
+  <data name="TestTextTrackingFailed" xml:space="preserve">
+    <value>Sample text tracking failed. Running and recovery are blocked to preserve the recorded data.</value>
   </data>
 </root>

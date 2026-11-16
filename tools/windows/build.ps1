@@ -15,11 +15,12 @@ $outputRoot = Join-Path $repositoryRoot "out/windows/$Platform/$Configuration"
 New-Item -ItemType Directory -Path $outputRoot -Force | Out-Null
 $reportPath = Join-Path $outputRoot 'build-result.json'
 $report = [ordered]@{
-    schemaVersion = 2; generatedAt = [DateTimeOffset]::Now.ToString('o')
+    schemaVersion = 3; generatedAt = [DateTimeOffset]::Now.ToString('o')
     host = Get-CpnWindowsHost; configuration = $Configuration; platform = $Platform
     stages = [Collections.Generic.List[object]]::new()
     coreBuildCompleted = $false; coreTestsExecuted = $false; coreTestsPassed = $false
     bridgeBuildCompleted = $false; bridgeTestsExecuted = $false; bridgeTestsPassed = $false
+    sessionBuildCompleted = $false; sessionTestsExecuted = $false; sessionTestsPassed = $false
     sourceEditorBuildCompleted = $false; appBuildCompleted = $false
     deploymentRequested = $Deploy.IsPresent -or $Launch.IsPresent; deploymentCompleted = $false
     activationRequested = $false; uiValidationCompleted = $false; failure = $null
@@ -89,6 +90,26 @@ try {
             -Arguments @((Join-Path $bridgeSource 'runner-settings.json')) -Report $report -OutputRoot $outputRoot
         $report.bridgeTestsPassed = $true
     }
+    $sessionTestExe = Join-Path $outputRoot 'session-tests.exe'
+    $sessionObjects = Join-Path $outputRoot 'session-tests/obj'
+    New-Item -ItemType Directory -Path $sessionObjects -Force | Out-Null
+    Invoke-CpnNativeStage -Name 'session-build' -Executable $toolchain.compiler -Arguments @(
+        '/nologo', '/std:c++20', '/EHsc', '/W4', '/utf-8', $runtimeLibrary, '/DCPN_PORTABLE_ADAPTER_TEST',
+        "/I$(Join-Path $repositoryRoot 'core/include')", "/I$(Join-Path $repositoryRoot 'third_party/json/include')", "/I$bridgeSource",
+        (Join-Path $bridgeSource 'SessionWorker.cpp'), (Join-Path $bridgeSource 'RecoveryModel.cpp'),
+        (Join-Path $bridgeSource 'SourceStore.cpp'), (Join-Path $bridgeSource 'RunnerConfiguration.cpp'),
+        (Join-Path $repositoryRoot 'apps/windows/tests/SessionTests.cpp'),
+        "/Fo$sessionObjects\", "/Fe:$sessionTestExe", '/link', $coreLibrary
+    ) -Report $report -OutputRoot $outputRoot
+    $report.sessionBuildCompleted = $true
+    if ($nativeTestPlatform) {
+        $report.sessionTestsExecuted = $true
+        Invoke-CpnNativeStage -Name 'session-tests' -Executable $sessionTestExe `
+            -Arguments @((Join-Path $bridgeSource 'recovery-settings.json')) -Report $report -OutputRoot $outputRoot
+        $report.sessionTestsPassed = $true
+    } else {
+        $report.sessionTestsSkippedReason = '输出架构与执行主机不一致；会话桥接仅完成构建，未执行。'
+    }
     $sourceLockPath = Join-Path $repositoryRoot 'patches/winuiedit/source-lock.json'
     $sourceLock = Get-Content -LiteralPath $sourceLockPath -Raw | ConvertFrom-Json
     $sourceLockHash = (Get-FileHash -LiteralPath $sourceLockPath -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -101,11 +122,18 @@ try {
     $editorObject = Join-Path $outputRoot 'editor/obj'
     $editorGenerated = Join-Path $editorObject 'Generated Files'
     $sourceArguments = @($prepared.project, '/nologo', "/m:$Parallelism", "/p:Configuration=$Configuration",
-        "/p:Platform=$Platform", '/p:WinUIEditorUseWinUI3=true', "/p:WindowsTargetPlatformVersion=$($toolchain.windowsSdkVersion)",
+        "/p:Platform=$Platform", '/p:WinUIEditorUseWinUI3=true', '/p:GenerateProjectSpecificOutputFolder=false',
+        "/p:WindowsTargetPlatformVersion=$($toolchain.windowsSdkVersion)",
         "/p:SolutionDir=$($prepared.root)\", "/p:OutDir=$editorBinary\", "/p:IntDir=$editorObject\", "/p:GeneratedFilesDir=$editorGenerated\")
     Invoke-CpnNativeStage -Name 'editor-restore' -Executable $toolchain.msbuild -Arguments ($sourceArguments + @(
         '/t:Restore', '/p:RestorePackagesConfig=true', "/p:RestoreRepositoryPath=$sourcePackages", "/p:RestoreConfigFile=$nugetConfig"
     )) -Report $report -OutputRoot $outputRoot
+    # Restore 完成后独立求值；日志只含属性 JSON，不与编译输出混合。
+    Invoke-CpnNativeStage -Name 'editor-output-properties' -Executable $toolchain.msbuild -Arguments ($sourceArguments + @(
+        '/getProperty:OutDir,TargetDir,TargetPath,GenerateProjectSpecificOutputFolder'
+    )) -Report $report -OutputRoot $outputRoot
+    $report.editorOutputProperties = Read-CpnMSBuildOutputProperties -LogPath (Join-Path $outputRoot 'editor-output-properties.log') `
+        -ExpectedTargetDir $editorBinary -ExpectedTargetPath (Join-Path $editorBinary 'WinUIEditor.dll')
     Invoke-CpnNativeStage -Name 'editor-build' -Executable $toolchain.msbuild -Arguments ($sourceArguments + @('/t:Build', "/bl:$(Join-Path $outputRoot 'editor-build.binlog')")) -Report $report -OutputRoot $outputRoot
     $report.sourceEditorBuildCompleted = $true
     $report.editorPackageHashes = Get-CpnPackageHashes -PackagesConfig (Join-Path $prepared.root 'WinUIEditor/packages.config') -PackagesRoot $sourcePackages
@@ -116,7 +144,7 @@ try {
         $artifactPath = Join-Path $editorBinary $_
         [ordered]@{ path = $artifactPath; sha256 = (Get-FileHash -LiteralPath $artifactPath -Algorithm SHA256).Hash.ToLowerInvariant() }
     }
-    # The app's MSVC profile carries the discovered compiler environment into an Explorer-launched process.
+    # 将发现的 MSVC 编译环境写入配置，供从 Explorer 启动的应用使用。
     $generatedToolchains = Join-Path $outputRoot 'toolchains'
     New-Item -ItemType Directory -Path $generatedToolchains -Force | Out-Null
     $msvcProfile = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'profiles/cpp-msvc.json') -Raw | ConvertFrom-Json
@@ -129,8 +157,11 @@ try {
     $msvcProfile | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $generatedToolchains 'cpp-msvc.json') -Encoding utf8
     $appProject = Join-Path $repositoryRoot 'apps/windows/CPEditorNativeWindows/CPEditorNativeWindows.vcxproj'
     $appPackages = Join-Path $repositoryRoot 'apps/windows/packages'
+    $appExecutable = Join-Path $outputRoot 'CPEditorNativeWindows.exe'
+    $appLayout = Join-Path $outputRoot 'layout'
     $appArguments = @($appProject, '/nologo', "/m:$Parallelism", "/p:Configuration=$Configuration", "/p:Platform=$Platform",
-        '/p:WinUIEditorUseWinUI3=true', "/p:WindowsTargetPlatformVersion=$($toolchain.windowsSdkVersion)",
+        '/p:WinUIEditorUseWinUI3=true', '/p:GenerateProjectSpecificOutputFolder=false',
+        "/p:WindowsTargetPlatformVersion=$($toolchain.windowsSdkVersion)",
         "/p:CPNWinUIEditProject=$($prepared.project)", "/p:CPNEditorBinaryDir=$editorBinary\",
         "/p:CPNEditorObjectDir=$editorObject\", "/p:CPNEditorGeneratedDir=$editorGenerated\",
         "/p:CPNPreparedEditorRoot=$($prepared.root)\", "/p:CPNCoreLibraryDir=$coreLibraryDir",
@@ -138,12 +169,18 @@ try {
     Invoke-CpnNativeStage -Name 'app-restore' -Executable $toolchain.msbuild -Arguments ($appArguments + @(
         '/t:Restore', '/p:RestorePackagesConfig=true', "/p:RestoreRepositoryPath=$appPackages", "/p:RestoreConfigFile=$nugetConfig"
     )) -Report $report -OutputRoot $outputRoot
+    Invoke-CpnNativeStage -Name 'app-output-properties' -Executable $toolchain.msbuild -Arguments ($appArguments + @(
+        '/getProperty:OutDir,TargetDir,TargetPath,AppxLayoutDir,GenerateProjectSpecificOutputFolder'
+    )) -Report $report -OutputRoot $outputRoot
+    $report.appOutputProperties = Read-CpnMSBuildOutputProperties -LogPath (Join-Path $outputRoot 'app-output-properties.log') `
+        -ExpectedTargetDir $outputRoot -ExpectedTargetPath $appExecutable -ExpectedAppxLayoutDir $appLayout
     Invoke-CpnNativeStage -Name 'app-build' -Executable $toolchain.msbuild -Arguments ($appArguments + @('/t:Build', "/bl:$(Join-Path $outputRoot 'app-build.binlog')")) -Report $report -OutputRoot $outputRoot
+    if (-not (Test-Path -LiteralPath $appExecutable -PathType Leaf)) { throw "原生应用构建产物缺失：$appExecutable" }
     $report.appBuildCompleted = $true
     $report.appPackageHashes = Get-CpnPackageHashes -PackagesConfig (Join-Path (Split-Path $appProject) 'packages.config') -PackagesRoot $appPackages
-    $manifestPath = Join-Path $outputRoot 'layout/AppxManifest.xml'
+    $manifestPath = Join-Path $appLayout 'AppxManifest.xml'
     $report.layoutManifestPath = $manifestPath
-    $report.executablePath = Join-Path $outputRoot 'CPEditorNativeWindows.exe'
+    $report.executablePath = $appExecutable
     if ($Deploy -or $Launch) {
         if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw "缺少 MSIX layout 清单：$manifestPath" }
         Import-Module Appx -UseWindowsPowerShell -ErrorAction Stop

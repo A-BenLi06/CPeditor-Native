@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "defaultProfile": "cpp",
   "fallbackProfile": "plain",
-  "maxDocumentBytes": 33554432,
+  "maxDocumentBytes": 16777216,
   "tabWidth": 4,
   "profiles": [
     {

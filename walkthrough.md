@@ -385,3 +385,19 @@ Core 规则区分空输入、缺少预期输出与预期输出为空、checker �
 - c59c7a1 WindowsCI在CMake配置时正确拒绝Bundled Boost license SHA不一致；Git默认autocrlf把新许可证LF转换为CRLF。为third_party/licenses的锁定许可原文设置-text，保持官方字节及现有SHA，不改哈希值或关闭完整性检查。工作流加入.gitattributes变更触发。
 - 根用core.autocrlf=true导出完整独立index副本，许可SHA与官方lock完全一致；对该独立副本执行CMake配置通过，Boost版本／归档／源与捆绑许可验证仍保留。证据out/windows/research/root-license-autocrlf-configure.log。原失败日志out/windows/ci/43934149039保留。
 - 此修复不改变HTTP或判题语义；后续真实WindowsCI继续验证16项Core及控件／应用产物。Windows与macOS恢复草稿继续分别审查，不纳入提交。
+
+## 2026-11-17T03:10:39+08:00 — Windows 会话恢复、源文件事务与最终版本保存
+
+### 改动与思路
+
+- 新SessionWorker后台C ABI engine与有界队列／锁等待取消／并发close；RecoveryModel完整候选先校验再应用，保留稳定ID、raw样例／空与缺答案、BOM／CRLF／NUL、保存点与opaque偏好；SourceStore记录原始磁盘摘要，合作锁＋原子替换，新目标no-replace提交。
+- MainWindow接入自动恢复、Retry／SaveRecoveryAs、完整捕获及关闭后重新核对磁盘。位置偏好真正持久化后才采用新路径；locator失败保留旧paths／token、阻止普通Retry／关闭并显示副本位置。私有恢复／备份／锁／locator／SourceLocks及别名不能作为源文件或导出目标，导出改为不预建文件的COM picker。
+- UINT64_MAX是合法最终版本，允许原生恢复并以只读能力保留完整exact会话，未改变逻辑仍读取实际磁盘核对后可关闭。最后MAX-1提交先排除既有Open／SourceSave，FinalPersistenceLease在fallible UI之前登记所有权，同UI段冻结／捕获；普通保存允许继续编辑。MAX副本已写但locator失败也消费预算并保留exact副本，不能重新开放编辑丢C。
+- 独立复审依据官方WinUI文档确认TextChanged异步可丢最后样例；改用BeforeTextChanging同步预算拒绝和TextChanging同步更新raw bytes／checked revision，UI刷新派发到后续Dispatcher，禁止在同步事件修改visual tree。追踪异常显式拒绝运行／保存旧内容。两次独立probe复验C/MAX持久往返与gate异常释放均通过。
+- 真实4c18ee2 CI控件0 Errors但脚本错误假设OutDir不含project子目录。工程／ProjectReference／命令统一GenerateProjectSpecificOutputFolder=false；Restore后独立MSBuild17.8+ getProperty严格核对OutDir／TargetDir／TargetPath／AppxLayoutDir，构建后叶文件校验，不递归猜产物。
+
+### 验证与范围
+
+- 根独立严格普通及完整归档两侧ASan+UBSan13组真实Core／文件I/O通过，证据out/windows/research/root-sync-session/verification.json；作者普通／ASan+UBSan／TSan13组及XML/XAML/resource/static通过，session-synchronous-validation.json。AppleASan未启用LSan。独立原边界复验与13个OutDir路径／4个PowerShellParser／工程XML通过，final-review/fixed-boundary-evidence.json。
+- 根实际在macOS执行verify.ps1，预期退出1，automatedPassed=false、uiValidationCompleted=false、15个人工场景not_run／null；脚本包含目标Windows10／IME／UU／DPI／虚拟桌面及恢复事务的中文实测模板与JSON报告。
+- 本次提交Windows源码与PowerShell验证入口；完整MSVC／WinUI／TextChanging／IME／UU与目标机仍待执行，后续CI会继续提供真实失败或通过证据。macOS导入／版本修复及HTTP生命周期ABI草稿不纳入。

@@ -102,4 +102,4 @@ POSIX 使用 `flock`，Windows 使用 `LockFileEx`。锁文件保留，释放句
 
 macOS 普通与完整严格警告 ASan/UBSan 构建的 13 个 CTest 入口通过。会话与 ABI 测试覆盖未保存正文、稳定 ID／revision、原生未知偏好、NUL／0xFF、空／缺答案、损坏保留、两实例同 token 竞争、备份和恢复替换前后故障、缓冲区容量不足及取消。独立真实子进程验证跨进程排他锁与释放。
 
-macOS 原生会话接入阶段：30 项 Swift 模型／真实编辑器／Core ABI 测试和真实应用重启恢复、源文件冲突保护、另存及恢复后判题通过；详情见 [macOS 说明](../apps/macos/README.md)。Windows 会话 UI 尚待接入，Windows 后端仍需在目标主机编译和执行。
+macOS 原生会话接入阶段：30 项 Swift 模型／真实编辑器／Core ABI 测试和真实应用重启恢复、源文件冲突保护、另存及恢复后判题通过；详情见 [macOS 说明](../apps/macos/README.md)。Windows 会话 UI、独立 SessionWorker、严格 RecoveryModel、SourceStore、关闭屏障及 MAX 最终事务已接入源码；macOS 主机的 13 组真实 C ABI 便携测试与独立复审通过。Windows 原生编译、TextChanging／Scintilla、输入法和完整恢复行为仍需 CI／目标主机验证。

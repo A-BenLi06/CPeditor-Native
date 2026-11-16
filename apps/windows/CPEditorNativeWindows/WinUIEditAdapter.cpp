@@ -39,7 +39,23 @@ void WinUIEditAdapter::subscribe() {
         if (auto self = weak.lock(); self && !self->replacing_) self->notify();
     });
 }
-void WinUIEditAdapter::notify() const { if (changed_) changed_(); }
+void WinUIEditAdapter::update_read_only() const {
+    if (!editor_) return;
+    if (tracking_available() && committed_available()) {
+        try { document_exhausted_ = document_exhausted_ || RevisionPolicy::exhausted(revision()); }
+        catch (winrt::hresult_error const&) { document_exhausted_ = true; }
+    }
+    const bool readonly = workspace_read_only_ || document_exhausted_;
+    if (editor_.ReadOnly() != readonly) editor_.ReadOnly(readonly);
+}
+void WinUIEditAdapter::set_workspace_read_only(bool readonly) {
+    workspace_read_only_ = readonly; update_read_only();
+}
+void WinUIEditAdapter::notify() const {
+    // Apply the real revision limit synchronously at native committed availability, before another edit.
+    if (!replacing_) update_read_only();
+    if (changed_) changed_();
+}
 void WinUIEditAdapter::replace_document(std::string_view utf8) {
     if (!control_.IsCommittedSnapshotTrackingAvailable()) winrt::throw_hresult(E_FAIL);
     if (!control_.IsCommittedSnapshotAvailable()) winrt::throw_hresult(E_PENDING);
@@ -55,8 +71,9 @@ void WinUIEditAdapter::replace_document(std::string_view utf8) {
     winrt::Windows::Storage::Streams::Buffer data{static_cast<std::uint32_t>(utf8.size())};
     data.Length(static_cast<std::uint32_t>(utf8.size()));
     if (!utf8.empty()) std::memcpy(data.data(), utf8.data(), utf8.size());
-    replacing_ = true;
+    replacing_ = true; document_exhausted_ = false;
     try {
+        editor_.ReadOnly(false);
         editor_.ClearAll();
         if (!utf8.empty()) {
             editor_.AddTextFromBuffer(static_cast<std::int64_t>(utf8.size()), data);
@@ -67,6 +84,7 @@ void WinUIEditAdapter::replace_document(std::string_view utf8) {
         editor_.Anchor(0);
         document_id_ = text;
         native_revision_base_ = control_.CommittedRevision();
+        document_revision_base_ = 1;
         saved_.record_written(std::move(loaded_baseline));
         saved_.match_native_savepoint();
     } catch (...) {
@@ -75,6 +93,16 @@ void WinUIEditAdapter::replace_document(std::string_view utf8) {
     }
     replacing_ = false;
     notify();
+}
+void WinUIEditAdapter::restore_document(cpn::SessionDocument const& record, std::int64_t caret, std::int64_t anchor) {
+    replace_document(record.source_text);
+    document_id_ = std::wstring{winrt::to_hstring(record.document_id)};
+    document_revision_base_ = record.revision;
+    if (record.save_point) {
+        saved_.restore_digest(record.save_point->source_digest);
+        if (!saved_.compare_committed(record.revision, record.source_text)) { editor_.SetSavePoint(); saved_.match_native_savepoint(); }
+    } else saved_.mark_unwritten();
+    editor_.CurrentPos(caret); editor_.Anchor(anchor); notify();
 }
 void WinUIEditAdapter::set_language(std::wstring_view language) {
     control_.HighlightingLanguage(winrt::hstring{language});
@@ -89,10 +117,9 @@ bool WinUIEditAdapter::mark_saved(EditorSnapshot written_snapshot) {
     editor_.SetSavePoint(); saved_.match_native_savepoint(); notify(); return true;
 }
 std::uint64_t WinUIEditAdapter::revision() const {
-    const auto native = control_.CommittedRevision();
-    if (native < native_revision_base_ || native - native_revision_base_ == std::numeric_limits<std::uint64_t>::max())
-        winrt::throw_hresult(E_BOUNDS);
-    return native - native_revision_base_ + 1;
+    try { return RevisionPolicy::document(control_.CommittedRevision(), native_revision_base_, document_revision_base_); }
+    catch (std::overflow_error const&) { winrt::throw_hresult(E_BOUNDS); }
+
 }
 bool WinUIEditAdapter::committed_available() const { return control_.IsCommittedSnapshotAvailable(); }
 bool WinUIEditAdapter::tracking_available() const { return control_.IsCommittedSnapshotTrackingAvailable(); }
@@ -101,6 +128,7 @@ void WinUIEditAdapter::focus() { control_.Focus(winrt::Microsoft::UI::Xaml::Focu
 bool WinUIEditAdapter::dirty() const {
     // A preedit or tracking failure must never permit a destructive action to assume a clean document.
     if (!tracking_available() || !committed_available()) return true;
+    if (saved_.never_written()) return true;
     if (saved_.native_matches_disk()) return editor_.Modify();
     const auto current_revision = revision();
     if (auto cached = saved_.cached_dirty(current_revision)) return *cached;
@@ -121,12 +149,13 @@ EditorSnapshot WinUIEditAdapter::snapshot() const {
     std::uint64_t native_revision{};
     std::int64_t caret{}, anchor{};
     const auto bytes = control_.ReadCommittedText(native_revision, caret, anchor);
-    if (native_revision < native_revision_base_ || native_revision - native_revision_base_ == std::numeric_limits<std::uint64_t>::max())
-        winrt::throw_hresult(E_BOUNDS);
+    std::uint64_t revision{};
+    try { revision = RevisionPolicy::document(native_revision, native_revision_base_, document_revision_base_); }
+    catch (std::overflow_error const&) { winrt::throw_hresult(E_BOUNDS); }
     std::string utf8;
     if (bytes.Length()) utf8.assign(reinterpret_cast<char const*>(bytes.data()), bytes.Length());
     FileStore::validate_utf8(utf8);
-    return {document_id_, native_revision - native_revision_base_ + 1, std::move(utf8), caret, anchor};
+    return {document_id_, revision, std::move(utf8), caret, anchor};
 }
 void WinUIEditAdapter::dispose() noexcept {
     changed_ = {};

@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "directory": "Recovery",
+  "filename": "workspace.json",
+  "backupFilename": "previous.json",
+  "lockFilename": "lock",
+  "locationFilename": "recovery-location.json",
+  "sourceLockDirectory": "SourceLocks",
+  "workspaceNamespace": "org.cpeditor.native.windows.workspace",
+  "documentNamespace": "org.cpeditor.native.windows.document",
+  "lockTimeoutMilliseconds": 5000,
+  "autosaveMilliseconds": 2000,
+  "maximumCommands": 16,
+  "maximumRequestBytes": 67108864,
+  "maximumLocationBytes": 65536
+}

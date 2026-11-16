@@ -10,11 +10,11 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
         <CommandBar x:Name="Commands" DefaultLabelPosition="Right" IsEnabled="False">
-            <AppBarButton x:Uid="NewCommand" Icon="Page2" Click="New_Click" />
-            <AppBarButton x:Uid="OpenCommand" Icon="OpenFile" Click="Open_Click" />
-            <AppBarButton x:Uid="SaveCommand" Icon="Save" Click="Save_Click" />
-            <AppBarButton x:Uid="SaveAsCommand" Icon="SaveLocal" Click="SaveAs_Click" />
-            <AppBarButton x:Uid="ExportCommand" Icon="Download" Click="Export_Click" />
+            <AppBarButton x:Name="NewButton" x:Uid="NewCommand" Icon="Page2" Click="New_Click" />
+            <AppBarButton x:Name="OpenButton" x:Uid="OpenCommand" Icon="OpenFile" Click="Open_Click" />
+            <AppBarButton x:Name="SaveButton" x:Uid="SaveCommand" Icon="Save" Click="Save_Click" />
+            <AppBarButton x:Name="SaveAsButton" x:Uid="SaveAsCommand" Icon="SaveLocal" Click="SaveAs_Click" />
+            <AppBarButton x:Name="ExportButton" x:Uid="ExportCommand" Icon="Download" Click="Export_Click" />
             <CommandBar.Content>
                 <ComboBox x:Name="Profiles" x:Uid="Profiles" Margin="12,4" MinWidth="140"
                           SelectionChanged="Profile_SelectionChanged" />
@@ -48,7 +48,14 @@
             </Grid>
         </Grid>
         <Border Grid.Row="3" Padding="12,6" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
-            <TextBlock x:Name="Status" TextTrimming="CharacterEllipsis" />
+            <StackPanel Spacing="6">
+                <TextBlock x:Name="Status" TextTrimming="CharacterEllipsis" />
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button x:Name="RetryRecoveryButton" x:Uid="RetryRecovery" Click="RetryRecovery_Click" IsEnabled="False" />
+                    <Button x:Name="SaveRecoveryAsButton" x:Uid="SaveRecoveryAs" Click="SaveRecoveryAs_Click" IsEnabled="False" />
+                    <TextBlock x:Name="RecoveryStatus" TextWrapping="Wrap" VerticalAlignment="Center" />
+                </StackPanel>
+            </StackPanel>
         </Border>
     </Grid>
 </Window>

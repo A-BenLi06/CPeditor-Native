@@ -17,9 +17,10 @@ $definition = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'verification-sc
 if ($definition.schema_version -ne 1) { throw '不支持的实测场景契约版本。' }
 $reportPath = Join-Path $outputRoot 'verification-report.json'
 $report = [ordered]@{
-    schemaVersion = 1; generatedAt = [DateTimeOffset]::Now.ToString('o')
+    schemaVersion = 2; generatedAt = [DateTimeOffset]::Now.ToString('o')
     host = Get-CpnWindowsHost; configuration = $Configuration; platform = $Platform
     automatedExecutionCompleted = $false; automatedPassed = $false
+    sessionBuildCompleted = $false; sessionTestsExecuted = $false; sessionTestsPassed = $false
     uiValidationCompleted = $false; activationRequested = $false; failure = $null
     manualScenarios = @($definition.scenarios | ForEach-Object {
         [ordered]@{ id = $_.id; name = $_.name; method = $_.method; expected = $_.expected
@@ -57,13 +58,24 @@ try {
     $report.automatedExecutionCompleted = $true
     $report.automatedPassed = $buildReport.coreBuildCompleted -and $buildReport.coreTestsExecuted -and
         $buildReport.coreTestsPassed -and $buildReport.bridgeBuildCompleted -and $buildReport.bridgeTestsExecuted -and
-        $buildReport.bridgeTestsPassed -and $buildReport.sourceEditorBuildCompleted -and $buildReport.appBuildCompleted
+        $buildReport.bridgeTestsPassed -and $buildReport.sessionBuildCompleted -and $buildReport.sessionTestsExecuted -and
+        $buildReport.sessionTestsPassed -and $buildReport.sourceEditorBuildCompleted -and $buildReport.appBuildCompleted
+    $report.sessionBuildCompleted = $buildReport.sessionBuildCompleted
+    $report.sessionTestsExecuted = $buildReport.sessionTestsExecuted
+    $report.sessionTestsPassed = $buildReport.sessionTestsPassed
     $report.activationRequested = $buildReport.activationRequested
     $report.deploymentCompleted = $buildReport.deploymentCompleted
 } catch {
     $report.failure = $_.Exception.Message
     $buildReportPath = Join-Path $outputRoot 'build-result.json'
-    if (Test-Path -LiteralPath $buildReportPath -PathType Leaf) { $report.buildReportPath = $buildReportPath }
+    if (Test-Path -LiteralPath $buildReportPath -PathType Leaf) {
+        $report.buildReportPath = $buildReportPath
+        $failedBuildReport = Get-Content -LiteralPath $buildReportPath -Raw | ConvertFrom-Json
+        foreach ($field in @('sessionBuildCompleted', 'sessionTestsExecuted', 'sessionTestsPassed')) {
+            $property = $failedBuildReport.PSObject.Properties[$field]
+            if ($null -ne $property) { $report[$field] = $property.Value }
+        }
+    }
     throw
 } finally {
     $report.completedAt = [DateTimeOffset]::Now.ToString('o')
