@@ -401,3 +401,9 @@ Core 规则区分空输入、缺少预期输出与预期输出为空、checker �
 - 根独立严格普通及完整归档两侧ASan+UBSan13组真实Core／文件I/O通过，证据out/windows/research/root-sync-session/verification.json；作者普通／ASan+UBSan／TSan13组及XML/XAML/resource/static通过，session-synchronous-validation.json。AppleASan未启用LSan。独立原边界复验与13个OutDir路径／4个PowerShellParser／工程XML通过，final-review/fixed-boundary-evidence.json。
 - 根实际在macOS执行verify.ps1，预期退出1，automatedPassed=false、uiValidationCompleted=false、15个人工场景not_run／null；脚本包含目标Windows10／IME／UU／DPI／虚拟桌面及恢复事务的中文实测模板与JSON报告。
 - 本次提交Windows源码与PowerShell验证入口；完整MSVC／WinUI／TextChanging／IME／UU与目标机仍待执行，后续CI会继续提供真实失败或通过证据。macOS导入／版本修复及HTTP生命周期ABI草稿不纳入。
+
+## 2026-11-17T03:22:33+08:00 — 修复 Windows XAML 应用声明单位
+
+- 594a9cf 的 Windows Server 2022 x64 Debug／Release 均实际通过 Core 16/16、正式 Runner 与 Session 桥接、WinUIEdit 编译和严格 OutDir／产物检查。宿主下一失败为 MDMERGE MDM2025：仅含注释的 App.idl 无法提供有效 App.winmd。日志和下载的分阶段报告保留在 out/windows/ci/43936593315，根汇总为 root-summary.json。
+- App.xaml.h 消费标准 App.xaml.g.h；App 启动由 XAML ApplicationDefinition 生成。将 App.idl 改为与固定 WinUIEdit CppDemoWinUI3 相同的空 namespace 声明单位，仅替换工程命名空间，不新增无用途 runtimeclass，也不关闭 MIDL／mdmerge。
+- 根逐字核对固定参考源码声明与本工程名替换结果，并完成 whitespace 检查；本机为 macOS，未执行 MIDL。后续 CI 继续验证宿主编译；目标 Windows10／IME／UU／DPI及多桌面仍待用户脚本实测。其他 Windows Companion、macOS 和 listener ABI 草稿不纳入本次修复提交。
