@@ -1,0 +1,3 @@
+[submodule "references/cpeditor"]
+	path = references/cpeditor
+	url = https://github.com/cpeditor/cpeditor.git

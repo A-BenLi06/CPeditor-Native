@@ -1,0 +1,13 @@
+# Local operating-system and IDE state
+.DS_Store
+Thumbs.db
+.vs/
+*.user
+xcuserdata/
+
+# Future build and measurement outputs
+/out/
+/build/
+/.build/
+/DerivedData/
+/artifacts/
