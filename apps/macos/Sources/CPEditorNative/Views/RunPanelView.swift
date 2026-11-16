@@ -4,8 +4,7 @@ import NativeCoreBridge
 struct RunPanelView: View {
     @Bindable var session: NativeEditorSession
     @Bindable var runner: RunController
-    @State private var editingProfile = false
-    @State private var profileJSON = ""
+    @State private var configurationDraft: ConfigurationJSONDraft?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -16,10 +15,7 @@ struct RunPanelView: View {
                 }.frame(maxWidth: 290).disabled(runner.isRunning)
                 Menu {
                     Button(L10n.string("load_toolchain")) { runner.loadProfile() }
-                    Button(L10n.string("edit_toolchain")) {
-                        do { profileJSON = try runner.selectedProfile?.jsonText() ?? ""; editingProfile = true }
-                        catch { runner.errorMessage = L10n.describe(error) }
-                    }
+                    Button(L10n.string("edit_toolchain"), action: beginProfileEdit)
                 } label: { Image(systemName: "gearshape") }
                     .help(L10n.string("toolchain")).disabled(runner.isRunning)
                 Spacer()
@@ -33,6 +29,20 @@ struct RunPanelView: View {
                     }.disabled(runner.selectedProfile == nil || runner.isClosed)
                 }
             }
+            HStack {
+                Toggle(L10n.string("external_checker"), isOn: Binding(
+                    get: { runner.externalCheckerEnabled },
+                    set: { enabled in
+                        if enabled, runner.externalChecker == nil { beginCheckerEdit() }
+                        else { runner.externalCheckerEnabled = enabled }
+                    }))
+                    .disabled(runner.checkerPreferencesAreOpaque || !runner.checkerPreferenceStorageAvailable || runner.isRunning)
+                Button(L10n.string("edit_checker")) { beginCheckerEdit() }
+                    .disabled(runner.checkerPreferencesAreOpaque || !runner.checkerPreferenceStorageAvailable || runner.isRunning)
+                if let checker = runner.externalChecker { Text(checker.executable).font(.caption).lineLimit(1).textSelection(.enabled) }
+                Spacer()
+                if runner.externalCheckerEnabled { Text(L10n.string("checker_expected_required")).font(.caption).foregroundStyle(.secondary) }
+            }
             HSplitView {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
@@ -43,7 +53,7 @@ struct RunPanelView: View {
                             Text(L10n.string("comparison_trailing")).tag(ComparisonPolicy.trailing)
                             Text(L10n.string("comparison_strict")).tag(ComparisonPolicy.strict)
                             Text(L10n.string("comparison_byte")).tag(ComparisonPolicy.byte)
-                        }.labelsHidden().frame(maxWidth: 170)
+                        }.labelsHidden().frame(maxWidth: 170).disabled(runner.externalCheckerEnabled)
                     }.disabled(runner.isRunning)
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 10) {
@@ -59,24 +69,30 @@ struct RunPanelView: View {
             }
         }
         .padding(10).frame(minHeight: 230, idealHeight: 320)
-        .sheet(isPresented: $editingProfile) {
-            VStack(alignment: .leading) {
-                Text(L10n.string("toolchain_json")).font(.headline)
-                TextEditor(text: $profileJSON).font(.system(.body, design: .monospaced))
-                HStack {
-                    Spacer()
-                    Button(L10n.string("cancel"), role: .cancel) { editingProfile = false }
-                    Button(L10n.string("apply")) {
-                        do { try runner.applyProfile(profileJSON); editingProfile = false }
-                        catch { runner.errorMessage = L10n.describe(error) }
-                    }.keyboardShortcut(.defaultAction)
+        .sheet(item: $configurationDraft) { draft in
+            ConfigurationJSONSheet(draft: draft) { jsonText in
+                switch draft.kind {
+                case .toolchain: try runner.applyProfile(jsonText)
+                case .checker: try runner.applyChecker(jsonText)
                 }
-            }.padding().frame(width: 680, height: 480)
+            }
         }
         .alert(L10n.string("error_title"), isPresented: Binding(
             get: { runner.errorMessage != nil }, set: { if !$0 { runner.errorMessage = nil } })) {
                 Button(L10n.string("ok"), role: .cancel) { runner.errorMessage = nil }
             } message: { Text(runner.errorMessage ?? "") }
+    }
+
+    private func beginCheckerEdit() {
+        do { configurationDraft = ConfigurationJSONDraft(kind: .checker, jsonText: try runner.checkerDraft()) }
+        catch { runner.errorMessage = L10n.describe(error) }
+    }
+
+    private func beginProfileEdit() {
+        do {
+            guard let profile = runner.selectedProfile else { throw WireError.invalidProfile }
+            configurationDraft = ConfigurationJSONDraft(kind: .toolchain, jsonText: try profile.jsonText())
+        } catch { runner.errorMessage = L10n.describe(error) }
     }
 }
 
@@ -128,7 +144,7 @@ struct RunResultsView: View {
                     Text(result.profileID).font(.caption).foregroundStyle(.secondary)
                     if !result.error.isEmpty { Text(result.error).textSelection(.enabled) }
                     if let build = result.build, !build.stderr.data.isEmpty || !build.stdout.data.isEmpty {
-                        DisclosureGroup(L10n.string("compiler_output")) { ProcessOutputView(report: build) }
+                        DisclosureGroup(L10n.string("compiler_output")) { ProcessOutputView(report: build, binaryPreviewBytes: runner.binaryPreviewBytes) }
                     }
                     ForEach(result.tests) { test in
                         VStack(alignment: .leading, spacing: 4) {
@@ -140,7 +156,9 @@ struct RunResultsView: View {
                             }
                             Text(test.testcaseID).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
                             if !test.detail.isEmpty { Text(test.detail).font(.caption).textSelection(.enabled) }
-                            ProcessOutputView(report: test.process)
+                            Text(String(format: L10n.string("solution_status_format"), test.process.termination)).font(.caption).foregroundStyle(.secondary)
+                            ProcessOutputView(report: test.process, binaryPreviewBytes: runner.binaryPreviewBytes)
+                            if let checker = test.checker { CheckerDiagnosticsView(report: checker, binaryPreviewBytes: runner.binaryPreviewBytes) }
                         }.padding(6).overlay(RoundedRectangle(cornerRadius: 4).stroke(.separator))
                     }
                 } else { Text(L10n.jobState(runner.state)).foregroundStyle(.secondary) }
@@ -149,21 +167,61 @@ struct RunResultsView: View {
     }
 }
 
+struct CheckerDiagnosticsView: View {
+    let report: CheckerReport
+    let binaryPreviewBytes: Int
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(L10n.string("checker_diagnostics")).font(.caption.bold())
+            Text(String(format: L10n.string("checker_verdict_format"), L10n.checkerVerdict(report.verdict))).font(.caption)
+            Text(report.processAttempted ? L10n.string("checker_process_attempted") : L10n.string("checker_process_not_attempted"))
+                .font(.caption).foregroundStyle(.secondary)
+            if !report.detail.isEmpty { Text(report.detail).font(.caption).textSelection(.enabled) }
+            if report.processAttempted {
+                Text(String(format: L10n.string("checker_status_format"), report.process.termination)).font(.caption)
+                if let exit = report.process.exitCode { Text(String(format: L10n.string("checker_exit_format"), exit)).font(.caption) }
+                if let signal = report.process.signal { Text(String(format: L10n.string("checker_signal_format"), signal)).font(.caption) }
+                if report.process.nativeError != 0 { Text(String(format: L10n.string("checker_native_error_format"), report.process.nativeError)).font(.caption) }
+                Text(String(format: L10n.string("elapsed_format"), report.process.elapsedMS)).font(.caption).foregroundStyle(.secondary)
+                Text(String(format: L10n.string("checker_bytes_format"), report.process.stdoutTotalBytes, report.process.stderrTotalBytes)).font(.caption)
+                if !report.process.detail.isEmpty { Text(report.process.detail).font(.caption).textSelection(.enabled) }
+                ProcessOutputView(report: report.process, binaryPreviewBytes: binaryPreviewBytes)
+            }
+        }.padding(6).background(.quaternary)
+    }
+}
+
 struct ProcessOutputView: View {
     let report: ProcessReport
+    let binaryPreviewBytes: Int
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             if !report.stdout.data.isEmpty {
                 Text(L10n.string("output_title")).font(.caption.bold())
-                Text(report.stdout.text).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                OutputBytesView(bytes: report.stdout, binaryPreviewBytes: binaryPreviewBytes)
             }
             if !report.stderr.data.isEmpty {
                 Text(L10n.string("stderr_title")).font(.caption.bold())
-                Text(report.stderr.text).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                OutputBytesView(bytes: report.stderr, binaryPreviewBytes: binaryPreviewBytes)
             }
             if report.stdoutTruncated || report.stderrTruncated {
                 Text(L10n.string("output_truncated")).font(.caption).foregroundStyle(.orange)
             }
         }.frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+struct OutputBytesView: View {
+    let bytes: WireBytes
+    let binaryPreviewBytes: Int
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(bytes.canDisplayAsText ? bytes.text : bytes.hexPreview(maximumBytes: binaryPreviewBytes))
+                .font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+            if !bytes.canDisplayAsText {
+                Text(String(format: L10n.string("output_binary_preview"), min(bytes.data.count, binaryPreviewBytes), UInt64(bytes.data.count)))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
     }
 }

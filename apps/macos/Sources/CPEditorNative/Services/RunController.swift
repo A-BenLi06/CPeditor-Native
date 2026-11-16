@@ -12,16 +12,20 @@ struct RunConfiguration: Decodable, Sendable {
     let comparison: ComparisonPolicy
     let maxImportBytes: Int
     let maxTestcases: Int
+    let binaryPreviewBytes: Int
+    let maxCheckerPreferenceBytes: Int
     enum CodingKeys: String, CodingKey {
         case schemaVersion = "schema_version", profileResources = "profile_resources"
         case defaultProfileID = "default_profile_id", pollingMilliseconds = "polling_milliseconds"
-        case drainEvents = "drain_events", comparison, maxImportBytes = "max_import_bytes", maxTestcases = "max_testcases"
+        case drainEvents = "drain_events", comparison, maxImportBytes = "max_import_bytes", maxTestcases = "max_testcases", binaryPreviewBytes = "binary_preview_bytes"
+        case maxCheckerPreferenceBytes = "max_checker_preference_bytes"
     }
     static func load() throws -> Self {
         guard let url = Bundle.module.url(forResource: "running", withExtension: "json") else { throw CocoaError(.fileNoSuchFile) }
         let configuration = try JSONDecoder().decode(Self.self, from: Data(contentsOf: url))
         guard configuration.schemaVersion == 1, configuration.maxImportBytes > 0,
-              configuration.maxTestcases > 0 else { throw WireError.unsupportedSchema }
+              configuration.maxTestcases > 0, (1...4096).contains(configuration.binaryPreviewBytes),
+              (1...65536).contains(configuration.maxCheckerPreferenceBytes) else { throw WireError.unsupportedSchema }
         return configuration
     }
 }
@@ -30,6 +34,11 @@ struct RunConfiguration: Decodable, Sendable {
     var profiles: [ToolchainProfile] = []
     var selectedProfileID = RawIdentifier("")
     var comparison: ComparisonPolicy = .trailing
+    var externalCheckerEnabled = false
+    private(set) var externalChecker: CheckerConfiguration?
+    var checkerPreferencesAreOpaque = false
+    var checkerPreferenceStorageAvailable = true
+    private(set) var binaryPreviewBytes = 0
     private(set) var isRunning = false
     private(set) var isClosed = false
     private(set) var pendingImportCount = 0
@@ -48,6 +57,7 @@ struct RunConfiguration: Decodable, Sendable {
             let config = try RunConfiguration.load()
             configuration = config
             comparison = config.comparison
+            binaryPreviewBytes = config.binaryPreviewBytes
             for resource in config.profileResources {
                 guard let url = Bundle.module.url(forResource: resource, withExtension: "json") else { throw CocoaError(.fileNoSuchFile) }
                 profiles.append(try JSONDecoder().decode(ToolchainProfile.self, from: Data(contentsOf: url)))
@@ -65,10 +75,12 @@ struct RunConfiguration: Decodable, Sendable {
         if let failure = session.captureFailure { errorMessage = L10n.describe(failure); return }
         guard profile.languageID.utf8.elementsEqual(session.document.languageID.utf8) else { errorMessage = L10n.string("toolchain_language_mismatch"); return }
         guard session.testCases.contains(where: \.enabled) else { errorMessage = L10n.string("enable_testcase"); return }
+        guard !externalCheckerEnabled || externalChecker != nil else { errorMessage = L10n.string("checker_configuration_required"); return }
         let snapshot = session.document.snapshot()
         session.toolchainProfileID = profile.id
         let request = BatchRequest(snapshot: snapshot, originalPath: session.document.url?.path,
-                                   toolchain: profile, tests: session.testCases, comparison: comparison)
+                                   toolchain: profile, tests: session.testCases, comparison: comparison,
+                                   externalChecker: externalCheckerEnabled ? externalChecker : nil)
         submitted = snapshot
         result = nil
         state = .queued
@@ -107,6 +119,34 @@ struct RunConfiguration: Decodable, Sendable {
     }
 
     func waitForCurrentRun() async { if let task { await task.value } }
+
+    func applyChecker(_ jsonText: String, enabled: Bool = true) throws {
+        guard !checkerPreferencesAreOpaque else { throw WireError.unsupportedSchema }
+        guard checkerPreferenceStorageAvailable else { throw CheckerConfigurationError("checker_error_preference_capacity") }
+        let candidate = try validateChecker(jsonText)
+        externalChecker = candidate; externalCheckerEnabled = enabled
+    }
+
+    func validateChecker(_ jsonText: String) throws -> CheckerConfiguration {
+        guard let configuration else { throw WireError.unsupportedSchema }
+        let candidate = try CheckerConfiguration(jsonText: jsonText)
+        // false 的 JSON 表示更长，确保开关的两种状态均能保存在同一偏好上限内。
+        let preference = CheckerNativePreferences(enabled: false, configurationJSON: candidate.originalJSON)
+        guard try JSONEncoder().encode(preference).count <= configuration.maxCheckerPreferenceBytes else {
+            throw CheckerConfigurationError("checker_error_preference_size")
+        }
+        return candidate
+    }
+
+    func restoreChecker(_ configuration: CheckerConfiguration?, enabled: Bool, opaque: Bool) {
+        externalChecker = configuration; externalCheckerEnabled = enabled; checkerPreferencesAreOpaque = opaque
+    }
+
+    func checkerDraft() throws -> String {
+        if let externalChecker { return externalChecker.originalJSON }
+        guard let url = Bundle.module.url(forResource: "checker", withExtension: "json") else { throw CocoaError(.fileNoSuchFile) }
+        return try String(contentsOf: url, encoding: .utf8)
+    }
 
     func applyProfile(_ jsonText: String) throws {
         let profile = try JSONDecoder().decode(ToolchainProfile.self, from: Data(jsonText.utf8))

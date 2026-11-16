@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "command": {
+    "executable": "checker",
+    "arguments": ["${input}", "${actual}", "${expected}"]
+  },
+  "limits": {
+    "spawn_timeout_ms": 5000,
+    "wall_timeout_ms": 2000,
+    "terminate_grace_ms": 100,
+    "drain_timeout_ms": 500,
+    "stdout_bytes": 1048576,
+    "stderr_bytes": 1048576,
+    "combined_bytes": 2097152
+  },
+  "accepted_exit_codes": [0],
+  "wrong_answer_exit_codes": [1, 2],
+  "inherit_environment": true,
+  "environment": []
+}

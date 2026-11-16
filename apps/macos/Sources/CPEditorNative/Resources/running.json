@@ -6,5 +6,7 @@
   "drain_events": 16,
   "comparison": "trailing",
   "max_import_bytes": 16777216,
-  "max_testcases": 4096
+  "max_testcases": 4096,
+  "binary_preview_bytes": 256,
+  "max_checker_preference_bytes": 65536
 }

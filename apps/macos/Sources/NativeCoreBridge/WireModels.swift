@@ -69,6 +69,10 @@ public struct WireBytes: Codable, Sendable, Equatable {
     }
     public var text: String { String(decoding: data, as: UTF8.self) }
     public var isUTF8: Bool { String(data: data, encoding: .utf8) != nil }
+    public var canDisplayAsText: Bool { isUTF8 && !data.contains { ($0 < 32 && ![9, 10, 13].contains($0)) || $0 == 127 } }
+    public func hexPreview(maximumBytes: Int) -> String {
+        data.prefix(max(0, maximumBytes)).map { String(format: "%02X", $0) }.joined(separator: " ")
+    }
 }
 
 public struct TestCaseInput: Codable, Sendable, Equatable, Identifiable {
@@ -100,12 +104,14 @@ public struct BatchRequest: Encodable, Sendable {
     let toolchain: ToolchainProfile
     let tests: [TestCaseInput]
     let comparison: ComparisonPolicy
-    enum CodingKeys: String, CodingKey { case schemaVersion = "schema_version", source, toolchain, tests, comparison }
+    let externalChecker: CheckerConfiguration?
+    enum CodingKeys: String, CodingKey { case schemaVersion = "schema_version", source, toolchain, tests, comparison, externalChecker = "external_checker" }
     public init(snapshot: SourceSnapshot, originalPath: String?, toolchain: ToolchainProfile,
-                tests: [TestCaseInput], comparison: ComparisonPolicy = .trailing) {
+                tests: [TestCaseInput], comparison: ComparisonPolicy = .trailing, externalChecker: CheckerConfiguration? = nil) {
         source = Source(documentID: snapshot.documentID, revision: snapshot.revision,
                         text: snapshot.text, originalPath: originalPath)
         self.toolchain = toolchain; self.tests = tests; self.comparison = comparison
+        self.externalChecker = externalChecker
     }
 }
 
@@ -123,15 +129,28 @@ public struct ProcessReport: Decodable, Sendable, Equatable {
     public let exitCode: Int?
     public let stdoutTruncated: Bool
     public let stderrTruncated: Bool
+    public let signal: Int?
+    public let nativeError: Int
+    public let stdoutTotalBytes: UInt64
+    public let stderrTotalBytes: UInt64
     enum CodingKeys: String, CodingKey {
         case termination, stdout, stderr, detail, elapsedMS = "elapsed_ms", exitCode = "exit_code"
         case stdoutTruncated = "stdout_truncated", stderrTruncated = "stderr_truncated"
+        case signal, nativeError = "native_error", stdoutTotalBytes = "stdout_total_bytes", stderrTotalBytes = "stderr_total_bytes"
     }
+}
+public struct CheckerReport: Decodable, Sendable, Equatable {
+    public let verdict: String
+    public let processAttempted: Bool
+    public let process: ProcessReport
+    public let detail: String
+    enum CodingKeys: String, CodingKey { case verdict, processAttempted = "process_attempted", process, detail }
 }
 public struct TestResult: Decodable, Sendable, Equatable, Identifiable {
     public let testcaseID: String; public var id: RawIdentifier { RawIdentifier(testcaseID) }
     public let verdict: String; public let process: ProcessReport; public let detail: String
-    enum CodingKeys: String, CodingKey { case testcaseID = "testcase_id", verdict, process, detail }
+    public let checker: CheckerReport?
+    enum CodingKeys: String, CodingKey { case testcaseID = "testcase_id", verdict, process, detail, checker }
 }
 public struct BatchResult: Decodable, Sendable, Equatable {
     public let schemaVersion: Int; public let documentID: RawIdentifier; public let revision: UInt64

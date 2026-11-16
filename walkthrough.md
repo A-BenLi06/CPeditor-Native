@@ -249,3 +249,19 @@ Core 规则区分空输入、缺少预期输出与预期输出为空、checker �
 - 发现并读取新提交的AGENTS要求：每次创建提交后立即推送到当前上游。补推Windows／Companion两个本地提交时，普通git push实际被non-fast-forward拒绝，完整本地提交保留。
 - 获取origin/main并确认远端只有初始化GPLv3 LICENSE；采用保留双方父提交的merge整合独立历史，不覆盖远端历史。唯一add/add冲突为同一GPLv3全文的空白差异；独立按空白分词逐字核对相同后保留远端完整文本。自有源码GPL-3.0-or-later声明和第三方来源不改变。
 - 更新README同步说明，合并只纳入LICENSE／README／本记录，不暂存原生checker正在进行的改动。完成合并提交后立即普通push，最终同步状态以实际推送和远端HEAD核对为准。
+
+## 2026-11-17T01:46:38+08:00 — macOS 外部 checker 与可靠配置窗口
+
+### 改动与思路
+
+- 接入版本 1 checker JSON、英文配置窗口／开关、严格有界校验与不可变 Run 请求；配置字段和状态在桥接模型集中声明，资源定义草稿及预览／偏好容量。
+- 分开显示解答与 checker verdict／进程是否尝试／退出或 signal／错误／耗时／总字节和截断；原始 stdout／stderr 为 Data，非文本输出使用有界 hex。空答案运行 checker，无答案保持 Unchecked，checker 错误不替代解答的 TLE／RE。
+- 独立偏好保存 enabled 与原始 JSON。修复 UTF-8 分隔符与 Swift 字素簇校验不一致、满 16 条 owner 偏好追加导致保存失败、v1 与未来版本共存的恢复拒绝；保留未知原件并在新增配置前校验槽位和完整偏好大小。
+- 根 CUA 实际发现首次 checker 配置窗口空白，工具链存在同一数据流模式。改为带身份／内容的单一 draft 和 sheet(item:)，独立窗口初始化并拥有文本／错误，取消丢弃草稿、有效 Apply 才关闭；使用原生 Escape／Return，没有延时或 onAppear 灌入。
+
+### 验证与范围
+
+- 根独立执行完整 Swift 测试：41 项通过（7 模型、21 原生／恢复／配置、13 C ABI／checker）；新增真实附属窗口覆盖首次正文、取消重开、无效与有效 Apply，参数化覆盖 checker/toolchain 与默认/已有配置。
+- 根实际打包启动并严格 codesign 验证通过。独立 CUA 通过 raw-byte AC／WA／独立 CheckerError 退出 7＋0.5／Unchecked、浮点版本拒绝、hex 与总字节、退出重启的禁用状态／原配置、修复后两个首次配置按钮入口及恢复后的再次运行。
+- 独立磁盘核对配置 JSON 字节、稳定 ID／revision、源码 SHA-256、input／expected 的 NUL／0xFF 与无答案一致。证据文件为 out/macos/checker-verification/20261117T012243+0800/verification.json，未修改参考 fixture 或默认恢复数据。
+- 此变更仅完成 macOS checker 接入，不计为 Windows／最低 macOS／系统 IME／UU／DPI／性能或完整产品验收。Windows 会话恢复与共享 Inbox 草稿分别在其他所有者范围内实施，不纳入本提交。

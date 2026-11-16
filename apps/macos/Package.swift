@@ -24,7 +24,7 @@ let package = Package(
             .linkedLibrary("cpn_core"), .linkedLibrary("c++"),
             .unsafeFlags(["-L", coreLibraryDirectory])
         ]),
-        .target(name: "NativeCoreBridge", dependencies: ["CPNativeCore", "NativeEditorModel"]),
+        .target(name: "NativeCoreBridge", dependencies: ["CPNativeCore", "NativeEditorModel"], resources: [.process("Resources")]),
         .executableTarget(name: "CPEditorNative", dependencies: [
             "NativeEditorModel", "NativeCoreBridge",
             .product(name: "CodeEditorView", package: "CodeEditorView"),

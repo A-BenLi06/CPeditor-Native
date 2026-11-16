@@ -58,4 +58,14 @@ enum L10n {
         case .failed: return string("job_failed")
         }
     }
+
+    static func checkerVerdict(_ verdict: String) -> String {
+        switch verdict {
+        case "Accepted": return string("checker_verdict_accepted")
+        case "WrongAnswer": return string("checker_verdict_wrong_answer")
+        case "Cancelled": return string("checker_verdict_cancelled")
+        case "CheckerError": return string("checker_verdict_error")
+        default: return String(format: string("checker_verdict_unknown"), verdict)
+        }
+    }
 }

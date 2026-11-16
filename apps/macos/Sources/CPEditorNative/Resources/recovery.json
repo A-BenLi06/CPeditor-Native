@@ -7,5 +7,7 @@
   "lockTimeoutMS": 5000,
   "workspaceNamespace": "org.cpeditor.native.macos.workspace",
   "documentNamespace": "org.cpeditor.native.macos.document",
+  "checkerNamespace": "org.cpeditor.native.macos.checker",
+  "maxPreferencesPerOwner": 16,
   "locationPreferenceKey": "org.cpeditor.native.macos.recovery-location.v1"
 }

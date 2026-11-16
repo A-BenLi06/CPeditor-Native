@@ -1,6 +1,6 @@
 # 外部 checker 与 testlib 二元判题
 
-共享 Core 已支持外部 checker；C++ `BatchRequest.external_checker`、批量 JSON/C ABI 和 CLI 使用同一配置语义。原生界面的 checker 配置与诊断面板尚待接入，Windows 运行证据待目标机采集。
+共享 Core 已支持外部 checker；C++ `BatchRequest.external_checker`、批量 JSON/C ABI 和 CLI 使用同一配置语义。macOS 原生界面已接入 checker 配置、独立诊断和会话持久化；Windows 原生配置仍待接入，运行证据待目标机采集。
 
 ## 执行与结果
 
@@ -57,6 +57,14 @@ checker 的超时、信号／异常结束、输出超限、创建／I/O 失败�
 
 当前进程能力不支持内存硬限额和硬启动期限；JSON 不接受未实现的 `memory_bytes`。这是本地程序运行器，不是安全沙箱；POSIX 进程组无法保证清理主动脱离进程组的程序。
 
+## macOS 原生接入
+
+原生测试面板的 **Configure Checker…** 编辑版本 1 JSON，Apply 先校验全部候选，成功后才更新有效配置；关闭 **External Checker** 保留配置。带内容的 `sheet(item:)` 草稿由独立窗口拥有编辑状态，首次打开显示当前正文，Escape 取消丢弃未应用文本。工具链配置使用同一呈现组件。界面和错误文案位于英文原生资源中。
+
+每次 Run All 按值复制 checker 配置；结果将解答状态与 checker 的 verdict、进程是否尝试、终止原因、退出码／signal、系统错误、耗时、采集字节和截断分别显示。NUL、控制字节或无效 UTF-8 输出以有界十六进制预览显示，原始输出 `Data` 保留。没有 expected 时仍为 Unchecked，expected 为空时实际运行 checker。
+
+独立版本化偏好保存开关和配置 JSON 的原始字符串。偏好总容量和单偏好 64 KiB 限额在 Apply 前校验；未知版本保持原样，包含 v1 与未来版本共存的情况。原生配置、会话存储和验证入口见 [macOS 说明](../apps/macos/README.md)。
+
 ## CLI
 
 仓库根目录构建 Core 后，在 PowerShell 7 中运行：
@@ -72,3 +80,7 @@ CLI 测试文件为 JSON 数组，复用 `parse_test_cases` 严格解析，最�
 ## 验证范围
 
 macOS 普通与完整严格警告 ASan/UBSan 的 12 项 CTest 通过。真实 helper 覆盖三个文件的 NUL／0xFF、Unicode 参数和可执行路径、AC／WA／空答案／无答案、checker 超时／异常／输出超限、默认评分码错误分类、独立结果序列化、C ABI 任务释放与取消。受控执行器测试覆盖协作取消、I/O 失败和超量输出预算。CLI 实际验证了 raw 字节、严格 schema、参数错误和原有三个 C++ 样例。Windows 编译与原生 UI 尚未完成相应验收。
+
+### 2026-11-17T01:46:38+08:00 — macOS 原生验收
+
+完整 41 项 Swift／原生／真实 Core 测试通过。根 agent 在独立 out 恢复文件中通过实际按钮验证原始字节 checker AC、比较 checker WA、默认退出 7 的独立 CheckerError／0.5 输出、无答案 Unchecked、非法浮点版本拒绝；退出重启后关闭状态和配置完整恢复。修复后的首次 checker／toolchain 配置窗口实际显示正文，取消保持原件，重新启用后判题链路再次通过。磁盘独立核对配置原始字节、文档 ID／revision、源码摘要和 NUL／0xFF 样例一致；应用打包启动及严格 codesign 校验通过。此证据来自 macOS 27.0.1 arm64，最低 macOS、Windows 系统 IME／UU 和性能矩阵仍待验收。

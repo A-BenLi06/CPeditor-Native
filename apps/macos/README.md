@@ -1,8 +1,8 @@
 # macOS 原生编辑器原型
 
-验证记录时间：2026-11-17T00:36:30+08:00。
+验证记录时间：2026-11-17T01:46:38+08:00。
 
-本目录实现 SwiftUI 窗口、菜单和文档侧栏，以及两个真实 AppKit 编辑器适配器。当前已完成 M0 双编辑器原型、共享 Core 的样例运行接入及会话恢复接入，组件集成不代表已选择生产编辑器，也不代表后续完整里程碑已验收。主项目仍以 Windows 10 22H2 为第一目标。
+本目录实现 SwiftUI 窗口、菜单和文档侧栏，以及两个真实 AppKit 编辑器适配器。当前已完成 M0 双编辑器原型、共享 Core 的样例运行、会话恢复及外部 checker 接入，组件集成不代表已选择生产编辑器，也不代表后续完整里程碑已验收。主项目仍以 Windows 10 22H2 为第一目标。
 
 ## 构建和启动
 
@@ -65,7 +65,7 @@ flowchart TD
 
 ## 自动验证证据
 
-当前 `swift test --package-path apps/macos` 通过 30 项测试（7 项模型测试、15 项原生编辑器／面板／恢复测试、8 项 C ABI 桥接测试）；双编辑器恢复的参数化测试执行两个组件实例。原生测试创建真实 `NSWindow` 和编辑器视图，不用空白占位控件替代组件。
+当前 `swift test --package-path apps/macos` 通过 41 项测试（7 项模型测试、21 项原生编辑器／面板／恢复／checker 测试、13 项 C ABI 桥接测试）；双编辑器恢复和满额偏好恢复分别执行两个参数化实例，配置呈现执行 checker／toolchain × 默认／已配置的四个实例。原生测试创建真实 `NSWindow` 和编辑器视图，不用空白占位控件替代组件。
 
 | 检查 | 当前证据 |
 | --- | --- |
@@ -96,7 +96,7 @@ flowchart TD
 
 `CoreCoordinator` 串行拥有引擎和任务句柄。每次 drain 先复制返回字节，再在 decode 成功或失败时都释放 buffer；终态事件已由 Core 确认后释放 job。协议消费失败时销毁引擎，保证任务、native buffers 和 worker 仍有界。ABI 1 暂无等待事件接口，因此仅在后台 actor 中按配置轮询，不在 MainActor 等待进程。取消按钮调用 Core cancel，继续 drain 到终态。关闭单个文档会取消该文档的运行。关闭窗口／退出应用先捕获全部已提交文本并保存恢复会话，再异步取消并 join 两个独立 Core 引擎，完成后才继续关闭；恢复保存失败提供单独导出或取消关闭。
 
-当前面板覆盖编译、普通样例执行和 Core 已实现的比较方式，尚未实现 clangd、SPJ、交互题、压力测试或完整竞赛导入工作流。旧源码标记只说明 source revision 关系；展示的是 Last Run 的不可变结果，不会把后来编辑的测试用例重新判为旧任务输入。
+当前面板覆盖编译、普通样例执行、内置比较和外部 checker 二元判题；尚未实现 clangd、checker 编译、完整评分、交互题、压力测试或完整竞赛导入工作流。旧源码标记只说明 source revision 关系；展示的是 Last Run 的不可变结果，不会把后来编辑的测试用例重新判为旧任务输入。
 
 ## 会话恢复与文件保存
 
@@ -121,6 +121,26 @@ CPN_CORE_PREBUILT=1 ./script/build_and_run.sh --verify \
 `NSFileCoordinator` 及 Core 锁仅协调遵守协议的 writer，摘要检测属于乐观校验，不能宣称阻止绕过协调的外部程序在最终替换时竞争。这轮已验证源文件冲突、受控协调 writer 阻塞期间的新编辑、恢复导出持锁时关闭拒绝和 flush 等待，以及真实 I/O 失败返回；尚未做断电／磁盘设备故障验证。两个原生组件的恢复均验证 BOM、CRLF、NUL、CJK、emoji 和选区精确往返；真实系统输入法与最低系统仍需目标机矩阵。
 
 
+## 外部 checker 原生面板
+
+测试面板提供 **External Checker** 开关和 **Configure Checker…** JSON 编辑器。默认关闭且没有配置，启用时先要求应用有效配置；应用配置后启用 checker，关闭开关仍保留配置。编辑器内显示校验错误，不改变已经应用的有效配置。内置 Comparison 选择在外部 checker 启用时禁用。版本 1 草稿位于 `Resources/checker.json`，用户需选择现有可执行程序及参数数组；应用不会编译 checker。
+
+checker 和 toolchain 配置统一使用带身份、类型和完整 JSON 的 `ConfigurationJSONDraft` 通过 `sheet(item:)` 呈现，`ConfigurationJSONSheet` 在创建时初始化自己拥有的文本及错误状态。首次前台 CUA 曾发现旧的布尔呈现状态与独立文本状态导致首次打开空白；当前数据流把呈现和载荷作为同一次状态更新，不用延时或 `onAppear` 再灌入文本。取消丢弃未应用草稿，再次打开重新读取已应用配置；Apply 校验失败保留文本并在 sheet 内显示错误，成功才关闭。Escape 和 Return 使用原生取消／默认动作快捷键。
+
+`NativeCoreBridge/CheckerConfiguration.swift` 按 [外部 checker 契约](../../docs/external-checker.md) 校验配置。专用有界 JSON 解析器保留整数类型并拒绝重复字段；配置／命令／limits／environment 各层拒绝未知字段，检查版本、整数范围、参数数量、命令／环境字节预算、互斥退出码映射、环境名 ASCII 大小写去重、NUL、占位符及平台时钟范围。`memory_bytes` 等未实现字段拒绝。配置中的 ASCII 分隔符按 UTF-8 字节扫描，避免 `= + combining acute` 或 `} + combining acute` 的字素簇影响契约。提交使用结构化 executable／arguments，不拼接 shell；Core 仍执行权威校验。
+
+每个 Run All 复制源码、测试和 checker 配置。只有解答正常退出 0 且 Expected Output 存在时才运行 checker；没有 Expected 表示 Unchecked，空 Expected 仍实际调用 checker。测试结论 AC／WA 与 checker 自己的 `Accepted`／`WrongAnswer` 分开建模；默认退出码 0 接受、1／2 拒绝，未映射码（包括默认评分码 7）为 CheckerError。checker 的超时、异常、创建失败和输出超限均显示独立 CheckerError，解答原来的 TLE／RE 不会被替换；取消显示 Cancelled。stdout 分数文本不会被猜测为二元结论。
+
+结果面板分开显示 **Solution status** 和 **Checker Diagnostics**。checker 诊断读取契约中的 verdict、process_attempted、termination、exit_code、signal、native_error、elapsed_ms、stdout／stderr 总采集字节与截断标记；未尝试进程时不把默认进程状态当成真实退出。正常 UTF-8 输出按文本显示；包含 NUL、其他非文本控制字节或无效 UTF-8 时使用有界 hex 预览，并说明显示字节数与原始输出的区别。原始 `Data` 保留，Input／Expected 编辑绑定原有 `.text` 语义不变。预览默认 256 字节，配置位于 `Resources/running.json` 的 `binary_preview_bytes`。
+
+checker 偏好使用独立命名空间 `org.cpeditor.native.macos.checker`、版本 1，保存 enabled 与 `configuration_json` 原始字符串，不更改已有 workspace 偏好版本。原始 JSON 格式和已禁用配置随会话往返。遇到该命名空间未来版本时，所有版本（包括共存的 v1）都作为不透明原件保留，不解释 v1，也不追加重复旧版本；当前应用关闭 checker 并禁用配置入口，源码和样例仍可保存。当前版本偏好中的无效配置整体拒绝恢复候选，保留既有工作区。
+
+未启用且无配置的 checker 不写空偏好。Core 每 owner 最多 16 条偏好；未知原件占满容量时不强加 workspace／document 默认条目，显示设置容量提示，继续保存源码和测试。新增 checker 没有可用槽位时在 Apply 之前拒绝，保持原状态；已有 checker 保留其存储槽位。`Resources/recovery.json` 定义本机 owner 上限，`running.json` 定义单 checker 偏好上限。虽然 Core checker JSON 最多 1 MiB，原生持久化还受单偏好 64 KiB 限制，因此 Apply 和恢复均校验完整偏好编码大小，包含更长的 disabled 状态，避免应用成功后阻断恢复保存。
+
+本轮通过真实 Core 和原生测试验证：AC／WA、无答案跳过、空输出／空答案调用、checker 超时／信号／输出超限、默认退出 7、解答 RE／TLE 跳过 checker、Checking 期间取消、原始 NUL／0xFF 诊断与总数、配置开关重启恢复、未来 v1＋99 共存、无 workspace 偏好＋foreign16、foreign15＋workspace1，以及拒绝新增无容量配置后的源码／样例保存。语法回归覆盖重复／浮点／未知字段、范围、模板组合字符和环境名边界。当前 AppKit 测试真实挂载 RunPanelView；根 agent 已在独立恢复文件中完成前台 CUA 验收，没有操作用户默认恢复文件或既有验收数据。
+
+新增配置呈现回归在后台测试窗口中实际创建附属 sheet，读取原生 `NSTextView` 的首次内容，输入未应用草稿并通过 Escape 取消、再次呈现后验证内容恢复；同时通过 Return 触发真实 Apply，验证无效版本保持配置和草稿、有效替换才启用 checker 并关闭。宿主提供标准 SwiftUI item 呈现环境，验证独立编辑器 sheet 的原生生命周期；RunPanelView 的实际配置按钮入口、修复后的前台首次正文和重启后运行也已由根 agent 复验通过。
+
 ## 固定依赖和许可
 
 直接依赖固定到不可变提交，传递依赖记录在 `Package.resolved`。本原型沿用主仓库 GPLv3 路径使用 STTextView，不使用其商业许可路径；后续发布必须保留适用许可和对应源码。
@@ -138,3 +158,5 @@ CPN_CORE_PREBUILT=1 ./script/build_and_run.sh --verify \
 根 agent 在 2026-11-16T23:40:39+08:00 的真实 CUA 验收中，通过系统文件选择器导入 `tests/fixtures/editor/samples.json`，点击 Run All 后三个稳定测试 ID（sample-1、sample-2、empty-stdin）均显示 AC，原始样例输出对应 3、92、空输出，面板确认 Source matches this run。此证据覆盖当前 macOS 主机的原生界面到共享 Core 链路，尚不包含最低系统、完整系统输入法、会话及发布验收。
 
 根 agent 在 2026-11-17T00:44:44+08:00 完成独立恢复文件的真实 CUA 验收：原生缓冲区追加中文／emoji／组合字符，设置7+8样例并判为AC；正常退出后重启，未保存正文、选区和样例恢复。随后注入外部源文件修改，Save明确拒绝覆盖，Save As将缓冲区保存到新文件，原文件保留外部修改。磁盘核对恢复正文／摘要／保存点、文档ID／revision、样例原始字节以及另存结果完全一致；恢复后的原生Run All再次AC。该验收使用out/macos/verification的独立测试数据，不修改参考fixture或用户默认恢复文件。
+
+根 agent 在 2026-11-17T01:46:38+08:00 完成独立 checker 夹具的真实 CUA 验收：verify 模式判为 AC，checker stdout 25 字节、stderr 12 字节（含 NUL／0xFF）与解答 8 字节均显示对应 hex；compare 模式判为 WA、exit 7 为独立 CheckerError 并保留 0.5 输出，无答案为 Unchecked。非法浮点版本显示校验错误。退出重启后开关关闭且 JSON 原件完整恢复；修复后的首次 checker 和首次 toolchain 配置窗口均显示当前正文，Escape 取消保留配置，重新启用后再次运行得到相同 checker 错误语义。磁盘核对配置原始 JSON、单一文档 ID／revision、源码 SHA-256 和 raw 样例全部一致，41 项 Swift 测试、脚本打包启动及严格 codesign 验证通过。精简证据在本机 `out/macos/checker-verification/20261117T012243+0800/verification.json`；未把此局部能力当作最低系统、系统 IME 或完整产品验收。

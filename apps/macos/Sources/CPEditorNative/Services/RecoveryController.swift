@@ -12,11 +12,14 @@ struct RecoveryConfiguration: Decodable, Sendable {
     let lockTimeoutMS: UInt64
     let workspaceNamespace: String
     let documentNamespace: String
+    let checkerNamespace: String
+    let maxPreferencesPerOwner: Int
     let locationPreferenceKey: String
     static func load() throws -> Self {
         guard let url = Bundle.module.url(forResource: "recovery", withExtension: "json") else { throw CocoaError(.fileNoSuchFile) }
         let value = try JSONDecoder().decode(Self.self, from: Data(contentsOf: url))
-        guard value.schemaVersion == 1, value.lockTimeoutMS <= 60000 else { throw WireError.unsupportedSchema }
+        guard value.schemaVersion == 1, value.lockTimeoutMS <= 60000,
+              (1...16).contains(value.maxPreferencesPerOwner) else { throw WireError.unsupportedSchema }
         return value
     }
     func paths(for file: URL) -> SessionPaths {
@@ -40,6 +43,12 @@ struct DocumentNativePreferences: Codable {
     let editor: EditorKind
     let selectionLocation: Int
     let selectionLength: Int
+}
+
+struct CheckerNativePreferences: Codable {
+    let enabled: Bool
+    let configurationJSON: String?
+    enum CodingKeys: String, CodingKey { case enabled, configurationJSON = "configuration_json" }
 }
 
 private struct RecoveryLocationPreference: Codable {

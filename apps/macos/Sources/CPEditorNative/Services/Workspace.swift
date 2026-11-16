@@ -289,15 +289,24 @@ struct WorkspaceConfiguration: Decodable {
             let own = NativePreferences(namespaceID: recoveryConfig.documentNamespace, schemaVersion: 1,
                 objectJSON: String(decoding: try encoder.encode(preferences), as: UTF8.self))
             let hasOpaqueOwn = session.preservedPreferences.contains { $0.namespaceID.utf8.elementsEqual(recoveryConfig.documentNamespace.utf8) }
+            let canAddOwn = session.preservedPreferences.count < recoveryConfig.maxPreferencesPerOwner
             return SessionDocumentRecord(snapshot: session.document.snapshot(), originalPath: session.document.url?.path,
                 languageID: session.document.languageID, toolchainProfileID: session.toolchainProfileID,
                 savePoint: session.document.savePoint, tests: session.testCases,
-                editorPreferences: session.preservedPreferences + (hasOpaqueOwn ? [] : [own]))
+                editorPreferences: session.preservedPreferences + (hasOpaqueOwn || !canAddOwn ? [] : [own]))
         }
         let selected = selection == closingDocumentID ? included.last?.document.id : selection
         let hasOpaqueOwn = preservedPreferences.contains { $0.namespaceID.utf8.elementsEqual(recoveryConfig.workspaceNamespace.utf8) }
+        let hasOpaqueChecker = preservedPreferences.contains { $0.namespaceID.utf8.elementsEqual(recoveryConfig.checkerNamespace.utf8) }
+        let checkerHasData = runner.externalCheckerEnabled || runner.externalChecker != nil
+        let checkerSlots = checkerHasData && !hasOpaqueChecker ? 1 : 0
+        let canAddWorkspace = preservedPreferences.count + checkerSlots < recoveryConfig.maxPreferencesPerOwner
+        let checker = CheckerNativePreferences(enabled: runner.externalCheckerEnabled, configurationJSON: runner.externalChecker?.originalJSON)
+        let checkerPreference = NativePreferences(namespaceID: recoveryConfig.checkerNamespace, schemaVersion: 1,
+            objectJSON: String(decoding: try encoder.encode(checker), as: UTF8.self))
         return WorkspaceSessionRecord(workspaceID: workspaceID, revision: revision, selectedDocumentID: selected,
-            documents: documents, editorPreferences: preservedPreferences + (hasOpaqueOwn ? [] : [own]))
+            documents: documents, editorPreferences: preservedPreferences + (hasOpaqueOwn || !canAddWorkspace ? [] : [own])
+                + (hasOpaqueChecker || !checkerHasData ? [] : [checkerPreference]))
     }
 
     func applyRecoveryCandidate(_ candidate: WorkspaceSessionRecord, configuration recoveryConfig: RecoveryConfiguration,
@@ -311,6 +320,13 @@ struct WorkspaceConfiguration: Decodable {
         let ownWorkspace = candidate.editorPreferences.filter(isOwnWorkspace)
         guard ownWorkspace.count <= 1 else { throw CocoaError(.fileReadCorruptFile) }
         let native = try ownWorkspace.first.map { try JSONDecoder().decode(WorkspaceNativePreferences.self, from: Data($0.objectJSON.utf8)) }
+        let isOwnChecker: (NativePreferences) -> Bool = { $0.schemaVersion == 1 && $0.namespaceID.utf8.elementsEqual(recoveryConfig.checkerNamespace.utf8) }
+        let ownChecker = candidate.editorPreferences.filter(isOwnChecker)
+        let opaqueChecker = candidate.editorPreferences.contains { $0.schemaVersion != 1 && $0.namespaceID.utf8.elementsEqual(recoveryConfig.checkerNamespace.utf8) }
+        guard ownChecker.count <= 1 else { throw CocoaError(.fileReadCorruptFile) }
+        let checkerPrefs = try (opaqueChecker ? nil : ownChecker.first).map { try JSONDecoder().decode(CheckerNativePreferences.self, from: Data($0.objectJSON.utf8)) }
+        let checker = try checkerPrefs?.configurationJSON.map { try runner.validateChecker($0) }
+        guard checkerPrefs?.enabled != true || checker != nil else { throw CheckerConfigurationError("checker_error_required_configuration") }
         if let native {
             guard !native.profiles.isEmpty, Set(native.profiles.map(\.id)).count == native.profiles.count,
                   native.profiles.contains(where: { $0.id == native.selectedProfileID }) else { throw WireError.invalidProfile }
@@ -345,12 +361,24 @@ struct WorkspaceConfiguration: Decodable {
         } catch { constructed.forEach { $0.dispose() }; throw error }
         sessions.forEach { runner.cancel(documentID: $0.document.id); $0.dispose() }
         workspaceID = candidate.workspaceID
-        preservedPreferences = candidate.editorPreferences.filter { !isOwnWorkspace($0) }
+        preservedPreferences = candidate.editorPreferences.filter { !isOwnWorkspace($0) && (opaqueChecker || !isOwnChecker($0)) }
         let hasOpaqueWorkspace = preservedPreferences.contains { $0.namespaceID.utf8.elementsEqual(recoveryConfig.workspaceNamespace.utf8) }
         let hasOpaqueDocument = constructed.contains { session in
             session.preservedPreferences.contains { $0.namespaceID.utf8.elementsEqual(recoveryConfig.documentNamespace.utf8) }
         }
-        preferenceNotice = (hasOpaqueWorkspace || hasOpaqueDocument) ? L10n.string("future_native_preferences") : nil
+        let checkerHasData = checkerPrefs?.enabled == true || checker != nil
+        let checkerSlots = checkerHasData ? 1 : 0
+        let workspaceSlots = !hasOpaqueWorkspace && preservedPreferences.count + checkerSlots < recoveryConfig.maxPreferencesPerOwner ? 1 : 0
+        runner.checkerPreferenceStorageAvailable = checkerHasData || preservedPreferences.count + workspaceSlots < recoveryConfig.maxPreferencesPerOwner
+        let documentCapacityFull = constructed.contains { session in
+            !session.preservedPreferences.contains { $0.namespaceID.utf8.elementsEqual(recoveryConfig.documentNamespace.utf8) }
+                && session.preservedPreferences.count >= recoveryConfig.maxPreferencesPerOwner
+        }
+        let workspaceCapacityFull = !hasOpaqueWorkspace && workspaceSlots == 0
+        let notices = [hasOpaqueWorkspace || hasOpaqueDocument || opaqueChecker ? L10n.string("future_native_preferences") : nil,
+                       workspaceCapacityFull || documentCapacityFull || !runner.checkerPreferenceStorageAvailable ? L10n.string("preference_capacity_notice") : nil].compactMap { $0 }
+        preferenceNotice = notices.isEmpty ? nil : notices.joined(separator: " ")
+        runner.restoreChecker(checker, enabled: checkerPrefs?.enabled ?? false, opaque: opaqueChecker)
         if let native {
             runner.profiles = native.profiles; runner.selectedProfileID = native.selectedProfileID; runner.comparison = native.comparison
             newEditor = native.newEditor; wrapText = native.wrapText; showMinimap = native.showMinimap
