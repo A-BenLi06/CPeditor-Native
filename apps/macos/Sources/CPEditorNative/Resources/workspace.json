@@ -1,6 +1,9 @@
 {
   "schemaVersion": 1,
   "defaultLanguageID": "cpp",
-  "languageIDs": ["cpp"],
-  "defaultEditor": "codeeditorview"
+  "languageIDs": [
+    "cpp"
+  ],
+  "defaultEditor": "codeeditorview",
+  "maxSourceBytes": 16777216
 }

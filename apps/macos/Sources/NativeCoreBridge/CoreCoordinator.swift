@@ -9,6 +9,18 @@ public struct CoreFailure: Error, LocalizedError, Sendable {
 
 /// 此 actor 的 C ABI 调用在后台执行。句柄／返回 buffer 不跨 actor 传递。
 public actor CoreCoordinator {
+    private final class CancellationHandle: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value: UInt64 = 0
+        private var cancellationRequested = false
+        @discardableResult func set(_ handle: UInt64) -> Bool {
+            lock.lock(); defer { lock.unlock() }; value = handle; return cancellationRequested
+        }
+        func request() -> UInt64 {
+            lock.lock(); defer { lock.unlock() }; cancellationRequested = true; return value
+        }
+    }
+    nonisolated private let cancellationHandle = CancellationHandle()
     private var engine: UInt64 = 0
     private var activeJob: UInt64?
     private var closed = false
@@ -31,13 +43,13 @@ public actor CoreCoordinator {
         if handle != 0 { Task.detached { _ = cpn_engine_destroy(handle, nil) } }
     }
 
-    private func errorStorage() -> cpn_error {
+    nonisolated private static func errorStorage() -> cpn_error {
         var storage = cpn_error()
         storage.struct_size = UInt32(MemoryLayout<cpn_error>.size)
         return storage
     }
 
-    private func check(_ status: cpn_status, _ storage: inout cpn_error) throws {
+    nonisolated private static func check(_ status: cpn_status, _ storage: inout cpn_error) throws {
         guard status != CPN_OK else { return }
         let message = withUnsafeBytes(of: &storage.message) { bytes in
             String(decoding: bytes.prefix { $0 != 0 }, as: UTF8.self)
@@ -56,14 +68,15 @@ public actor CoreCoordinator {
         options.max_buffers = maximumBuffers
         options.max_jobs = maximumJobs
         if maximumJobs == 1 { options.max_workers = 1 }
-        var error = errorStorage()
-        try check(cpn_engine_create(&options, &engine, &error), &error)
+        var error = Self.errorStorage()
+        try Self.check(cpn_engine_create(&options, &engine, &error), &error)
+        if cancellationHandle.set(engine) { _ = cpn_engine_close(engine, nil) }
     }
 
     private func events() throws -> [CoreEvent] {
         var buffer = cpn_buffer()
-        var error = errorStorage()
-        try check(cpn_engine_drain_json(engine, drainEvents, &buffer, &error), &error)
+        var error = Self.errorStorage()
+        try Self.check(cpn_engine_drain_json(engine, drainEvents, &buffer, &error), &error)
         defer { _ = cpn_buffer_release(buffer.handle, nil) }
         let data: Data
         if let pointer = buffer.data { data = Data(bytes: pointer, count: buffer.size) }
@@ -77,14 +90,14 @@ public actor CoreCoordinator {
                     onEvent: @Sendable (CoreEvent) async -> Void = { _ in }) async throws -> BatchResult {
         guard activeJob == nil else { throw WireError.busy }
         try ensureEngine()
-        var error = errorStorage()
+        var error = Self.errorStorage()
         var job: UInt64 = 0
         let data = try JSONEncoder().encode(request)
         let status = data.withUnsafeBytes { bytes in
             cpn_engine_submit_json(engine, cpn_bytes(data: bytes.bindMemory(to: UInt8.self).baseAddress,
                                                     size: bytes.count), &job, &error)
         }
-        try check(status, &error)
+        try Self.check(status, &error)
         activeJob = job
         do {
             while true {
@@ -95,8 +108,8 @@ public actor CoreCoordinator {
                     await onEvent(event)
                     if event.state.isTerminal {
                         guard let result = event.result, result.schemaVersion == 1 else { throw WireError.malformedTerminal }
-                        var releaseError = errorStorage()
-                        try check(cpn_engine_release_job(engine, job, &releaseError), &releaseError)
+                        var releaseError = Self.errorStorage()
+                        try Self.check(cpn_engine_release_job(engine, job, &releaseError), &releaseError)
                         activeJob = nil
                         return result
                     }
@@ -106,7 +119,7 @@ public actor CoreCoordinator {
             }
         } catch {
             // 已确认事件可能消费失败时，销毁整个引擎保证任务和 native buffers 有界。
-            if engine != 0 { _ = cpn_engine_destroy(engine, nil); engine = 0 }
+            if engine != 0 { _ = cpn_engine_destroy(engine, nil); engine = 0; cancellationHandle.set(0) }
             activeJob = nil
             throw error
         }
@@ -114,14 +127,57 @@ public actor CoreCoordinator {
 
     public func cancel() throws {
         guard let job = activeJob, engine != 0 else { return }
-        var error = errorStorage()
-        try check(cpn_engine_cancel(engine, job, &error), &error)
+        var error = Self.errorStorage()
+        try Self.check(cpn_engine_cancel(engine, job, &error), &error)
+    }
+
+    nonisolated private static func copyBuffer(_ buffer: cpn_buffer) -> Data {
+        defer { _ = cpn_buffer_release(buffer.handle, nil) }
+        let data = buffer.data.map { Data(bytes: $0, count: buffer.size) } ?? Data()
+        return data
+    }
+
+    public func loadSession(at path: String) throws -> SessionLoadResponse {
+        try ensureEngine()
+        let data = try Self.sessionBytes(engine: engine, data: Data(path.utf8), saving: false)
+        let response = try JSONDecoder().decode(SessionLoadResponse.self, from: data)
+        guard response.schemaVersion == 1 else { throw WireError.unsupportedSchema }
+        return response
+    }
+
+    public func saveSession(_ session: WorkspaceSessionRecord, paths: SessionPaths,
+                            expectedDiskDigest: String?, lockTimeoutMS: UInt64) throws -> SessionSaveResponse {
+        try ensureEngine()
+        let bytes = try JSONEncoder().encode(SessionSaveRequest(paths: paths, session: session,
+                                                                 expectedDiskDigest: expectedDiskDigest, lockTimeoutMS: lockTimeoutMS))
+        let data = try Self.sessionBytes(engine: engine, data: bytes, saving: true)
+        let response = try JSONDecoder().decode(SessionSaveResponse.self, from: data)
+        guard response.schemaVersion == 1 else { throw WireError.unsupportedSchema }
+        return response
+    }
+
+    nonisolated private static func sessionBytes(engine: UInt64, data: Data, saving: Bool) throws -> Data {
+        var buffer = cpn_buffer(); var error = errorStorage()
+        let status = data.withUnsafeBytes { bytes in
+            let input = cpn_bytes(data: bytes.bindMemory(to: UInt8.self).baseAddress, size: bytes.count)
+            return saving ? cpn_engine_session_save_json(engine, input, &buffer, &error)
+                : cpn_engine_session_load(engine, input, &buffer, &error)
+        }
+        try check(status, &error)
+        return copyBuffer(buffer)
+    }
+
+    /// C ABI 的 close 可并行触发 stop；不能排在阻塞的会话锁等待之后。
+    public nonisolated func requestCancellation() {
+        let handle = cancellationHandle.request()
+        if handle != 0 { Task.detached { _ = cpn_engine_close(handle, nil) } }
     }
 
     public func shutdown() {
         closed = true
         let handle = engine
         engine = 0
+        cancellationHandle.set(0)
         activeJob = nil
         if handle != 0 { _ = cpn_engine_destroy(handle, nil) }
     }

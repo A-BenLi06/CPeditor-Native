@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "directoryName": "CPEditor-Native/Recovery",
+  "recoveryFilename": "workspace.json",
+  "backupFilenameFormat": "%@.previous.json",
+  "lockFilenameFormat": "%@.lock",
+  "lockTimeoutMS": 5000,
+  "workspaceNamespace": "org.cpeditor.native.macos.workspace",
+  "documentNamespace": "org.cpeditor.native.macos.document",
+  "locationPreferenceKey": "org.cpeditor.native.macos.recovery-location.v1"
+}

@@ -33,13 +33,13 @@ struct WindowCloseGuard: NSViewRepresentable {
         func windowShouldClose(_ sender: NSWindow) -> Bool {
             if closeApproved { return originalDelegate?.windowShouldClose?(sender) ?? true }
             guard closeTask == nil else { return false }
-            guard workspace?.canCloseAll() ?? true else { return false }
-            guard let workspace, !workspace.runner.isClosed else {
+            guard let workspace else {
                 return originalDelegate?.windowShouldClose?(sender) ?? true
             }
             closeTask = Task { @MainActor [weak self, weak sender] in
-                await workspace.runner.shutdown()
+                let approved = await workspace.prepareToClose()
                 guard let self, let sender else { return }
+                guard approved else { self.closeTask = nil; return }
                 self.closeApproved = true
                 self.closeTask = nil
                 sender.performClose(nil)

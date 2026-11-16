@@ -6,17 +6,17 @@ import Testing
     @Test func stableIdentityRevisionAndSavePoint() throws {
         let doc = SourceDocument(text: "int main() {}\n", languageID: "cpp")
         let original = doc.snapshot()
-        #expect(!doc.commit(original.text))
+        #expect(!(try doc.commit(original.text)))
         #expect(doc.revision == 0)
-        doc.commit("int main() { return 0; }\n")
+        try doc.commit("int main() { return 0; }\n")
         let saved = doc.snapshot()
         #expect(saved.documentID == original.documentID)
         #expect(saved.revision == 1)
         #expect(doc.isDirty)
-        doc.commit("int main() { return 1; }\n")
+        try doc.commit("int main() { return 1; }\n")
         try doc.markSaved(at: URL(fileURLWithPath: "/tmp/main.cpp"), snapshot: saved)
         #expect(doc.isDirty)
-        doc.commit(saved.text)
+        try doc.commit(saved.text)
         #expect(!doc.isDirty)
         #expect(doc.revision == 3)
     }
@@ -30,7 +30,7 @@ import Testing
         #expect(throws: DocumentError.invalidRange) {
             try doc.replacing(NSRange(location: 3, length: 1), with: "", expectedRevision: 0)
         }
-        doc.commit("changed")
+        try doc.commit("changed")
         #expect(throws: DocumentError.staleRevision) {
             try doc.replacing(NSRange(location: 0, length: 1), with: "", expectedRevision: 0)
         }
@@ -66,5 +66,62 @@ import Testing
         #expect(tokens.contains { $0.kind == .string && (text as NSString).substring(with: $0.range) == "\"中文 42\"" })
         #expect(tokens.filter { $0.kind == .number }.count == 1)
         #expect(tokens.filter { $0.kind == .comment }.count == 2)
+    }
+
+    @Test func canonicalEquivalentTextAndIDsRemainByteDistinct() throws {
+        let composed = "é"
+        let decomposed = "e\u{301}"
+        #expect(composed == decomposed)
+        let document = SourceDocument(id: RawIdentifier("opaque/" + composed), text: composed, languageID: "cpp")
+        let before = document.snapshot()
+        #expect(try document.commit(decomposed))
+        #expect(document.revision == 1)
+        #expect(document.snapshot() != before)
+        #expect(document.isDirty)
+        #expect(Set([RawIdentifier(composed), RawIdentifier(decomposed)]).count == 2)
+        let exhausted = SourceDocument(text: "old", languageID: "cpp", revision: .max)
+        #expect(throws: DocumentError.revisionExhausted) { try exhausted.commit("new") }
+        #expect(exhausted.revision == UInt64.max)
+        #expect(exhausted.text == "old")
+    }
+
+    @Test func coordinatedBOMCRLFNULRoundTripAndDiskConflict() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let source = folder.appendingPathComponent("原始 🙂.cpp")
+        let copy = folder.appendingPathComponent("副本.cpp")
+        let data = Data("\u{feff}// 中文🙂e\u{301}\r\n\0\treturn 0;\r\n".utf8)
+        try data.write(to: source)
+        let loaded = try await Task.detached { try CoordinatedSourceFile.read(source, maximumBytes: data.count) }.value
+        #expect(Data(loaded.text.utf8) == data)
+        #expect(loaded.diskDigest == SourceDigest.sha256(data))
+        let document = SourceDocument(text: loaded.text, languageID: "cpp")
+        let snapshot = document.snapshot()
+        let digest = try await Task.detached {
+            try CoordinatedSourceFile.write(snapshot, to: copy, expectedDiskDigest: nil)
+        }.value
+        #expect(try Data(contentsOf: copy) == data)
+        #expect(digest == loaded.diskDigest)
+        let external = Data("externally changed\n".utf8)
+        try external.write(to: source)
+        do {
+            _ = try await Task.detached { try CoordinatedSourceFile.write(snapshot, to: source, expectedDiskDigest: loaded.diskDigest) }.value
+            Issue.record("Expected a source conflict")
+        } catch { #expect(error as? DocumentError == .diskConflict) }
+        #expect(try Data(contentsOf: source) == external)
+        do {
+            _ = try await Task.detached { try CoordinatedSourceFile.read(copy, maximumBytes: data.count - 1) }.value
+            Issue.record("Expected the configured source size bound")
+        } catch { #expect((error as NSError).code == CocoaError.fileReadTooLarge.rawValue) }
+        let alias = folder.appendingPathComponent("recovery-alias.json")
+        try FileManager.default.linkItem(at: copy, to: alias)
+        do {
+            _ = try await Task.detached {
+                try CoordinatedSourceFile.write(snapshot, to: alias, expectedDiskDigest: digest, reservedPaths: [copy.path])
+            }.value
+            Issue.record("Expected a reserved recovery alias to be rejected")
+        } catch { #expect(error as? DocumentError == .reservedRecoveryPath) }
+        #expect(try Data(contentsOf: copy) == data)
     }
 }

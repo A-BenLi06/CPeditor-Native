@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import CryptoKit
 
 public enum EditorKind: String, CaseIterable, Codable, Sendable {
     case codeEditorView = "codeeditorview"
@@ -9,44 +10,74 @@ public enum EditorKind: String, CaseIterable, Codable, Sendable {
 }
 
 public struct SourceSnapshot: Equatable, Sendable {
-    public let documentID: UUID
+    public let documentID: RawIdentifier
     public let revision: UInt64
     public let text: String
     public var utf8: Data { Data(text.utf8) }
+    public var sourceDigest: String { SourceDigest.sha256(utf8) }
+    public static func == (left: Self, right: Self) -> Bool {
+        left.documentID == right.documentID && left.revision == right.revision && left.text.utf8.elementsEqual(right.text.utf8)
+    }
+}
+
+public enum SourceDigest {
+    public static func sha256(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+public struct SourceSavePoint: Codable, Sendable, Equatable {
+    public let revision: UInt64
+    public let sourceDigest: String
+    public let diskDigest: String?
+    public init(revision: UInt64, sourceDigest: String, diskDigest: String?) {
+        self.revision = revision; self.sourceDigest = sourceDigest; self.diskDigest = diskDigest
+    }
+    enum CodingKeys: String, CodingKey { case revision, sourceDigest = "source_digest", diskDigest = "disk_digest" }
 }
 
 public enum DocumentError: Error, Equatable {
     case staleRevision
     case invalidRange
     case invalidUTF8
+    case diskConflict
+    case revisionExhausted
+    case reservedRecoveryPath
 }
 
 /// 原生编辑器拥有 live buffer；这里仅记录已提交的文本及保存点。
 @MainActor @Observable
 public final class SourceDocument: Identifiable {
-    public let id: UUID
+    public let id: RawIdentifier
     public let editorKind: EditorKind
     public let languageID: String
     public private(set) var url: URL?
     public private(set) var text: String
-    public private(set) var revision: UInt64 = 0
-    private var savedText: String
-    public var isDirty: Bool { text != savedText }
+    public private(set) var revision: UInt64
+    public private(set) var savePoint: SourceSavePoint?
+    public private(set) var sourceDigest: String
+    private var savedDigest: String
+    public var isDirty: Bool { sourceDigest != savedDigest }
 
-    public init(id: UUID = UUID(), text: String = "", url: URL? = nil,
+    public init(id: RawIdentifier = RawIdentifier(UUID().uuidString), text: String = "", url: URL? = nil,
                 editorKind: EditorKind = .codeEditorView, languageID: String,
-                saved: Bool = true) {
+                saved: Bool = true, revision: UInt64 = 0, savePoint: SourceSavePoint? = nil) {
         self.id = id
         self.text = text
         self.url = url
         self.editorKind = editorKind
         self.languageID = languageID
-        savedText = saved ? text : ""
+        self.revision = revision
+        self.savePoint = savePoint
+        sourceDigest = SourceDigest.sha256(Data(text.utf8))
+        savedDigest = savePoint?.sourceDigest ?? SourceDigest.sha256(Data((saved ? text : "").utf8))
     }
 
-    @discardableResult public func commit(_ committedText: String) -> Bool {
-        guard committedText != text else { return false }
+    @discardableResult public func commit(_ committedText: String) throws -> Bool {
+        guard !committedText.utf8.elementsEqual(text.utf8) else { return false }
+        guard revision < UInt64.max else { throw DocumentError.revisionExhausted }
         text = committedText
+        sourceDigest = SourceDigest.sha256(Data(committedText.utf8))
         revision += 1
         return true
     }
@@ -55,11 +86,13 @@ public final class SourceDocument: Identifiable {
         SourceSnapshot(documentID: id, revision: revision, text: text)
     }
 
-    public func markSaved(at url: URL, snapshot: SourceSnapshot) throws {
-        guard snapshot.documentID == id else { throw DocumentError.staleRevision }
+    public func markSaved(at url: URL, snapshot: SourceSnapshot, diskDigest: String? = nil) throws {
+        guard snapshot.documentID == id, snapshot.revision <= revision else { throw DocumentError.staleRevision }
         self.url = url
         // 写盘期间的新编辑不得被误标为已保存。
-        savedText = snapshot.text
+        savedDigest = snapshot.sourceDigest
+        savePoint = SourceSavePoint(revision: snapshot.revision, sourceDigest: snapshot.sourceDigest,
+                                    diskDigest: diskDigest ?? snapshot.sourceDigest)
     }
 
     public func replacing(_ range: NSRange, with replacement: String,
@@ -74,8 +107,8 @@ public final class SourceDocument: Identifiable {
 public enum SourceFile {
     public static func readUTF8(_ url: URL) throws -> String {
         let data = try Data(contentsOf: url)
-        guard let text = String(data: data, encoding: .utf8) else { throw DocumentError.invalidUTF8 }
-        return text
+        guard String(data: data, encoding: .utf8) != nil else { throw DocumentError.invalidUTF8 }
+        return String(decoding: data, as: UTF8.self)
     }
 
     public static func write(_ snapshot: SourceSnapshot, to url: URL) throws {

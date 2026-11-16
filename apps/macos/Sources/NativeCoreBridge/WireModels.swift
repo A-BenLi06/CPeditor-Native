@@ -31,7 +31,7 @@ public enum JSONValue: Codable, Sendable, Equatable {
 public struct ToolchainProfile: Codable, Sendable, Identifiable, Equatable {
     public let payload: JSONValue
     public enum Field: String { case id, languageID = "language_id", schemaVersion = "schema_version" }
-    public var id: String { payload[Field.id.rawValue]?.string ?? "" }
+    public var id: RawIdentifier { RawIdentifier(payload[Field.id.rawValue]?.string ?? "") }
     public var languageID: String { payload[Field.languageID.rawValue]?.string ?? "" }
     public init(payload: JSONValue) throws {
         guard payload[Field.schemaVersion.rawValue] == .number(1),
@@ -72,17 +72,17 @@ public struct WireBytes: Codable, Sendable, Equatable {
 }
 
 public struct TestCaseInput: Codable, Sendable, Equatable, Identifiable {
-    public var id: String
+    public var id: RawIdentifier
     public var input: WireBytes
     public var expected: WireBytes?
     public var enabled: Bool
     public init(id: String = UUID().uuidString, input: String = "", expected: String? = "", enabled: Bool = true) {
-        self.id = id; self.input = WireBytes(input); self.expected = expected.map(WireBytes.init); self.enabled = enabled
+        self.id = RawIdentifier(id); self.input = WireBytes(input); self.expected = expected.map(WireBytes.init); self.enabled = enabled
     }
     enum CodingKeys: String, CodingKey { case id, input, expected, enabled }
     public init(from decoder: Decoder) throws {
         let box = try decoder.container(keyedBy: CodingKeys.self)
-        id = try box.decode(String.self, forKey: .id)
+        id = try box.decode(RawIdentifier.self, forKey: .id)
         input = try box.decode(WireBytes.self, forKey: .input)
         expected = try box.decodeIfPresent(WireBytes.self, forKey: .expected)
         enabled = try box.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
@@ -92,7 +92,7 @@ public struct TestCaseInput: Codable, Sendable, Equatable, Identifiable {
 public enum ComparisonPolicy: String, Codable, CaseIterable, Sendable { case trailing, strict, byte }
 public struct BatchRequest: Encodable, Sendable {
     public struct Source: Encodable, Sendable {
-        let documentID: String; let revision: UInt64; let text: String; let originalPath: String?
+        let documentID: RawIdentifier; let revision: UInt64; let text: String; let originalPath: String?
         enum CodingKeys: String, CodingKey { case documentID = "document_id", revision, text, originalPath = "original_path" }
     }
     let schemaVersion = 1
@@ -103,7 +103,7 @@ public struct BatchRequest: Encodable, Sendable {
     enum CodingKeys: String, CodingKey { case schemaVersion = "schema_version", source, toolchain, tests, comparison }
     public init(snapshot: SourceSnapshot, originalPath: String?, toolchain: ToolchainProfile,
                 tests: [TestCaseInput], comparison: ComparisonPolicy = .trailing) {
-        source = Source(documentID: snapshot.documentID.uuidString, revision: snapshot.revision,
+        source = Source(documentID: snapshot.documentID, revision: snapshot.revision,
                         text: snapshot.text, originalPath: originalPath)
         self.toolchain = toolchain; self.tests = tests; self.comparison = comparison
     }
@@ -129,12 +129,12 @@ public struct ProcessReport: Decodable, Sendable, Equatable {
     }
 }
 public struct TestResult: Decodable, Sendable, Equatable, Identifiable {
-    public let testcaseID: String; public var id: String { testcaseID }
+    public let testcaseID: String; public var id: RawIdentifier { RawIdentifier(testcaseID) }
     public let verdict: String; public let process: ProcessReport; public let detail: String
     enum CodingKeys: String, CodingKey { case testcaseID = "testcase_id", verdict, process, detail }
 }
 public struct BatchResult: Decodable, Sendable, Equatable {
-    public let schemaVersion: Int; public let documentID: String; public let revision: UInt64
+    public let schemaVersion: Int; public let documentID: RawIdentifier; public let revision: UInt64
     public let profileID: String; public let sourceDigest: String; public let buildOutcome: String
     public let error: String; public let build: ProcessReport?; public let tests: [TestResult]
     enum CodingKeys: String, CodingKey {
@@ -142,7 +142,7 @@ public struct BatchResult: Decodable, Sendable, Equatable {
         case sourceDigest = "source_digest", buildOutcome = "build_outcome", error, build, tests
     }
     public func matches(_ snapshot: SourceSnapshot) -> Bool {
-        schemaVersion == 1 && documentID == snapshot.documentID.uuidString && revision == snapshot.revision
+        schemaVersion == 1 && documentID == snapshot.documentID && revision == snapshot.revision
     }
 }
 public struct CoreEvent: Decodable, Sendable {

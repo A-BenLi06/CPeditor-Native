@@ -12,6 +12,16 @@ enum L10n {
     }
 
     static func describe(_ error: Error) -> String {
+        if let document = error as? DocumentError {
+            switch document {
+            case .staleRevision: return string("stale_document_revision")
+            case .invalidRange: return string("invalid_document_range")
+            case .invalidUTF8: return string("invalid_utf8_source")
+            case .diskConflict: return string("source_disk_conflict")
+            case .revisionExhausted: return string("revision_exhausted")
+            case .reservedRecoveryPath: return string("reserved_recovery_path")
+            }
+        }
         guard let wire = error as? WireError else { return error.localizedDescription }
         switch wire {
         case .invalidProfile: return string("invalid_toolchain")
@@ -20,6 +30,19 @@ enum L10n {
         case .malformedTerminal: return string("invalid_core_event")
         case .busy: return string("core_busy")
         case .closed: return string("core_closed")
+        }
+    }
+
+    static func sessionSaveStatus(_ status: SessionSaveStatus) -> String {
+        switch status {
+        case .saved: return string("recovery_saved")
+        case .conflict: return string("recovery_conflict")
+        case .invalidSession: return string("recovery_invalid_session")
+        case .invalidExisting: return string("recovery_preserved")
+        case .ioFailed: return string("recovery_io_failed")
+        case .durabilityUnknown: return string("recovery_durability_unknown")
+        case .lockUnavailable: return string("recovery_lock_unavailable")
+        case .cancelled: return string("recovery_cancelled")
         }
     }
 

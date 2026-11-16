@@ -10,8 +10,13 @@ import NativeCoreBridge
     let document: SourceDocument
     let container = EditorContainer()
     private(set) var isComposing = false
+    private(set) var captureFailure: DocumentError?
     private(set) var selection = NSRange(location: 0, length: 0)
+    private(set) var committedSelection = NSRange(location: 0, length: 0)
+    private(set) var interactionEnabled = true
     var testCases = [TestCaseInput()]
+    var toolchainProfileID: RawIdentifier?
+    var preservedPreferences: [NativePreferences] = []
     @ObservationIgnored private var codeState: CodeEditorState?
     @ObservationIgnored private var codeHost: NSHostingView<CodeEditorSurface>?
     @ObservationIgnored private weak var codeView: NSTextView?
@@ -37,7 +42,7 @@ import NativeCoreBridge
                 observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] notification in
                     guard let view = notification.object as? NSTextView else { return }
                     MainActor.assumeIsolated {
-                        guard let self, view.isEditable, view.isDescendant(of: self.container) else { return }
+                        guard let self, view.isDescendant(of: self.container), view.isEditable || self.codeView === view else { return }
                         self.codeView = view
                         // AppKit 在 setMarkedText 的内部替换步骤发通知，此时 marked range
                         // 可能尚未建立。等当前原生事件调用栈完成后再观察输入事务结果。
@@ -81,15 +86,84 @@ import NativeCoreBridge
             isComposing = view.hasMarkedText()
             selection = view.selectedRange()
             guard !isComposing else { return false }
-            return document.commit(view.text ?? "")
+            committedSelection = selection
+            return commit(view.text ?? "")
         }
         if let view = codeView {
             isComposing = view.hasMarkedText()
             selection = view.selectedRange()
             guard !isComposing else { return false }
-            return document.commit(view.string)
+            committedSelection = selection
+            return commit(view.string)
         }
         return false
+    }
+
+    func restoreSelection(_ range: NSRange) throws {
+        _ = try TextCoordinateIndex(document.text).utf8Range(for: range)
+        selection = range
+        committedSelection = range
+        codeState?.position.selections = [range]
+        codeView?.setSelectedRange(range)
+        stView?.textSelection = range
+    }
+
+    func setInteractionEnabled(_ enabled: Bool) {
+        interactionEnabled = enabled
+        container.allowsEditingCommands = enabled
+        let editable = enabled && document.revision < UInt64.max
+        stView?.isEditable = editable
+        if codeView == nil {
+            func find(_ view: NSView) -> NSTextView? {
+                if let text = view as? NSTextView, text.isEditable { return text }
+                return view.subviews.lazy.compactMap(find).first
+            }
+            codeView = find(container)
+        }
+        codeView?.isEditable = editable
+    }
+
+    func currentNativeText() throws -> String {
+        if let view = stView {
+            guard !view.hasMarkedText() else { throw DocumentError.invalidRange }
+            return view.text ?? ""
+        }
+        if let view = codeView {
+            guard !view.hasMarkedText() else { throw DocumentError.invalidRange }
+            return view.string
+        }
+        return document.text
+    }
+
+    /// 在一次性应用恢复候选之前，构造并检查组件真正持有的原生 buffer。
+    func validateRestoredBuffer() throws {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 400),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = container
+        defer { window.contentView = nil; window.orderOut(nil) }
+        window.layoutIfNeeded()
+        container.layoutSubtreeIfNeeded()
+        if document.editorKind == .codeEditorView {
+            func find(_ view: NSView) -> NSTextView? {
+                if let text = view as? NSTextView, text.isEditable { return text }
+                return view.subviews.lazy.compactMap(find).first
+            }
+            guard let view = find(container), view.string.utf8.elementsEqual(document.text.utf8) else {
+                throw DocumentError.invalidUTF8
+            }
+            codeView = view
+        } else if !(stView?.text ?? "").utf8.elementsEqual(document.text.utf8) {
+            throw DocumentError.invalidUTF8
+        }
+    }
+
+    private func commit(_ text: String) -> Bool {
+        do {
+            let changed = try document.commit(text)
+            captureFailure = nil
+            if document.revision == UInt64.max { stView?.isEditable = false; codeView?.isEditable = false }
+            return changed
+        } catch { captureFailure = error as? DocumentError; return false }
     }
 
     func update(wrapText: Bool, showMinimap: Bool) {
@@ -148,7 +222,7 @@ struct NativeEditorView: NSViewRepresentable {
 /// 重建内部 CodeEditor representable 及 NSTextView。
 struct NativeEditorDeck: NSViewRepresentable {
     let sessions: [NativeEditorSession]
-    let selectedID: UUID?
+    let selectedID: RawIdentifier?
     let wrapText: Bool
     let showMinimap: Bool
 
@@ -159,9 +233,9 @@ struct NativeEditorDeck: NSViewRepresentable {
     }
 
     @MainActor final class DeckView: NSView {
-        private var selection: UUID?
+        private var selection: RawIdentifier?
 
-        func reconcile(sessions: [NativeEditorSession], selectedID: UUID?, wrapText: Bool, showMinimap: Bool) {
+        func reconcile(sessions: [NativeEditorSession], selectedID: RawIdentifier?, wrapText: Bool, showMinimap: Bool) {
             let owned = Set(sessions.map { ObjectIdentifier($0.container) })
             for view in subviews where !owned.contains(ObjectIdentifier(view)) { view.removeFromSuperview() }
             for session in sessions {

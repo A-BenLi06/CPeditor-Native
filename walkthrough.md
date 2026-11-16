@@ -180,3 +180,21 @@ Core 规则区分空输入、缺少预期输出与预期输出为空、checker �
 - 独立检查发现会话本体已严格校验，但C ABI保存信封和paths对象仍忽略未知字段。新增允许字段校验，拼错expected token或文件路径键在任何磁盘操作和buffer配额分配之前被拒绝。
 - 新回归在已占用全部buffer配额的情况下提交未知外层／paths字段，确认返回InvalidArgument、无buffer且未写恢复文件，不能被Capacity错误掩盖。
 - 普通及完整严格警告ASan／UBSan构建的session_api、C header检查均2/2通过；其他未改逻辑沿用上一变更12/12证据。同步更新中文会话文档。
+
+## 2026-11-17T00:44:44+08:00 — macOS 原生会话、源文件保存与关闭流程
+
+### 改动与思路
+
+- 通过独立后台Core actor接入会话load／save，稳定工作区／文档／测试身份、保存点、未保存正文、工具链／样例／选区和原生偏好完整恢复。候选全部验证及真实native buffer匹配后一次应用；撤销历史和preedit不序列化。
+- SourceDocument与ID／快照按UTF-8字节比较，修复Swift规范等价导致版本或身份合并；revision耗尽明确拒绝／报告并可复制实际live buffer为新文档，不能回绕。
+- 未知原生偏好原样保留。审查发现自身未来namespace追加v1导致重复，修复为保留未来版本而不追加旧版，显示设置兼容性提示；源码／样例仍可恢复保存。
+- 源文件后台NSFileCoordinator、有界循环读取、原磁盘摘要校验和原子写入；BOM／CRLF／NUL不转换。保存旧快照时的新编辑仍dirty。关闭单文档冻结native输入／Undo，重新检查保存期间新编辑，恢复移除成功才释放容器。
+- 窗口／退出先捕获committed buffer、flush恢复，再关闭两Core引擎。I/O失败保留原件并提供独立恢复导出／取消关闭；sticky取消跨引擎创建时点保留。打开／导入／导出／备份加载的异步任务协调关闭，避免丢失晚完成的操作。
+- 单Window暂时控制默认恢复文件归属，新增--recovery-file用于独立工作区；产品仍英文资源，项目文档中文。
+
+### 验证与范围
+
+- 30项Swift测试通过（7模型／15真实原生集成／8 Core ABI，双编辑器参数化执行两组件）；包含BOM／CRLF／NUL、未知与自身未来偏好、max版本、源文件冲突／Save As、受控writer期间新编辑、持锁flush／shutdown、取消先于引擎创建等回归。
+- root实际重新打包并--verify启动、严格codesign验证通过。CUA在独立out恢复文件／源码上验证未保存中文／emoji／组合字符、样例7+8→15 AC、退出重启恢复；注入外部修改后Save拒绝覆盖，另存新文件并保持原始文件，恢复后Run All再次AC。
+- 磁盘独立核对UTF-8正文、SHA256、revision、稳定document ID、保存点、样例原始字节和另存路径一致。参考fixture和用户默认恢复文件未修改。
+- macOS14／Intel、系统IME候选、多显示器／Spaces／性能和发布仍未验收；Windows原生全链路和其余竞赛／高级功能继续实施，目标未标完成。

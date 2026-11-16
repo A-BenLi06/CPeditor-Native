@@ -28,10 +28,11 @@ struct RunConfiguration: Decodable, Sendable {
 
 @MainActor @Observable final class RunController {
     var profiles: [ToolchainProfile] = []
-    var selectedProfileID = ""
+    var selectedProfileID = RawIdentifier("")
     var comparison: ComparisonPolicy = .trailing
     private(set) var isRunning = false
     private(set) var isClosed = false
+    private(set) var pendingImportCount = 0
     private(set) var state: JobState?
     private(set) var result: BatchResult?
     private(set) var submitted: SourceSnapshot?
@@ -51,7 +52,7 @@ struct RunConfiguration: Decodable, Sendable {
                 guard let url = Bundle.module.url(forResource: resource, withExtension: "json") else { throw CocoaError(.fileNoSuchFile) }
                 profiles.append(try JSONDecoder().decode(ToolchainProfile.self, from: Data(contentsOf: url)))
             }
-            selectedProfileID = config.defaultProfileID
+            selectedProfileID = RawIdentifier(config.defaultProfileID)
             guard selectedProfile != nil else { throw WireError.invalidProfile }
             coordinator = CoreCoordinator(pollingMilliseconds: config.pollingMilliseconds, drainEvents: config.drainEvents)
         } catch { errorMessage = L10n.describe(error) }
@@ -61,9 +62,11 @@ struct RunConfiguration: Decodable, Sendable {
         guard !isRunning, !isClosed, let coordinator, let profile = selectedProfile else { return }
         session.capture()
         guard !session.isComposing else { errorMessage = L10n.string("finish_composition"); return }
-        guard profile.languageID == session.document.languageID else { errorMessage = L10n.string("toolchain_language_mismatch"); return }
+        if let failure = session.captureFailure { errorMessage = L10n.describe(failure); return }
+        guard profile.languageID.utf8.elementsEqual(session.document.languageID.utf8) else { errorMessage = L10n.string("toolchain_language_mismatch"); return }
         guard session.testCases.contains(where: \.enabled) else { errorMessage = L10n.string("enable_testcase"); return }
         let snapshot = session.document.snapshot()
+        session.toolchainProfileID = profile.id
         let request = BatchRequest(snapshot: snapshot, originalPath: session.document.url?.path,
                                    toolchain: profile, tests: session.testCases, comparison: comparison)
         submitted = snapshot
@@ -94,7 +97,7 @@ struct RunConfiguration: Decodable, Sendable {
         }
     }
 
-    func cancel(documentID: UUID) { if submitted?.documentID == documentID { cancel() } }
+    func cancel(documentID: RawIdentifier) { if submitted?.documentID == documentID { cancel() } }
 
     func shutdown() async {
         guard !isClosed else { if let task { await task.value }; return }
@@ -113,36 +116,44 @@ struct RunConfiguration: Decodable, Sendable {
     }
 
     func loadProfile() {
-        guard let config = configuration else { return }
+        guard !isClosed, pendingImportCount == 0, let config = configuration else { return }
         let panel = NSOpenPanel(); panel.allowsMultipleSelection = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
+        pendingImportCount += 1
         Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.pendingImportCount -= 1 }
             do {
                 let text = try await Task.detached {
                     let data = try Self.boundedRead(url, limit: config.maxImportBytes)
                     guard let text = String(data: data, encoding: .utf8) else { throw DocumentError.invalidUTF8 }
                     return text
                 }.value
-                try self?.applyProfile(text)
-            } catch { self?.errorMessage = L10n.describe(error) }
+                guard !self.isClosed else { return }
+                try self.applyProfile(text)
+            } catch { if !self.isClosed { self.errorMessage = L10n.describe(error) } }
         }
     }
 
     func importTests(into session: NativeEditorSession) {
-        guard let config = configuration else { return }
+        guard !isClosed, pendingImportCount == 0, let config = configuration else { return }
         let panel = NSOpenPanel(); panel.allowsMultipleSelection = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
+        pendingImportCount += 1
         Task { @MainActor [weak self, weak session] in
+            guard let self else { return }
+            defer { self.pendingImportCount -= 1 }
             do {
                 let samples = try await Task.detached {
                     let data = try Self.boundedRead(url, limit: config.maxImportBytes)
                     let tests = try JSONDecoder().decode([TestCaseInput].self, from: data)
                     guard tests.count <= config.maxTestcases, Set(tests.map(\.id)).count == tests.count,
-                          tests.allSatisfy({ !$0.id.isEmpty && !$0.id.contains("\0") }) else { throw CocoaError(.fileReadCorruptFile) }
+                          tests.allSatisfy({ !$0.id.isEmpty && !$0.id.rawValue.contains("\0") }) else { throw CocoaError(.fileReadCorruptFile) }
                     return tests
                 }.value
+                guard !self.isClosed else { return }
                 session?.testCases = samples
-            } catch { self?.errorMessage = L10n.describe(error) }
+            } catch { if !self.isClosed { self.errorMessage = L10n.describe(error) } }
         }
     }
 

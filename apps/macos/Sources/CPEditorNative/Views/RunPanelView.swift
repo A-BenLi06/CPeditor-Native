@@ -12,7 +12,7 @@ struct RunPanelView: View {
             HStack {
                 Text(L10n.string("tests_title")).font(.headline)
                 Picker(L10n.string("toolchain"), selection: $runner.selectedProfileID) {
-                    ForEach(runner.profiles) { profile in Text(profile.id).tag(profile.id) }
+                    ForEach(runner.profiles) { profile in Text(profile.id.rawValue).tag(profile.id) }
                 }.frame(maxWidth: 290).disabled(runner.isRunning)
                 Menu {
                     Button(L10n.string("load_toolchain")) { runner.loadProfile() }

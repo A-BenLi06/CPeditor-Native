@@ -5,7 +5,7 @@ import AppKit
     @NSApplicationDelegateAdaptor(ApplicationDelegate.self) private var delegate
 
     var body: some Scene {
-        WindowGroup(L10n.string("app_name")) { WorkspaceView() }
+        Window(L10n.string("app_name"), id: "workspace") { WorkspaceView() }
             .defaultSize(width: 1100, height: 720)
             .commands { EditorCommands() }
     }
@@ -29,13 +29,20 @@ import AppKit
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard terminationTask == nil else { return .terminateLater }
         let workspaces = Self.registrations.compactMap(\.workspace)
-        guard workspaces.allSatisfy({ $0.canCloseAll() }) else { return .terminateCancel }
         terminationTask = Task { @MainActor in
-            for workspace in workspaces { await workspace.runner.shutdown() }
+            for workspace in workspaces {
+                guard await workspace.prepareToClose() else {
+                    terminationTask = nil
+                    sender.reply(toApplicationShouldTerminate: false)
+                    return
+                }
+            }
             sender.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater
     }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppTelemetry.lifecycle.notice("Application launched")

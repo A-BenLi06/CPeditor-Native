@@ -4,7 +4,7 @@ import NativeEditorModel
 struct WorkspaceView: View {
     @State private var workspace: Workspace
 
-    init(workspace: Workspace = Workspace(arguments: Array(CommandLine.arguments.dropFirst()))) {
+    init(workspace: Workspace = Workspace(arguments: Array(CommandLine.arguments.dropFirst()), automaticRecovery: true)) {
         _workspace = State(initialValue: workspace)
     }
 
@@ -28,10 +28,24 @@ struct WorkspaceView: View {
                 }
             }
             .navigationTitle(L10n.string("documents"))
+            .disabled(workspace.isLoading || workspace.isClosing || workspace.closingDocumentID != nil || workspace.decidingCloseID != nil)
             .navigationSplitViewColumnWidth(min: 180, ideal: 230, max: 320)
         } detail: {
             VSplitView {
               VStack(spacing: 0) {
+                if let notice = workspace.preferenceNotice {
+                    Text(notice).font(.caption).foregroundStyle(.secondary).padding(10)
+                }
+                if let recovery = workspace.recovery, let notice = recovery.notice {
+                    HStack(alignment: .top) {
+                        Image(systemName: "exclamationmark.triangle")
+                        Text(notice).textSelection(.enabled)
+                        Spacer()
+                        Button(L10n.string("save_recovery_as")) { Task { await recovery.saveElsewhere() } }
+                        Button(L10n.string("load_recovery_backup")) { Task { await recovery.loadBackup() } }
+                        Button(L10n.string("retry_recovery")) { Task { await recovery.retry() } }
+                    }.font(.caption).padding(10).background(.quaternary).disabled(workspace.isBusy)
+                }
                 ZStack {
                     NativeEditorDeck(sessions: workspace.sessions, selectedID: workspace.selection,
                                      wrapText: workspace.wrapText, showMinimap: workspace.showMinimap)
@@ -39,6 +53,7 @@ struct WorkspaceView: View {
                         ContentUnavailableView(L10n.string("no_document"), systemImage: "doc.text",
                                                description: Text(L10n.string("open_or_create")))
                     }
+                    if workspace.isLoading { ProgressView(L10n.string("loading_recovery")) }
                 }
                 if let session = workspace.activeSession {
                     Divider()
@@ -47,27 +62,29 @@ struct WorkspaceView: View {
               }.frame(minHeight: 170)
               if let session = workspace.activeSession {
                   RunPanelView(session: session, runner: workspace.runner)
+                      .disabled(workspace.isLoading || workspace.isClosing)
               }
             }
             .navigationTitle(workspace.activeSession.map(workspace.title(for:)) ?? L10n.string("app_name"))
         }
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
-                Button { workspace.openPanel() } label: {
+                Button { Task { await workspace.openPanel() } } label: {
                     Label(L10n.string("open_document"), systemImage: "folder")
-                }
-                Button { workspace.save() } label: {
+                }.disabled(workspace.isBusy)
+                Button { Task { await workspace.save() } } label: {
                     Label(L10n.string("save"), systemImage: "square.and.arrow.down")
-                }.disabled(workspace.activeSession == nil)
+                }.disabled(workspace.activeSession == nil || workspace.isBusy)
                 Toggle(isOn: $workspace.wrapText) {
                     Label(L10n.string("wrap_lines"), systemImage: "text.alignleft")
-                }
+                }.disabled(workspace.isLoading || workspace.isClosing)
                 Toggle(isOn: $workspace.showMinimap) {
                     Label(L10n.string("show_minimap"), systemImage: "sidebar.right")
-                }.disabled(workspace.activeSession?.document.editorKind != .codeEditorView)
+                }.disabled(workspace.activeSession?.document.editorKind != .codeEditorView || workspace.isLoading || workspace.isClosing)
             }
         }
         .focusedSceneValue(\.editorWorkspace, workspace)
+        .task { await workspace.bootstrap() }
         .background(WindowCloseGuard(workspace: workspace).frame(width: 0, height: 0))
         .alert(L10n.string("error_title"), isPresented: Binding(
             get: { workspace.errorMessage != nil },
