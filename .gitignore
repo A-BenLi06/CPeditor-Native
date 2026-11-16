@@ -11,3 +11,5 @@ xcuserdata/
 /.build/
 /DerivedData/
 /artifacts/
+apps/macos/.build/
+apps/macos/.swiftpm/

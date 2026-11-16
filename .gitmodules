@@ -1,3 +1,9 @@
 [submodule "references/cpeditor"]
 	path = references/cpeditor
 	url = https://github.com/cpeditor/cpeditor.git
+[submodule "third_party/WinUIEdit"]
+	path = third_party/WinUIEdit
+	url = https://github.com/BreeceW/WinUIEdit.git
+[submodule "third_party/json"]
+	path = third_party/json
+	url = https://github.com/nlohmann/json.git
