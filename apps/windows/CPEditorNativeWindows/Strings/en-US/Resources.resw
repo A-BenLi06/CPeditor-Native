@@ -31,7 +31,7 @@
     <value>{0} — {1}{2}</value>
   </data>
   <data xml:space="preserve" name="StatusFormat">
-    <value>{0}  |  Revision {1}  |  UTF-8: {2} bytes  |  Caret: {3}  |  Anchor: {4}</value>
+    <value>{0}  |  Committed revision {1}  |  UTF-8: {2} bytes  |  Caret: {3}  |  Anchor: {4}</value>
   </data>
   <data xml:space="preserve" name="ErrorTitle">
     <value>Unable to complete the action</value>
@@ -100,5 +100,216 @@
   </data>
   <data xml:space="preserve" name="Profiles.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name">
     <value>Language</value>
+  </data>
+  <data xml:space="preserve" name="RunAll.Content">
+    <value>Run all</value>
+  </data>
+  <data xml:space="preserve" name="CancelRun.Content">
+    <value>Cancel</value>
+  </data>
+  <data xml:space="preserve" name="AddTest.Content">
+    <value>Add sample</value>
+  </data>
+  <data xml:space="preserve" name="Toolchains.PlaceholderText">
+    <value>Toolchain</value>
+  </data>
+  <data xml:space="preserve" name="Toolchains.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name">
+    <value>Toolchain</value>
+  </data>
+  <data xml:space="preserve" name="Comparisons.PlaceholderText">
+    <value>Output comparison</value>
+  </data>
+  <data xml:space="preserve" name="Comparisons.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name">
+    <value>Output comparison</value>
+  </data>
+  <data xml:space="preserve" name="ToolchainMSVC">
+    <value>C++ / MSVC</value>
+  </data>
+  <data xml:space="preserve" name="ToolchainClang">
+    <value>C++ / Clang</value>
+  </data>
+  <data xml:space="preserve" name="ToolchainGCC">
+    <value>C++ / GCC</value>
+  </data>
+  <data xml:space="preserve" name="ToolchainPython">
+    <value>Python</value>
+  </data>
+  <data xml:space="preserve" name="ComparisonTrailing">
+    <value>Ignore trailing spaces</value>
+  </data>
+  <data xml:space="preserve" name="ComparisonStrict">
+    <value>CP Editor strict</value>
+  </data>
+  <data xml:space="preserve" name="ComparisonByte">
+    <value>Exact bytes</value>
+  </data>
+  <data xml:space="preserve" name="ProfilePython">
+    <value>Python (plain text)</value>
+  </data>
+  <data xml:space="preserve" name="RunIdle">
+    <value>Ready</value>
+  </data>
+  <data xml:space="preserve" name="RunAwaitingCommittedText">
+    <value>Waiting for committed source text…</value>
+  </data>
+  <data xml:space="preserve" name="RunQueued">
+    <value>Queued</value>
+  </data>
+  <data xml:space="preserve" name="RunBuilding">
+    <value>Compiling…</value>
+  </data>
+  <data xml:space="preserve" name="RunRunning">
+    <value>Running…</value>
+  </data>
+  <data xml:space="preserve" name="RunChecking">
+    <value>Comparing…</value>
+  </data>
+  <data xml:space="preserve" name="RunCompleted">
+    <value>Completed</value>
+  </data>
+  <data xml:space="preserve" name="RunCancelled">
+    <value>Cancelled</value>
+  </data>
+  <data xml:space="preserve" name="RunFailed">
+    <value>Failed</value>
+  </data>
+  <data xml:space="preserve" name="RunUnknown">
+    <value>Unknown</value>
+  </data>
+  <data xml:space="preserve" name="VerdictAC">
+    <value>AC</value>
+  </data>
+  <data xml:space="preserve" name="VerdictWA">
+    <value>WA</value>
+  </data>
+  <data xml:space="preserve" name="VerdictTLE">
+    <value>TLE</value>
+  </data>
+  <data xml:space="preserve" name="VerdictRE">
+    <value>RE</value>
+  </data>
+  <data xml:space="preserve" name="VerdictOLE">
+    <value>OLE</value>
+  </data>
+  <data xml:space="preserve" name="VerdictUnchecked">
+    <value>Unchecked</value>
+  </data>
+  <data xml:space="preserve" name="VerdictCancelled">
+    <value>Cancelled</value>
+  </data>
+  <data xml:space="preserve" name="VerdictNotRun">
+    <value>Not run</value>
+  </data>
+  <data xml:space="preserve" name="VerdictCheckerError">
+    <value>Checker error</value>
+  </data>
+  <data xml:space="preserve" name="VerdictInfrastructureError">
+    <value>Execution error</value>
+  </data>
+  <data xml:space="preserve" name="BuildNotRequired">
+    <value>Not required</value>
+  </data>
+  <data xml:space="preserve" name="BuildSucceeded">
+    <value>Succeeded</value>
+  </data>
+  <data xml:space="preserve" name="BuildCompilationError">
+    <value>Compilation error</value>
+  </data>
+  <data xml:space="preserve" name="BuildFailed">
+    <value>Failed</value>
+  </data>
+  <data xml:space="preserve" name="BuildCancelled">
+    <value>Cancelled</value>
+  </data>
+  <data xml:space="preserve" name="DocumentLimit">
+    <value>The configured maximum number of open documents has been reached.</value>
+  </data>
+  <data xml:space="preserve" name="TestLimit">
+    <value>The configured maximum number of samples has been reached.</value>
+  </data>
+  <data xml:space="preserve" name="TestEnabled">
+    <value>Enabled</value>
+  </data>
+  <data xml:space="preserve" name="HasExpected">
+    <value>Compare expected output (empty text means empty output)</value>
+  </data>
+  <data xml:space="preserve" name="TestInput">
+    <value>Input</value>
+  </data>
+  <data xml:space="preserve" name="TestExpected">
+    <value>Expected output</value>
+  </data>
+  <data xml:space="preserve" name="RemoveTest">
+    <value>Remove sample</value>
+  </data>
+  <data xml:space="preserve" name="RunError">
+    <value>The program could not be run.</value>
+  </data>
+  <data xml:space="preserve" name="TestError">
+    <value>The sample could not be changed.</value>
+  </data>
+  <data xml:space="preserve" name="SnapshotTrackingFailed">
+    <value>Committed source tracking is unavailable. Close and reopen this document to recreate the editor.</value>
+  </data>
+  <data xml:space="preserve" name="EditorInitializing">
+    <value>Initializing editor…</value>
+  </data>
+  <data xml:space="preserve" name="CompositionOrNativeBusy">
+    <value>Source text is being composed or updated…</value>
+  </data>
+  <data xml:space="preserve" name="FinishCompositionBeforeSaving">
+    <value>Finish composing the source text before saving.</value>
+  </data>
+  <data xml:space="preserve" name="SavedEarlierRevision">
+    <value>An earlier committed revision was saved; later edits are still unsaved.</value>
+  </data>
+  <data xml:space="preserve" name="Saved">
+    <value>Saved.</value>
+  </data>
+  <data xml:space="preserve" name="ChangedDuringClose">
+    <value>The document changed while closing. Review the edits and close again.</value>
+  </data>
+  <data xml:space="preserve" name="CancellationRequested">
+    <value>Cancellation requested…</value>
+  </data>
+  <data xml:space="preserve" name="ResultRevisionFormat">
+    <value>Result for source revision {0}</value>
+  </data>
+  <data xml:space="preserve" name="ResultStale">
+    <value>Outdated: source, samples or run settings have changed.</value>
+  </data>
+  <data xml:space="preserve" name="OutputHex">
+    <value>Binary or invalid UTF-8 output (hex):</value>
+  </data>
+  <data xml:space="preserve" name="DisplayOutputTruncated">
+    <value>Display limited; the captured output contains {0} bytes.</value>
+  </data>
+  <data xml:space="preserve" name="CoreOutputTruncated">
+    <value>The process output was truncated by the configured capture limit.</value>
+  </data>
+  <data xml:space="preserve" name="BuildOutputFormat">
+    <value>Build: {0}
+
+Build stdout:
+{1}
+
+Build stderr:
+{2}
+
+{3}</value>
+  </data>
+  <data xml:space="preserve" name="TestResultFormat">
+    <value>{0}  |  {1} ms
+
+stdout:
+{2}
+
+stderr:
+{3}
+
+{4}</value>
+  </data>
+  <data xml:space="preserve" name="CoreDeliveryFailed">
+    <value>The run coordinator could not deliver an event. Reopen the application to restart it.</value>
   </data>
 </root>

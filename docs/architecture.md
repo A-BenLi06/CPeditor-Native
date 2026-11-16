@@ -1,6 +1,6 @@
 # 原生架构
 
-状态：拟议设计，以[源码审查](upstream-audit.md)和[编辑器研究](editor-evaluation.md)为依据。本文不表示原生实现已经完成，也不表示已经取得性能测试结果。
+状态：总体架构及分阶段设计，以[源码审查](upstream-audit.md)和[编辑器研究](editor-evaluation.md)为依据。当前已实现的能力和实际验证证据见[实施状态](status.md)，精确接口见[当前 Core API](core-api.md)。本文中的后续模块不代表已经实现或通过性能验收。
 
 ## 架构决策与范围
 
@@ -18,8 +18,10 @@ flowchart TB
         WUI[WinUI 3 外壳与呈现模型]
         WDC[文档协调器]
         WE[可替换的 WinUIEdit 适配器]
+        WB[CoreRunner 后台协调线程]
         WUI --> WDC
         WDC --> WE
+        WDC --> WB
     end
     subgraph macOS[macOS 应用]
         MUI[SwiftUI 场景与呈现模型]
@@ -30,8 +32,9 @@ flowchart TB
         MDC --> ME
         MDC --> MB
     end
-    WDC --> API[C++ 应用 API]
-    MB --> API
+    WB --> ABI[稳定 C ABI 与有界句柄]
+    MB --> ABI
+    ABI --> API[C++ 服务 API]
     API --> Services[构建、运行、判题、导入、会话与语言服务]
     Services --> Domain[可跨平台的领域值与比较规则]
     Services --> Ports[进程、文件、时钟、HTTP 与配置接口]
@@ -76,7 +79,9 @@ flowchart TB
 
 首个候选是原生 WinUI Scintilla 移植版。上游记录了 IME、窗口重新激活和辅助功能方面的限制，不能直接假定其输入行为已满足生产要求。直接承载 Scintilla HWND 是单独的备选原型，需要自行验证 XAML 裁剪、弹出层、焦点、键盘、DPI 和辅助功能。Monaco／WebView2 是未来可选的权衡方案，需要另行决策，不属于首条原生编辑器路线。
 
-使用 `DispatcherQueue` 将状态变化调度到 UI。进程 I/O、编译、检查、解析和会话写入均在 UI 线程之外执行。使用可选的 Windows 背景效果前检查系统能力；效果不可用时，Windows 10 使用普通系统背景。开发阶段先采用选定 Windows App SDK 的打包模式；初步分发方案为签名 MSIX。便携／非打包模式需要单独验证运行时部署、路径和恢复行为。
+使用 `DispatcherQueue` 将状态变化调度到 UI。当前 Windows 桥接采用与 Swift 相同的 C ABI，由 `CoreRunner` 后台线程拥有引擎、提交请求、消费事件和释放句柄；原生编辑器只交付带文档身份和 revision 的不可变值。任务终态消费后才释放句柄，关闭在后台等待完成。进程 I/O、编译、检查和事件处理均在 UI 线程之外执行，Windows 会话接入尚待实施。
+
+使用可选的 Windows 背景效果前检查系统能力；效果不可用时，Windows 10 使用普通系统背景。开发阶段先采用选定 Windows App SDK 的打包模式；初步分发方案为签名 MSIX。便携／非打包模式需要单独验证运行时部署、路径和恢复行为。
 
 Windows 通过 `CreateProcessW` 创建进程，明确解析可执行文件，并正确编码参数向量。允许子进程执行前将其关联到 Job Objects，仅继承预期的管道句柄，并在适当情况下启用作业关闭时终止进程的机制。显式处理嵌套作业和关联失败。Shell 脚本用于开发及用户明确请求的终端命令，编译过程不隐式经由 Shell 执行。
 
@@ -108,9 +113,9 @@ SwiftUI 负责场景、命令、工具栏、侧边栏／面板和设置。使用
 
 后续服务扩展通过注册适配器接入：格式化器、语言服务器、检查器、生成器／交互器、终端和在线评测提交。MVP 不引入动态插件框架。提交凭据保存在原生凭据存储中，不写入可跨平台的恢复数据。集成仅执行用户明确发出的命令；导入不执行代码或提交解答。
 
-## 拟议仓库布局
+## 仓库布局与后续模块
 
-当前只有文档和参考子模块。下列目录是后续实现布局，不创建空的占位构建目标：
+当前已有两端原生宿主、共享 Core、契约、测试和固定参考子模块。下列布局同时包含后续服务的计划位置；Companion、LSP、格式化和高级判题仍按实施计划开发，不创建空的占位构建目标：
 
 ```text
 apps/
@@ -120,9 +125,10 @@ core/
   include/cpn/             # 领域、服务及抽象接口契约
   src/domain/
   src/services/
+  src/bridge/              # 当前 C ABI 实现
+  src/platform/common/     # 文件事务与合作锁
   src/platform/windows/
-  src/platform/macos/
-  src/c_api/
+  src/platform/posix/      # 当前 macOS/POSIX 进程实现
 contracts/                 # 带版本的配置／会话／Companion 映射及测试夹具
 resources/profiles/        # 声明式语言／工具链／检查器配置档
 tests/
@@ -130,6 +136,7 @@ tests/
   integration/
   editor-conformance/
 tools/                     # PowerShell 7 Windows 脚本及识别平台的工具
+patches/winuiedit/         # 哈希锁定的 committed snapshot 补丁
 docs/
 references/cpeditor/       # 固定版本的研究源码；不参与应用构建
 ```
@@ -140,7 +147,7 @@ references/cpeditor/       # 固定版本的研究源码；不参与应用构建
 | --- | --- | --- |
 | C++20 共享服务与两套原生外壳 | 共享竞赛语义，同时由各平台独立管理输入和布局 | 独立 Core 无法保持不依赖 Qt |
 | 集成编辑器组件 | 限制 IDE 维护范围，并允许根据验证结果更换组件 | 所有候选均未通过原型验收 |
-| Windows 使用 C++ API，macOS 使用 C ABI | Windows 直接接入；Swift 所有权规则明确，不依赖 STL ABI | 实测桥接成本足以支持内部采用已验证的 Swift-C++ 互操作 |
+| 两端原生桥接使用同一 C ABI | 共用请求／事件、限额和句柄生命周期验证；Windows 后台协调线程与 Swift actor 分别管理平台调度 | 新的接口需要直接 C++ 调用，且能保持一致的所有权与取消语义 |
 | 进程内引擎与受管理子进程 | 避免过早引入 RPC，用户程序在 UI 进程之外执行 | 崩溃隔离／沙箱要求足以支持受监督的服务进程 |
 | 新的带版本持久化格式及旧格式导入 | 解除 Qt 持久化耦合，同时保护未保存工作 | 旧格式测试夹具发现必须支持的新格式 |
 | 保持行为兼容，并明确记录改进 | 保留检查器和文件工作流，避免复现误导性的判定结果 | 已记录的兼容策略发生变化 |

@@ -41,7 +41,7 @@ git submodule status --recursive
 - 首先在指定的 Windows 10 22H2 机器上验证 WinUIEdit 原型，包括原有 UU 远程及虚拟桌面问题的复现流程。
 - 在 macOS 上对比 CodeEditorView 与 STTextView，将 CodeEditSourceEditor 保留为第三个候选；CodeEdit 和 BriskEdit 用于架构参考。
 - 抽离竞赛业务语义，重建进程、持久化和协议适配层。编辑器缓冲区、输入法、撤销和渲染由两端原生应用分别管理。
-- Swift 桥接使用稳定的 C ABI；Windows C++ 界面通过 C++ API 调用同一引擎。
+- 两端原生桥接目前统一使用稳定的 C ABI：Swift 通过 actor 管理句柄，Windows C++ 通过后台协调线程提交和消费事件。底层服务仍提供 C++ 接口。
 - 配置与本地化保持可扩展。C++ 是首个接受验证的语言配置，而非固定的语言模型。
 
 CP Editor 源文件头允许按 GPL 第 3 版或更高版本使用。参考项目保留各自许可证。原生实现的代码复用和分发应遵循源码审查中的来源与许可决策；首次架构变更没有将这些项目的实现复制到新 Core 中。

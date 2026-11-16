@@ -210,3 +210,20 @@ Core 规则区分空输入、缺少预期输出与预期输出为空、checker �
 
 - 检查目标文档不存在其他待提交改动，并执行 Markdown 空白检查；本次提交只包含 AGENTS.md 和改动记录。
 - git push --dry-run origin main 与首次提交后的 git push origin main 均实际被 non-fast-forward 拒绝：本地与远端历史尚未整合。本地提交已保留；补充失败记录后再次执行普通 push，最终同步状态以推送结果为准。
+
+## 2026-11-17T01:05:02+08:00 — Windows 多标签、Core 运行与可靠保存基线
+
+### 改动与思路
+
+- Windows 宿主接入持续挂载的每文档原生编辑器、独立撤销／光标／样例／运行身份及英文资源；配置定义工具链、比较策略、限额与状态映射。Python 首先使用纯文本 lexer，不声明语法高亮已完成。
+- WinUIEditAdapter 使用哈希锁定补丁的 guarded committed API，原子读取正文／revision／选区。Run 先拥有样例和配置，在 composition／原生队列释放后捕获正文；待提交意图可取消，tracking 永久失效明确失败，不回退读取 preedit。
+- CoreRunner 在后台协调线程拥有 C ABI 引擎；提交前预留追踪节点，取消按 token 去重，终态校验后 release，buffer RAII。关闭 join 在后台，外部并发 close 串行化；同worker回调重入 close 在改变状态前拒绝。交付异常可观察，generation过滤旧UI事件。
+- 独立审查修复保存B期间编辑C、随后undo回原保存点A却错误clean的问题：以实际落盘正文为权威基线；正常使用native savepoint，失效期间每committed revision缓存比较，回到B后恢复native保存点。失败不更新基线，保存期间可继续输入。
+- Windows verify增加正式Core桥接构建／测试及报告标志；Debug／Release CRT与Core一致。中文Windows说明、测试复现文档及总架构更新为两端共用C ABI；当前Windows会话与源文件外部冲突仍未接入。
+
+### 验证与范围
+
+- macOS ARM64中文路径上的正式桥接普通、完整Core两侧ASan／UBSan、TSan严格编译与实际子进程测试通过，命令／主机／+08:00时间戳／归档SHA记录于out/windows/research/core-adapter-validation.json。当前Apple运行时不支持LeakSanitizer，拒绝日志保留，没有泄漏检测结论。
+- 根另独立以-Werror编译正式桥接并链接out/core/dev/libcpn_core.a，全部回归通过；含UINT64_MAX／2^53+1、raw NUL、空／缺答案、CE／RE、取消、有限配额下释放重跑、回调拒绝及并发close。保存基线回归复验通过。
+- 根实际PowerShell7.7解析4脚本通过，非Windowsverify退出1，所有自动／UI通过标志false，10项人工not_run／null；XML／JSON、XAML事件、英文资源和实际打包profile路径检查通过。
+- Windows MSVC／MIDL／WinUI／TSF／IME／DPI／UU和性能尚未执行；请按目标机脚本采集真实证据，未将便携结果计作原生验收或完整产品完成。

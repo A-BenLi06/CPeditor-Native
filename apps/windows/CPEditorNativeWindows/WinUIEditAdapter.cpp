@@ -23,14 +23,11 @@ void WinUIEditAdapter::subscribe() {
         if (auto self = weak.lock(); self && !self->replacing_) {
             constexpr auto text_flags = static_cast<int>(winrt::WinUIEditor::ModificationFlags::InsertText) |
                                         static_cast<int>(winrt::WinUIEditor::ModificationFlags::DeleteText);
-            if ((args.ModificationType() & text_flags) != 0) {
-                if (self->revision_ == std::numeric_limits<std::uint64_t>::max()) {
-                    winrt::throw_hresult(E_BOUNDS);
-                }
-                ++self->revision_;
-                self->notify();
-            }
+            if ((args.ModificationType() & text_flags) != 0) self->notify();
         }
+    });
+    availability_ = control_.CommittedSnapshotAvailabilityChanged(winrt::auto_revoke, [weak](auto const&, bool) {
+        if (auto self = weak.lock(); self && !self->replacing_) self->notify();
     });
     reached_ = editor_.SavePointReached(winrt::auto_revoke, [weak](auto const&, auto const&) {
         if (auto self = weak.lock(); self && !self->replacing_) self->notify();
@@ -44,7 +41,10 @@ void WinUIEditAdapter::subscribe() {
 }
 void WinUIEditAdapter::notify() const { if (changed_) changed_(); }
 void WinUIEditAdapter::replace_document(std::string_view utf8) {
+    if (!control_.IsCommittedSnapshotTrackingAvailable()) winrt::throw_hresult(E_FAIL);
+    if (!control_.IsCommittedSnapshotAvailable()) winrt::throw_hresult(E_PENDING);
     FileStore::validate_utf8(utf8);
+    std::string loaded_baseline{utf8};
     if (utf8.size() >= std::numeric_limits<std::uint32_t>::max()) winrt::throw_hresult(E_BOUNDS);
     GUID identity{};
     winrt::check_hresult(CoCreateGuid(&identity));
@@ -66,7 +66,9 @@ void WinUIEditAdapter::replace_document(std::string_view utf8) {
         editor_.CurrentPos(0);
         editor_.Anchor(0);
         document_id_ = text;
-        revision_ = 1;
+        native_revision_base_ = control_.CommittedRevision();
+        saved_.record_written(std::move(loaded_baseline));
+        saved_.match_native_savepoint();
     } catch (...) {
         replacing_ = false;
         throw;
@@ -80,26 +82,55 @@ void WinUIEditAdapter::set_language(std::wstring_view language) {
 void WinUIEditAdapter::set_tab_width(std::uint32_t width) {
     editor_.TabWidth(static_cast<std::int32_t>(width));
 }
-void WinUIEditAdapter::mark_saved() { editor_.SetSavePoint(); notify(); }
+bool WinUIEditAdapter::mark_saved(EditorSnapshot written_snapshot) {
+    if (written_snapshot.document_id != document_id_) winrt::throw_hresult(E_INVALIDARG);
+    saved_.record_written(std::move(written_snapshot.utf8));
+    if (!committed_available() || revision() != written_snapshot.revision) { notify(); return false; }
+    editor_.SetSavePoint(); saved_.match_native_savepoint(); notify(); return true;
+}
+std::uint64_t WinUIEditAdapter::revision() const {
+    const auto native = control_.CommittedRevision();
+    if (native < native_revision_base_ || native - native_revision_base_ == std::numeric_limits<std::uint64_t>::max())
+        winrt::throw_hresult(E_BOUNDS);
+    return native - native_revision_base_ + 1;
+}
+bool WinUIEditAdapter::committed_available() const { return control_.IsCommittedSnapshotAvailable(); }
+bool WinUIEditAdapter::tracking_available() const { return control_.IsCommittedSnapshotTrackingAvailable(); }
+bool WinUIEditAdapter::composition_active() const { return control_.IsCompositionActive(); }
 void WinUIEditAdapter::focus() { control_.Focus(winrt::Microsoft::UI::Xaml::FocusState::Programmatic); }
-bool WinUIEditAdapter::dirty() const { return editor_.Modify(); }
+bool WinUIEditAdapter::dirty() const {
+    // A preedit or tracking failure must never permit a destructive action to assume a clean document.
+    if (!tracking_available() || !committed_available()) return true;
+    if (saved_.native_matches_disk()) return editor_.Modify();
+    const auto current_revision = revision();
+    if (auto cached = saved_.cached_dirty(current_revision)) return *cached;
+    EditorSnapshot current;
+    try { current = snapshot(); }
+    catch (winrt::hresult_error const& error) {
+        if (error.code() == E_PENDING || error.code() == E_FAIL) return true;
+        throw;
+    }
+    const bool changed = saved_.compare_committed(current.revision, current.utf8);
+    if (!changed) { editor_.SetSavePoint(); saved_.match_native_savepoint(); }
+    return changed;
+}
 std::int64_t WinUIEditAdapter::length() const { return editor_.Length(); }
 std::int64_t WinUIEditAdapter::caret_byte() const { return editor_.CurrentPos(); }
 std::int64_t WinUIEditAdapter::anchor_byte() const { return editor_.Anchor(); }
 EditorSnapshot WinUIEditAdapter::snapshot() const {
-    const auto length = editor_.Length();
-    if (length < 0 || length >= std::numeric_limits<std::uint32_t>::max()) winrt::throw_hresult(E_BOUNDS);
-    winrt::Windows::Storage::Streams::Buffer bytes{static_cast<std::uint32_t>(length + 1)};
-    bytes.Length(static_cast<std::uint32_t>(length + 1));
-    const auto copied = editor_.GetTextWriteBuffer(length + 1, bytes);
-    if (copied != length) winrt::throw_hresult(E_UNEXPECTED);
-    std::string utf8{reinterpret_cast<char const*>(bytes.data()), static_cast<std::size_t>(length)};
+    std::uint64_t native_revision{};
+    std::int64_t caret{}, anchor{};
+    const auto bytes = control_.ReadCommittedText(native_revision, caret, anchor);
+    if (native_revision < native_revision_base_ || native_revision - native_revision_base_ == std::numeric_limits<std::uint64_t>::max())
+        winrt::throw_hresult(E_BOUNDS);
+    std::string utf8;
+    if (bytes.Length()) utf8.assign(reinterpret_cast<char const*>(bytes.data()), bytes.Length());
     FileStore::validate_utf8(utf8);
-    return {document_id_, revision_, std::move(utf8),
-            editor_.CurrentPos(), editor_.Anchor()};
+    return {document_id_, native_revision - native_revision_base_ + 1, std::move(utf8), caret, anchor};
 }
 void WinUIEditAdapter::dispose() noexcept {
     changed_ = {};
+    availability_.revoke();
     modified_.revoke();
     reached_.revoke();
     left_.revoke();

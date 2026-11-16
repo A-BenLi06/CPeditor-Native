@@ -13,6 +13,10 @@
     <ClInclude Include="UiStrings.h" />
     <ClInclude Include="WinUIEditAdapter.h" />
     <ClInclude Include="pch.h" />
+    <ClInclude Include="CoreWire.h" />
+    <ClInclude Include="CoreRunner.h" />
+    <ClInclude Include="SaveBaseline.h" />
+    <ClInclude Include="RunnerConfiguration.h" />
   </ItemGroup>
   <ItemGroup>
     <ApplicationDefinition Include="App.xaml" />
@@ -27,6 +31,9 @@
     <ClCompile Include="WinUIEditAdapter.cpp" />
     <ClCompile Include="pch.cpp" />
     <ClCompile Include="$(GeneratedFilesDir)module.g.cpp" />
+    <ClCompile Include="CoreWire.cpp" />
+    <ClCompile Include="CoreRunner.cpp" />
+    <ClCompile Include="RunnerConfiguration.cpp" />
   </ItemGroup>
   <ItemGroup>
     <Midl Include="App.idl" />
@@ -38,14 +45,15 @@
   <ItemGroup>
     <Content Include="editor-profiles.json" />
     <Content Include="$(CPNGeneratedToolchainsDir)\*.json" />
-    <Content Include="..\..\..\resources\profiles\cpp-clang.json" />
+    <Content Include="..\..\..\tools\windows\profiles\cpp-clang-windows.json" />
     <Content Include="..\..\..\resources\profiles\cpp-gcc-windows.json" />
-    <Content Include="..\..\..\resources\profiles\python.json" />
+    <Content Include="..\..\..\tools\windows\profiles\python-windows.json" />
     <None Include="packages.config" />
     <Content Include="..\NOTICE.md" />
     <Content Include="..\..\..\third_party\WinUIEdit\LICENSE" />
     <Content Include="..\..\..\third_party\WinUIEdit\scintilla\License.txt" />
     <Content Include="..\..\..\third_party\WinUIEdit\lexilla\License.txt" />
+    <Content Include="runner-settings.json" />
   </ItemGroup>
   <ItemGroup>
     <Image Include="Assets\Square150x150Logo.scale-200.png" />

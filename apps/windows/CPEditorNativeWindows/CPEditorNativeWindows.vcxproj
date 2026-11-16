@@ -117,6 +117,10 @@
     <ClInclude Include="UiStrings.h" />
     <ClInclude Include="WinUIEditAdapter.h" />
     <ClInclude Include="pch.h" />
+    <ClInclude Include="CoreWire.h" />
+    <ClInclude Include="CoreRunner.h" />
+    <ClInclude Include="SaveBaseline.h" />
+    <ClInclude Include="RunnerConfiguration.h" />
   </ItemGroup>
   <ItemGroup>
     <ApplicationDefinition Include="App.xaml" />
@@ -137,6 +141,9 @@
       <PrecompiledHeader>Create</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="$(GeneratedFilesDir)module.g.cpp" />
+    <ClCompile Include="CoreWire.cpp" />
+    <ClCompile Include="CoreRunner.cpp" />
+    <ClCompile Include="RunnerConfiguration.cpp" />
   </ItemGroup>
   <ItemGroup>
     <Midl Include="App.idl">
@@ -166,6 +173,7 @@
     <Content Include="..\..\..\third_party\WinUIEdit\lexilla\License.txt">
       <Link>Licenses\Lexilla.txt</Link>
     </Content>
+    <Content Include="runner-settings.json" />
   </ItemGroup>
   <ItemGroup>
     <Image Include="Assets\Square150x150Logo.scale-200.png" />
@@ -182,14 +190,14 @@
     <Content Include="$(CPNGeneratedToolchainsDir)\*.json">
       <Link>Toolchains\%(Filename)%(Extension)</Link>
     </Content>
-    <Content Include="..\..\..\resources\profiles\cpp-clang.json">
-      <Link>Toolchains\cpp-clang.json</Link>
+    <Content Include="..\..\..\tools\windows\profiles\cpp-clang-windows.json">
+      <Link>Toolchains\cpp-clang-windows.json</Link>
     </Content>
     <Content Include="..\..\..\resources\profiles\cpp-gcc-windows.json">
       <Link>Toolchains\cpp-gcc-windows.json</Link>
     </Content>
-    <Content Include="..\..\..\resources\profiles\python.json">
-      <Link>Toolchains\python.json</Link>
+    <Content Include="..\..\..\tools\windows\profiles\python-windows.json">
+      <Link>Toolchains\python-windows.json</Link>
     </Content>
   </ItemGroup>
   <ItemGroup>

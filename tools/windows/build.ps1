@@ -19,6 +19,7 @@ $report = [ordered]@{
     host = Get-CpnWindowsHost; configuration = $Configuration; platform = $Platform
     stages = [Collections.Generic.List[object]]::new()
     coreBuildCompleted = $false; coreTestsExecuted = $false; coreTestsPassed = $false
+    bridgeBuildCompleted = $false; bridgeTestsExecuted = $false; bridgeTestsPassed = $false
     sourceEditorBuildCompleted = $false; appBuildCompleted = $false
     deploymentRequested = $Deploy.IsPresent -or $Launch.IsPresent; deploymentCompleted = $false
     activationRequested = $false; uiValidationCompleted = $false; failure = $null
@@ -69,6 +70,25 @@ try {
         "/Fo:$(Join-Path $outputRoot 'committed-text-tests.obj')", "/Fe:$stateTestExe"
     ) -Report $report -OutputRoot $outputRoot
     if ($nativeTestPlatform) { Invoke-CpnNativeStage -Name 'committed-state-test' -Executable $stateTestExe -Report $report -OutputRoot $outputRoot }
+    $bridgeTestExe = Join-Path $outputRoot 'core-adapter-tests.exe'
+    $bridgeObjects = Join-Path $outputRoot 'bridge-tests/obj'
+    New-Item -ItemType Directory -Path $bridgeObjects -Force | Out-Null
+    $bridgeSource = Join-Path $repositoryRoot 'apps/windows/CPEditorNativeWindows'
+    $runtimeLibrary = if ($Configuration -eq 'Debug') { '/MDd' } else { '/MD' }
+    Invoke-CpnNativeStage -Name 'bridge-build' -Executable $toolchain.compiler -Arguments @(
+        '/nologo', '/std:c++20', '/EHsc', '/W4', '/utf-8', $runtimeLibrary, '/DCPN_PORTABLE_ADAPTER_TEST',
+        "/I$(Join-Path $repositoryRoot 'core/include')", "/I$(Join-Path $repositoryRoot 'third_party/json/include')", "/I$bridgeSource",
+        (Join-Path $bridgeSource 'CoreWire.cpp'), (Join-Path $bridgeSource 'CoreRunner.cpp'),
+        (Join-Path $bridgeSource 'RunnerConfiguration.cpp'), (Join-Path $repositoryRoot 'apps/windows/tests/CoreRunnerTests.cpp'),
+        "/Fo$bridgeObjects\", "/Fe:$bridgeTestExe", '/link', $coreLibrary
+    ) -Report $report -OutputRoot $outputRoot
+    $report.bridgeBuildCompleted = $true
+    if ($nativeTestPlatform) {
+        $report.bridgeTestsExecuted = $true
+        Invoke-CpnNativeStage -Name 'bridge-tests' -Executable $bridgeTestExe `
+            -Arguments @((Join-Path $bridgeSource 'runner-settings.json')) -Report $report -OutputRoot $outputRoot
+        $report.bridgeTestsPassed = $true
+    }
     $sourceLockPath = Join-Path $repositoryRoot 'patches/winuiedit/source-lock.json'
     $sourceLock = Get-Content -LiteralPath $sourceLockPath -Raw | ConvertFrom-Json
     $sourceLockHash = (Get-FileHash -LiteralPath $sourceLockPath -Algorithm SHA256).Hash.ToLowerInvariant()

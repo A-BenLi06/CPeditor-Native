@@ -5,7 +5,39 @@
   "maxDocumentBytes": 33554432,
   "tabWidth": 4,
   "profiles": [
-    { "id": "cpp", "labelResource": "ProfileCpp", "highlightingLanguage": "cpp", "defaultExtension": ".cpp", "extensions": [".cpp", ".cc", ".cxx", ".h", ".hpp", ".c"] },
-    { "id": "plain", "labelResource": "ProfilePlain", "highlightingLanguage": "", "defaultExtension": ".txt", "extensions": [".txt", ".in", ".out"] }
+    {
+      "id": "cpp",
+      "labelResource": "ProfileCpp",
+      "highlightingLanguage": "cpp",
+      "defaultExtension": ".cpp",
+      "extensions": [
+        ".cpp",
+        ".cc",
+        ".cxx",
+        ".h",
+        ".hpp",
+        ".c"
+      ]
+    },
+    {
+      "id": "python",
+      "labelResource": "ProfilePython",
+      "highlightingLanguage": "plaintext",
+      "defaultExtension": ".py",
+      "extensions": [
+        ".py"
+      ]
+    },
+    {
+      "id": "plain",
+      "labelResource": "ProfilePlain",
+      "highlightingLanguage": "",
+      "defaultExtension": ".txt",
+      "extensions": [
+        ".txt",
+        ".in",
+        ".out"
+      ]
+    }
   ]
 }

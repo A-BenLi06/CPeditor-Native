@@ -27,7 +27,7 @@ std::string SnapshotJson::encode(EditorSnapshot const& snapshot,
     };
     string(Fields::format, L"cpn.editor-snapshot");
     result.SetNamedValue(Fields::version, JsonValue::CreateNumberValue(1));
-    string(Fields::kind, L"native-buffer");
+    string(Fields::kind, L"committed");
     string(Fields::document_id, winrt::hstring{snapshot.document_id});
     string(Fields::revision, winrt::to_hstring(snapshot.revision));
     string(Fields::byte_length, winrt::to_hstring(snapshot.utf8.size()));

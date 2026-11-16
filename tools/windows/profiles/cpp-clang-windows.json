@@ -1,0 +1,8 @@
+{
+  "schema_version": 1, "id": "cpp-clang-windows", "language_id": "cpp",
+  "source_filename": "main.cpp", "artifact_name": "solution.exe",
+  "build": { "executable": "clang++", "arguments": ["-std=c++20", "-O2", "-I", "${source_dir}", "${source}", "-o", "${artifact}"] },
+  "run": { "executable": "${artifact}", "arguments": [] },
+  "build_limits": { "wall_timeout_ms": 30000 }, "run_limits": { "wall_timeout_ms": 2000 },
+  "inherit_environment": true, "environment": [], "variables": []
+}

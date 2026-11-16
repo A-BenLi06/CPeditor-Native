@@ -56,7 +56,8 @@ try {
     $report.buildReportPath = Join-Path $outputRoot 'build-result.json'
     $report.automatedExecutionCompleted = $true
     $report.automatedPassed = $buildReport.coreBuildCompleted -and $buildReport.coreTestsExecuted -and
-        $buildReport.coreTestsPassed -and $buildReport.sourceEditorBuildCompleted -and $buildReport.appBuildCompleted
+        $buildReport.coreTestsPassed -and $buildReport.bridgeBuildCompleted -and $buildReport.bridgeTestsExecuted -and
+        $buildReport.bridgeTestsPassed -and $buildReport.sourceEditorBuildCompleted -and $buildReport.appBuildCompleted
     $report.activationRequested = $buildReport.activationRequested
     $report.deploymentCompleted = $buildReport.deploymentCompleted
 } catch {

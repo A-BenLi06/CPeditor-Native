@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "limits": {
+    "maximumDocuments": 16,
+    "maximumTests": 128,
+    "displayOutputBytes": 65536,
+    "maximumCommands": 64,
+    "maximumDrainEvents": 64,
+    "eventPollMilliseconds": 25,
+    "maximumWorkers": 2,
+    "maximumJobs": 16,
+    "maximumBuffers": 16,
+    "maximumRequestBytes": 16777216,
+    "maximumRetainedOutputBytes": 67108864
+  },
+  "defaultToolchains": {
+    "cpp": "cpp-msvc",
+    "plain": "cpp-msvc",
+    "python": "python-windows"
+  },
+  "toolchains": [
+    {
+      "id": "cpp-msvc",
+      "file": "cpp-msvc.json",
+      "labelResource": "ToolchainMSVC"
+    },
+    {
+      "id": "cpp-clang-windows",
+      "file": "cpp-clang-windows.json",
+      "labelResource": "ToolchainClang"
+    },
+    {
+      "id": "cpp-gcc-windows",
+      "file": "cpp-gcc-windows.json",
+      "labelResource": "ToolchainGCC"
+    },
+    {
+      "id": "python-windows",
+      "file": "python-windows.json",
+      "labelResource": "ToolchainPython"
+    }
+  ],
+  "defaultComparison": "trailing",
+  "comparisons": [
+    {
+      "id": "trailing",
+      "labelResource": "ComparisonTrailing"
+    },
+    {
+      "id": "strict",
+      "labelResource": "ComparisonStrict"
+    },
+    {
+      "id": "byte",
+      "labelResource": "ComparisonByte"
+    }
+  ],
+  "stateLabels": {
+    "Idle": "RunIdle",
+    "AwaitingCommittedText": "RunAwaitingCommittedText",
+    "Queued": "RunQueued",
+    "Building": "RunBuilding",
+    "Running": "RunRunning",
+    "Checking": "RunChecking",
+    "Completed": "RunCompleted",
+    "Cancelled": "RunCancelled",
+    "Failed": "RunFailed"
+  },
+  "verdictLabels": {
+    "AC": "VerdictAC",
+    "WA": "VerdictWA",
+    "TLE": "VerdictTLE",
+    "RE": "VerdictRE",
+    "OLE": "VerdictOLE",
+    "Unchecked": "VerdictUnchecked",
+    "Cancelled": "VerdictCancelled",
+    "NotRun": "VerdictNotRun",
+    "CheckerError": "VerdictCheckerError",
+    "InfrastructureError": "VerdictInfrastructureError"
+  },
+  "buildLabels": {
+    "NotRequired": "BuildNotRequired",
+    "Succeeded": "BuildSucceeded",
+    "CompilationError": "BuildCompilationError",
+    "Failed": "BuildFailed",
+    "Cancelled": "BuildCancelled"
+  }
+}

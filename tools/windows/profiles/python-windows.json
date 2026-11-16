@@ -1,0 +1,7 @@
+{
+  "schema_version": 1, "id": "python-windows", "language_id": "python",
+  "source_filename": "main.py", "artifact_name": "", "build": null,
+  "run": { "executable": "python", "arguments": ["${source}"] },
+  "run_limits": { "wall_timeout_ms": 2000 },
+  "inherit_environment": true, "environment": [], "variables": []
+}

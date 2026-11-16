@@ -1,5 +1,6 @@
 #pragma once
 #include "pch.h"
+#include "SaveBaseline.h"
 
 namespace cpn::windows {
 struct EditorSnapshot {
@@ -19,11 +20,15 @@ public:
     void replace_document(std::string_view utf8);
     void set_language(std::wstring_view language);
     void set_tab_width(std::uint32_t width);
-    void mark_saved();
+    [[nodiscard]] bool mark_saved(EditorSnapshot written_snapshot);
     void focus();
     void dispose() noexcept;
     [[nodiscard]] bool dirty() const;
-    [[nodiscard]] std::uint64_t revision() const noexcept { return revision_; }
+    [[nodiscard]] std::uint64_t revision() const;
+    [[nodiscard]] std::wstring const& document_id() const noexcept { return document_id_; }
+    [[nodiscard]] bool committed_available() const;
+    [[nodiscard]] bool tracking_available() const;
+    [[nodiscard]] bool composition_active() const;
     [[nodiscard]] std::int64_t length() const;
     [[nodiscard]] std::int64_t caret_byte() const;
     [[nodiscard]] std::int64_t anchor_byte() const;
@@ -38,9 +43,11 @@ private:
     winrt::WinUIEditor::Editor::SavePointReached_revoker reached_;
     winrt::WinUIEditor::Editor::SavePointLeft_revoker left_;
     winrt::WinUIEditor::Editor::UpdateUI_revoker updated_;
+    winrt::WinUIEditor::CodeEditorControl::CommittedSnapshotAvailabilityChanged_revoker availability_;
     bool replacing_{false};
     std::wstring document_id_;
-    std::uint64_t revision_{0};
+    std::uint64_t native_revision_base_{0};
+    mutable SaveBaseline saved_;
     std::function<void()> changed_;
 };
 }

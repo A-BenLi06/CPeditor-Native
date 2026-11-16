@@ -1,84 +1,106 @@
-# Windows M0 原型
+# Windows 原生应用与共享 Core 接入
 
-这是 WinUI 3 + C++/WinRT + WinUIEdit 的编辑器验证工程。当前已编写原生编辑器适配、文件事务、英文资源和构建脚本；尚未在 Windows 主机编译、部署或运行。以下行为是实现意图及待验证项，不能据此认定 M0 验收通过。
+这是 WinUI 3 + C++/WinRT + WinUIEdit 的原生应用工程。当前源码已编写多标签、每文档独立编辑器、committed 快照、文件事务、样例编辑、工具链选择、Run All / Cancel 和共享 C ABI 协调。便携桥接测试已在 macOS 执行；Windows 工程尚未编译、部署或运行，因此本文描述的原生行为仍需目标机验证。
 
-主要目标为 Windows 10 22H2 专业工作站版。当前开发主机为 macOS，Windows 构建和运行应在目标 Windows 环境完成。
+主要目标是 Windows 10 22H2 专业工作站版。实际开发与本轮便携验证主机为 macOS ARM64，不能将其结果记为 Windows、WinUI、输入法、DPI 或 UU 远程验证通过。
 
 ## 组成与边界
 
 ```mermaid
 flowchart LR
-    Window[MainWindow / WinUI 3] --> Adapter[WinUIEditAdapter]
+    Window[MainWindow / WinUI 3] --> Document[每文档编辑器、样例与运行状态]
+    Document --> Adapter[WinUIEditAdapter]
     Adapter --> Control[WinUIEdit / Scintilla]
-    Window --> Profiles[editor-profiles.json]
+    Adapter --> Baseline[SaveBaseline / 已写入正文基线]
     Window --> Files[FileStore / Win32 文件事务]
-    Window --> Snapshot[SnapshotJson / 原生缓冲区诊断导出]
+    Window --> Runner[CoreRunner / 后台协调线程]
+    Runner --> Wire[CoreWire / 版本化 JSON 边界]
+    Wire --> ABI[共享 Core / C ABI]
+    Window --> Config[编辑器与运行配置 / 英文本地化资源]
 ```
 
-`MainWindow` 负责单文档窗口、文件选择、保存提示和命令状态。`WinUIEditAdapter` 封装原生对象及事件生命周期，原生编辑控件直接处理编辑、滚动、选择、撤销和输入法。`FileStore` 在后台线程执行文件 I/O，更新 UI 前返回窗口的 apartment。
+`TabView` 管理标签头；每个文档持有自己的 `CodeEditorControl`、adapter、撤销栈、测试面板和运行身份。控件持续挂载，切换标签仅改变可见性。关闭文档会撤销订阅、取消运行，并忽略该文档已排队的通知。该行为尚需 Windows 测试确认。
 
-适配器不在每次按键时复制全文，只查询字节数、位置和修改状态。打开文档生成新的文档 ID，并从 revision 1 开始；实际插入或删除文本才推进 revision。语法样式、光标和滚动事件只更新状态显示。保存或导出时才读取原始 UTF-8 字节。
+`WinUIEditAdapter` 封装原生对象。Core 只接收独立的 UTF-8 正文和身份，不接收 WinUI、Scintilla 或活动文本控件。正常编辑期间不复制全文；保存、快照导出、实际提交运行，以及并发保存造成的保存点失效比较才读取 committed 正文。
 
-这里没有编译运行和判题按钮，也没有将 Scintilla 对象传给共享竞赛 Core。本原型用于先验证编辑器接入及文件事务，后续再接入 Core 的文档快照契约。
+## 已提交正文与运行意图
 
-## 数据和文件策略
+WinUIEdit 从固定源码提交 `d9f60dbca65c2af54ced590d873d9438de32ce77` 构建，构建副本应用仓库内的 [committed snapshot 补丁](../../patches/winuiedit/README.md)。源码、补丁及 overlay 身份由 `patches/winuiedit/source-lock.json` 校验，不修改 `third_party/WinUIEdit` 研究子模块。
 
-应用显示文本来自 `Strings/en-US/Resources.resw`；默认语言为英文。语言 profile、扩展名映射、默认和未知扩展名 profile、tab width 和打开文件大小上限由 `editor-profiles.json` 提供。当前包含 C++ 和纯文本，可修改配置而不改窗口代码。配置字段集中于解析边界，带 `schemaVersion: 1`。
+应用 adapter 已使用补丁提供的 `IsCompositionActive`、`IsCommittedSnapshotAvailable`、`IsCommittedSnapshotTrackingAvailable`、`CommittedRevision`、`CommittedSnapshotAvailabilityChanged` 和 `ReadCommittedText`。读取正文、revision、caret 与 anchor 在同一次 guarded 捕获中完成，没有原始缓冲区回退。文档加载生成新 ID，文档 revision 从 1 开始，由控件 committed revision 相对加载基线推导；光标、滚动、样式等通知不自行推进版本。
 
-打开文件仅接受严格 UTF-8，保留 BOM 信息和原有换行字节。默认打开上限为 32 MiB；此数值由配置决定，主要限制载入文件，并非已验证的编辑器容量或性能指标。原生字节 API 可表达包含 NUL 的文档；这点仍需目标机文件往返测试。
+原生事件只调度 DispatcherQueue 更新，不在 TSF 回调中同步读取正文。组合输入、edit lock 或原生通知期间暂不可捕获时，读取返回 `E_PENDING`；tracking 永久故障或控件结束时返回 `E_FAIL`。永久故障显示错误，不能保留为无限等待。补丁状态模型的便携测试不等同于真实 Windows TSF 验证。
 
-保存以同目录 UUID 临时文件、完整写入、flush、关闭和 `ReplaceFileW` 完成；新路径使用不覆盖竞态中新建文件的 `MoveFileExW`。编辑器在整个文件事务期间暂时不可编辑，使写入字节与 savepoint 对应。失败后不会设置保存点。尚未实现外部文件修改冲突检测，也尚未验证不同文件系统上的故障行为。
+点击 Run All 先复制该文档的样例、工具链与比较策略，并创建唯一运行 token。若正文暂时不可捕获，保留可取消的 pending intent；committed availability 通知到达后，再捕获正文并提交 Core。取消尚未提交的意图不会产生 Core job；已提交的运行按 token 取消。输入法提交或取消交给原生控件处理，没有延时猜测、强制取消组合或屏蔽编辑。
 
-导出格式为 `cpn.editor-snapshot` / `schemaVersion: 1` / `snapshotKind: native-buffer`。正文为 JSON 的 UTF-8 文本，revision、byteLength、caretByte、anchorByte 使用十进制字符串，避免 JSON number 精度丢失。坐标编码明确为 UTF-8 字节。该诊断文件不等同于共享 Core 的 committed snapshot。
+结果按运行 token、文档 ID 和源 revision 匹配。源文本、样例、工具链或比较策略发生变化时，旧结果标记过期。样例通过独立开关区分“无期望输出”和“期望输出为空字符串”，禁用样例不执行。字节字段通过 base64 契约传递，Core 桥接测试覆盖 NUL；原生 TextBox、文件和中文输入的往返仍需目标机验证。
 
-WinUIEdit 当前 API 没有公开输入法 composition 事务状态。原生缓冲区变更事件可能包含组合输入中的更新；本原型不通过延时、强制失焦或屏蔽输入来猜测事务是否完成。在确认中文候选选择、撤销、取消组合和焦点变化的实际行为，或补足可靠的 composition 接口前，不能声称编译使用的快照只包含已提交文本。
+## 后台协调与关闭
 
-## 固定源码构建与目标机验证入口
+`CoreRunner` 在单独的 C++ 协调线程执行 C ABI 的 create、submit、cancel、drain、release 和 close / destroy。事件 buffer 用 RAII 释放；terminal 完整解码并校验源身份后释放 job handle。命令队列有配置上限；取消集合按 token 去重；C ABI 接受任务前预分配本地追踪节点，避免接受后分配失败丢失 job。
 
-WinUIEdit 改为固定源码构建，提交为 `d9f60dbca65c2af54ced590d873d9438de32ce77`。构建副本应用 [committed snapshot 补丁](../../patches/winuiedit/README.md)，补丁和 overlay 身份由 `patches/winuiedit/source-lock.json` 校验，不修改研究子模块。当前应用适配器仍使用 M0 的诊断导出，下一轮 UI 接入才会使用新增的 committed 接口；不能因为接口存在而宣称编译快照已经接入。
+runner 回调在协调线程调用。接收者必须将 owned packet 派发到 UI，不能在回调内销毁 runner；回调内调用阻塞 `close()` 会在改变关闭状态之前明确抛出 `logic_error`。外部并发 close 由 join mutex 串行化，窗口在后台 apartment 等待结束。该线程行为由正式便携测试覆盖。
+
+事件交付抛异常会设置可观察的 `delivery_failed` 状态并关闭协调器；窗口下一次 UI 更新会终止待运行状态、显示错误并禁用新运行。文档编辑和保存仍可继续。窗口关闭期间先取消并在后台 join Core，再复查源版本；若出现新编辑，保留窗口并建立新 runner。generation 可过滤旧 runner 已排队的 UI 消息。窗口与 DispatcherQueue 的实际生命周期仍需 Windows 验证。
+
+## 数据与文件策略
+
+应用默认语言为英文，正常界面文本来自 `Strings/en-US/Resources.resw`。项目文档使用中文。`editor-profiles.json` 提供语言、扩展名、默认与未知扩展 profile、tab width 及打开大小上限；当前包含 C++、Python 与纯文本。Python 当前使用纯文本 lexer，不能声明已具备 Python 语法高亮。
+
+`runner-settings.json` 提供文档 / 样例 / 队列 / 输出显示限制、Core 选项、工具链目录、默认工具链、比较策略和状态资源映射。MSVC profile 由 Windows 构建脚本生成，包含发现的编译器绝对路径及对应环境；另有 Clang、GCC 和 Python profile。协议字符串键集中在带版本的解析与序列化边界，不分散到窗口逻辑。
+
+打开文件仅接受严格 UTF-8，保留 BOM 标志及换行字节；默认打开上限为 32 MiB，由配置决定。这个配置上限不是已验证的编辑器性能承诺。
+
+文件 I/O 在后台线程执行。保存使用同目录 UUID 临时文件、完整写入、flush、关闭及 `ReplaceFileW`；新文件使用不覆盖竞态中新建文件的 `MoveFileExW`。编辑器在保存期间可继续编辑。保存失败不更新正文基线；组合输入或 tracking 故障时保存明确失败，不读取 preedit。
+
+成功写入 snapshot B 时，adapter 总会记录 B 为磁盘正文基线。若当前仍是捕获的 revision，则设置原生保存点。若已经编辑到 C，旧原生保存点可能仍在 A，此时脏状态按 committed 正文与 B 比较，并按 revision 缓存比较结果；撤销回 A 仍为 dirty，回 B 才为 clean，并重新设置原生保存点恢复快速路径。该异常路径每个新的 committed revision 可能需要一次全文捕获与比较，其真实大文件代价需要 Windows 测量。
+
+快照导出格式为 `cpn.editor-snapshot` / `schemaVersion: 1` / `snapshotKind: committed`。正文为 UTF-8 JSON 文本，revision、byteLength、caretByte 和 anchorByte 使用十进制字符串，位置编码为 UTF-8 字节。它是诊断导出；实际运行经 `CoreWire` 使用共享 Core JSON 契约。
+
+目前尚未接入会话持久化、样例文件保存和外部文件冲突检测；样例与运行设置仍为内存中的每文档状态。Competitive Companion、SPJ、交互题及压力测试的 Windows 界面也属于后续阶段。
+
+## Windows 构建与验证入口
 
 | 依赖 | 固定版本或身份 | 用途 |
 | --- | --- | --- |
-| WinUIEdit | 固定源码提交与 source-lock | 原生编辑控件、Scintilla / Lexilla |
+| WinUIEdit | 固定源码提交与 source-lock | Scintilla / Lexilla 原生控件 |
 | Microsoft.WindowsAppSDK | 1.7.260224002 | WinUI 3 与桌面窗口 |
-| Microsoft.Windows.CppWinRT | 2.0.240405.15 | WinRT 投影和代码生成 |
-| Microsoft.Windows.SDK.BuildTools | 10.0.28000.1839 | Windows 打包构建工具 |
-| Microsoft.Windows.ImplementationLibrary | 1.0.260126.7 | 上游控件实际使用的 WIL |
+| Microsoft.Windows.CppWinRT | 2.0.240405.15 | WinRT 投影与代码生成 |
+| Microsoft.Windows.SDK.BuildTools | 10.0.28000.1839 | Windows 打包工具 |
+| Microsoft.Windows.ImplementationLibrary | 1.0.260126.7 | 上游控件使用的 WIL |
 
-目标主机需要 PowerShell 7、Visual Studio 2022 v143 C++ 工具、完整 Windows SDK、C++/WinRT 与单项目 MSIX / WinUI 构建工具。ARM64 还需安装对应的 C++ ARM64 工具。框架依赖部署需要匹配架构的 Windows App SDK 1.7 运行时，以及开发人员模式所需的本地注册权限。
+目标机需要 PowerShell 7、Visual Studio 2022 v143 C++、完整 Windows SDK、C++/WinRT 和单项目 MSIX / WinUI 工具。ARM64 输出需要相应 C++ 工具。框架依赖部署需要匹配架构的 Windows App SDK 1.7 运行时及本地开发注册权限。
 
-在项目根目录执行：
+项目根目录执行：
 
 ```powershell
 pwsh -File ./tools/windows/verify.ps1 -Configuration Debug -Platform x64 -Deploy -Launch
 ```
 
-脚本先确认真实主机，再通过 vswhere 发现 Visual Studio 2022、通过 Windows Kits 注册项发现 SDK，导入官方 Developer PowerShell 模块建立 MSVC 环境，然后构建共享 Core、列出并执行 CTest、构建并执行便携 committed 状态测试、准备并构建源码控件、构建应用。编译器路径及所需环境以数据配置生成 MSVC 工具链 profile，供 Explorer 启动的应用使用。
+脚本先确认真实主机，再通过 vswhere 和 Windows Kits 注册项发现 Visual Studio / SDK，导入官方 Developer PowerShell 环境，构建共享 Core、列出并执行 CTest、构建和执行 committed 状态测试与正式 Core 桥接测试，再构建控件及应用。桥接测试与 Core 使用一致的 Debug / Release CRT。输出架构与主机不一致时仅记录构建，不将交叉编译声明为运行验证。
 
-可使用 `-MSBuildPath`、`-CMakePath`、`-NinjaPath` 和 `-WindowsSdkVersion` 显式指定工具，`-Parallelism` 控制构建并行度。发现 Ninja 时使用单配置生成器，否则使用 Visual Studio 2022；交叉架构只报告构建，不伪称已执行测试。工程默认 SDK 为 10.0.22621.0，脚本覆盖为实际安装版本；最低 OS 版本为 10.0.17763.0，目标验收 OS 为 10.0.19045 / SKU 161。
+支持 `-MSBuildPath`、`-CMakePath`、`-NinjaPath`、`-WindowsSdkVersion` 与 `-Parallelism`。发现 Ninja 时使用单配置生成器，否则使用 Visual Studio 2022。工程默认 SDK 为 10.0.22621.0，脚本选用实际安装版本；最低 OS 为 10.0.17763.0，目标验收为 10.0.19045 / SKU 161。
 
-输出位于 `out/windows/<Platform>/<Configuration>/`，包括逐阶段日志、真实退出码、Core 测试名称、控件与包 SHA256、MSBuild binlog、MSIX layout、`build-result.json`、`verification-report.json` 和中文 `measurement-template.md`。源副本的目录名包含源码提交和完整 source-lock 身份；已有副本的原文件被修改时拒绝复用并保留改动。
+输出位于 `out/windows/<Platform>/<Configuration>/`，包含各阶段退出码与日志、Core 测试名称、归档及控件 SHA256、MSBuild binlog、MSIX layout、`build-result.json`、`verification-report.json` 和中文 `measurement-template.md`。非 Windows 主机执行会以失败退出并生成失败报告，全部 Windows 构建、执行和人工验收标记保持未执行。
 
-`-Deploy` 注册生成的 AppxManifest；`-Launch` 同时请求部署与启动。Windows 10 Appx 模块通过 PowerShell 7 的 Windows PowerShell 兼容宿主调用。项目使用正常 WinMD 项目引用生成组件注册；没有临时 ActivatableClass 绕过。`activationRequested` 只表示启动请求，`uiValidationCompleted` 始终保持 false。10 个 IME、撤销、多标签、Core 取消、UTF-8、DPI、虚拟桌面、UU 和大文件场景默认 `not_run` / `passed: null`，只有完成目标机操作并附证据后才能记录通过。
+`-Deploy` 注册 AppxManifest，`-Launch` 请求部署与启动。PowerShell 7 使用 Windows PowerShell 兼容宿主调用 Appx。工程用正常 WinMD 项目引用注册组件。`activationRequested` 仅代表启动请求；`uiValidationCompleted` 保持 false，10 个人工场景默认 `not_run` / `passed: null`。只有完成目标机操作并提供证据后才可填写通过。
 
-也可仅执行 `build.ps1` 构建。`verify.ps1` 不跳过 Core 测试。任何原生命令失败都保留错误与报告。在非 Windows 主机执行时，脚本写入失败报告及未执行模板，并以失败退出，不进行 Windows 构建或注册。
+## 验证范围与后续验收
 
-## 目标机验证
+正式 [Core 桥接测试](tests/README.md) 在 macOS 对真实 Core 归档运行，普通、ASan/UBSan 与 TSan 均通过，覆盖保存基线、文档身份、大整数 revision、NUL、空期望输出、禁用样例、任务释放、编译及运行失败、取消、回调异常、回调内 close 拒绝和外部并发 close。ASan 的 LeakSanitizer 在当前主机不受支持，没有执行泄漏检测。
 
-| 场景 | 应记录的证据 |
+另已执行 JSON / XML、项目文件引用、XAML 事件 / 资源键、PowerShell 语法和真实非 Windows guard 检查。便携检查无法证明 MIDL、XAML、C++/WinRT、MSVC、NuGet、MSIX 或原生控件运行正确。
+
+| Windows 待验证场景 | 应保留的证据 |
 | --- | --- |
-| Debug / Release 构建和部署 | OS 版本、架构、SDK、MSBuild、NuGet 版本、binlog、依赖注册结果 |
-| C++ 编辑和语法高亮 | 中文注释、模板、括号、缩进、复制粘贴、撤销 / 重做、语言切换 |
-| UTF-8 字节往返 | 无 BOM / BOM、LF / CRLF、emoji、组合 Unicode、NUL 字节；保存前后字节比较 |
-| 快照版本 | 编辑增加 revision；光标移动、滚动、语法切换不增加；caret / anchor 指向 UTF-8 边界 |
-| 中文输入法 | 拼音组合、候选窗口、候选选择、Esc 取消、组合中切换焦点、撤销与快照内容 |
-| 文件事务 | Save As 取消、保存失败、未保存关闭、打开失败、磁盘无空间、已有文件被占用 |
-| 滚动和大文件 | 1 MiB / 10 MiB / 20 MiB 文件，持续输入、快速滚动、选择和窗口缩放 |
-| 多显示器与桌面 | 100% / 150% / 200% DPI、跨屏、虚拟桌面切换、睡眠唤醒 |
-| UU 远程 | 与现有 CP Editor 在同机、同网络、同文件下比较输入延迟、滚动和恢复后的状态 |
+| Debug / Release 构建、部署与启动 | OS、SKU、架构、SDK、MSBuild、NuGet、binlog、依赖注册与真实窗口 |
+| 多标签与独立撤销 | 不同文本、光标、undo / redo，切换和关闭后状态 |
+| 中文输入法与 committed 快照 | 候选选择、Esc 取消、重转换、组合中 Run / Cancel / Save、tracking 失败 |
+| Run All / Cancel | 空期望与 Unchecked、AC / WA / TLE / RE、多个文档、重复取消、关闭运行中子进程 |
+| 并发保存与 UTF-8 往返 | B 保存中编辑 C，undo A / B；BOM、LF / CRLF、emoji、NUL、失败保存 |
+| 文档身份与过期结果 | 编辑、样例和工具链变化后的 revision / token，关闭后旧事件不影响新标签 |
+| 文件事务与异常 | Save As 取消、未保存关闭、文件占用、磁盘空间、打开失败 |
+| 大文件与远程响应 | 1 / 10 / 20 MiB，输入、选择、滚动、缩放及异常保存点比较 |
+| DPI、虚拟桌面与 UU | 100% / 150% / 200%、跨屏、睡眠唤醒、同机同网络 CP Editor 对照 |
 
-性能结果需报告测量方法、文件内容、首次 / 后续启动、工作集和采样时间。这里尚未设定或验证“稳定 60 FPS”“内存小于某值”等产品承诺。
-
-## 当前验证范围
-
-macOS 上执行了 XML / JSON 解析、项目静态引用检查、XAML 事件和资源键检查、源码 API 交叉核对、PowerShell 语法解析、实际源码准备与篡改拒绝、非 Windows guard、便携状态模型 ASan/UBSan 以及 `git diff --check`。这些检查不能发现全部 MIDL、XAML、C++/WinRT、NuGet 或 MSIX 运行问题。Windows 编译、UI、IME、DPI、UU 远程和性能验证尚未执行。
+性能数据必须附文件内容、测量方法、首次 / 后续启动、工作集与采样时间。当前没有 Windows 性能验收结论。
