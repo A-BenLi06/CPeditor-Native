@@ -407,3 +407,10 @@ Core 规则区分空输入、缺少预期输出与预期输出为空、checker �
 - 594a9cf 的 Windows Server 2022 x64 Debug／Release 均实际通过 Core 16/16、正式 Runner 与 Session 桥接、WinUIEdit 编译和严格 OutDir／产物检查。宿主下一失败为 MDMERGE MDM2025：仅含注释的 App.idl 无法提供有效 App.winmd。日志和下载的分阶段报告保留在 out/windows/ci/43936593315，根汇总为 root-summary.json。
 - App.xaml.h 消费标准 App.xaml.g.h；App 启动由 XAML ApplicationDefinition 生成。将 App.idl 改为与固定 WinUIEdit CppDemoWinUI3 相同的空 namespace 声明单位，仅替换工程命名空间，不新增无用途 runtimeclass，也不关闭 MIDL／mdmerge。
 - 根逐字核对固定参考源码声明与本工程名替换结果，并完成 whitespace 检查；本机为 macOS，未执行 MIDL。后续 CI 继续验证宿主编译；目标 Windows10／IME／UU／DPI及多桌面仍待用户脚本实测。其他 Windows Companion、macOS 和 listener ABI 草稿不纳入本次修复提交。
+
+## 2026-11-17T03:33:33+08:00 — 恢复 WinUI 编辑器工程的标准元数据依赖
+
+- a17a1a5 的 Windows CI 两配置已通过 App.winmd 合并，下一错误为宿主 pch.h 找不到 winrt/WinUIEditor.h。真实日志中 CppWinRTDynamicProjectWinMDReferences 为空，编辑器 GetResolvedWinMD 在宿主投影之后才出现；原失败日志 out/windows/ci/43938714853/failed.log 保留。
+- 对照固定上游 CppDemoWinUI3 标准 ProjectReference，删除宿主 BuildReference=false，让 MSBuild 在投影之前解析／构建编辑器引用并增量复用既有产物。保留经验证的 AdditionalProperties 与输出路径约束，不复制生成头或屏蔽投影错误。
+- 宿主显式添加 Ws2_32.lib／Mswsock.lib，与共享 Core 的网络服务依赖保持一致，为正在独立审查的监听 ABI 所拉入的网络对象提供正确链接。只纳入这一依赖行及工程引用修复，不纳入 Companion UI 草稿。
+- 根工程 XML／标准引用／输出约束／链接依赖静态检查及 whitespace 检查通过；本机未执行 WinUI/MSBuild。下次真实 CI 验证投影和宿主编译，目标Windows10／IME／UU实测仍待执行。

@@ -83,7 +83,7 @@
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
-      <AdditionalDependencies>cpn_core.lib;windowsapp.lib;ole32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>cpn_core.lib;windowsapp.lib;ole32.lib;Ws2_32.lib;Mswsock.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(CPNCoreLibraryDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
@@ -215,7 +215,6 @@
   <ItemGroup>
     <ProjectReference Include="$(CPNWinUIEditProject)">
       <Project>{290647E3-D8CB-46B5-87CE-409F721E441A}</Project>
-      <BuildReference>false</BuildReference>
       <AdditionalProperties>WinUIEditorUseWinUI3=true;GenerateProjectSpecificOutputFolder=false;OutDir=$(CPNEditorBinaryDir);IntDir=$(CPNEditorObjectDir);GeneratedFilesDir=$(CPNEditorGeneratedDir);SolutionDir=$(CPNPreparedEditorRoot)</AdditionalProperties>
     </ProjectReference>
   </ItemGroup>
