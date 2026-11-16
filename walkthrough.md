@@ -265,3 +265,17 @@ Core 规则区分空输入、缺少预期输出与预期输出为空、checker �
 - 根实际打包启动并严格 codesign 验证通过。独立 CUA 通过 raw-byte AC／WA／独立 CheckerError 退出 7＋0.5／Unchecked、浮点版本拒绝、hex 与总字节、退出重启的禁用状态／原配置、修复后两个首次配置按钮入口及恢复后的再次运行。
 - 独立磁盘核对配置 JSON 字节、稳定 ID／revision、源码 SHA-256、input／expected 的 NUL／0xFF 与无答案一致。证据文件为 out/macos/checker-verification/20261117T012243+0800/verification.json，未修改参考 fixture 或默认恢复数据。
 - 此变更仅完成 macOS checker 接入，不计为 Windows／最低 macOS／系统 IME／UU／DPI／性能或完整产品验收。Windows 会话恢复与共享 Inbox 草稿分别在其他所有者范围内实施，不纳入本提交。
+
+## 2026-11-17T01:49:28+08:00 — 复用 PowerShell 入口的 Windows CI
+
+### 改动与思路
+
+- 新增 GitHub Actions Windows Server 2022 / PowerShell 7 / x64 Debug 与 Release 矩阵，直接执行 tools/windows/verify.ps1，复用工具发现、固定源码准备、Core／桥接测试和 WinUI 应用构建，不另写旁路构建逻辑。
+- checkout 与 upload-artifact 固定到实际核实的官方标签 SHA；工作流权限仅 contents:read，获取所有固定子模块且不保留 Git 凭据。每次运行保留逐阶段日志、JSON、binlog 与中文人工模板，失败阶段同样上传已产生的证据。
+- 自动流程不请求部署／启动，Windows Server runner 结果与目标 Windows 10 22H2／系统 IME／UU／DPI／虚拟桌面实测分开。更新 README 的 CI 入口和证据边界。
+
+### 验证与范围
+
+- 官方 actions/checkout v5 与 actions/upload-artifact v4 标签 SHA 通过 git ls-remote 核实；当前仓库 Actions 已开启，此变更没有修改平台权限或设置。
+- YAML 解析、触发器和 PowerShell 入口检查通过；静态确认 Debug／Release 矩阵和有界超时、日志范围。实际 Windows 构建结论必须等待本次 push 触发的对应提交运行，不预先宣称通过。
+- 仅提交工作流、README 与本记录；Windows 会话和共享 Inbox 的在途草稿不纳入此提交。

@@ -67,4 +67,6 @@ pwsh -File ./tools/windows/verify.ps1 -Configuration Debug -Platform x64 -Deploy
 
 工具前提、分阶段报告与中文实测模板见 [Windows 说明](apps/windows/README.md)。当前主机上的静态／便携检查不替代真实 Windows 构建和 UI 实测。
 
+[Windows CI](.github/workflows/windows.yml) 在 Windows Server 2022 runner 上用 PowerShell 7 执行同一验证入口，覆盖 x64 Debug／Release 的 Core、桥接测试、固定 WinUIEdit 源码和应用构建，并保存逐阶段日志、JSON 与 binlog。CI 不请求部署／启动；目标 Windows 10 22H2 的 IME、DPI、UU 与虚拟桌面仍按实测模板单独验收。首次运行及后续结论以对应 Git 提交的 Actions 结果为准。
+
 macOS 应用入口为 `./script/build_and_run.sh --verify`，Windows 原型入口与前提见 [Windows 说明](apps/windows/README.md)。[macOS 说明](apps/macos/README.md)记录双编辑器及真实 UI 验证范围。无界面工具可通过 `out/core/dev/cpn-cli --help` 查看配置、源码和样例参数，语言／工具链定义位于 `resources/profiles`。

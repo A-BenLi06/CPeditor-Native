@@ -1,0 +1,71 @@
+name: Windows 原生构建
+
+"on":
+  push:
+    paths:
+      - .github/workflows/windows.yml
+      - .gitmodules
+      - CMakeLists.txt
+      - CMakePresets.json
+      - core/**
+      - apps/windows/**
+      - tools/windows/**
+      - patches/winuiedit/**
+      - tests/**
+      - resources/**
+      - third_party/**
+  pull_request:
+    paths:
+      - .github/workflows/windows.yml
+      - .gitmodules
+      - CMakeLists.txt
+      - CMakePresets.json
+      - core/**
+      - apps/windows/**
+      - tools/windows/**
+      - patches/winuiedit/**
+      - tests/**
+      - resources/**
+      - third_party/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: ${{ matrix.configuration }} / x64
+    runs-on: windows-2022
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: [Debug, Release]
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: 获取固定源码和子模块
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: 执行 Windows 自动验证
+        run: ./tools/windows/verify.ps1 -Configuration ${{ matrix.configuration }} -Platform x64 -Parallelism 4
+      - name: 保存分阶段日志和验证报告
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-x64-${{ matrix.configuration }}-${{ github.sha }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            out/windows/x64/${{ matrix.configuration }}/*.log
+            out/windows/x64/${{ matrix.configuration }}/*.json
+            out/windows/x64/${{ matrix.configuration }}/*.binlog
+            out/windows/x64/${{ matrix.configuration }}/measurement-template.md
+            out/windows/x64/${{ matrix.configuration }}/core/Testing/Temporary/*.log
