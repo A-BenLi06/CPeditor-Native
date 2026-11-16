@@ -364,3 +364,18 @@ Core 规则区分空输入、缺少预期输出与预期输出为空、checker �
 - 提示箭头用显式长度的 u8string_view → string_view；折叠文本按真实 ScintillaCall::SetDefaultFoldDisplayText(const char *) 契约保留字面量的 NUL 结尾和静态生命周期，不关闭 char8_t 或降低语言标准。新增两个文件的 before／after SHA，更新完整 patch SHA；研究子模块不修改。
 - 根独立 PowerShell 7 全量导出／应用补丁与所有 SHA 通过；实际 CallTip.cxx 在 C++20／完整严格警告／-Werror 下编译通过，实际 ScintillaCall 方法签名及七字节／终止符检查通过。CodeEditorHandler 全文件语法检查通过，保留上游三个未处理 Unset 的 Clang 警告，不声称该完整文件 -Werror 通过。证据位于 out/windows/research/root-calltip-utf8-review-final.log 与 utf8-patch-files；原 CI 失败日志保留在 out/windows/ci/43929600541。
 - 完整 WinUI 编译继续由本提交触发的 Windows CI 验证；Windows 10 目标机脚本与 IME／UU／虚拟桌面实测仍待执行。Windows 恢复、HTTP 与 macOS 导入草稿不纳入此修复提交。
+
+## 2026-11-17T02:56:46+08:00 — 有界回环 HTTP 服务与固定 Boost 依赖
+
+### 改动与思路
+
+- 新增单异步网络线程＋单有界持久接纳worker的CompanionListener。显式v4 loopback／可用v6only loopback，Beast完整解析分段、Content-Length和chunked；严格Host／JSON类型／编码／Expect，虚函数明确拒绝所有trailer。
+- Header／连接／读取／写入／整请求／原始body所有权／接纳队列均有界；202仅在实际持久Accepted或精确Duplicate后返回，持久性未知保留替换标志。stop取消socket与锁等待并join，fatal网络失败可观察。
+- 独立review真实FileStore callback＋外部stop握手复现start重入join死锁；根将start／stop共用自身线程检查放在join锁之前，追加同一真实并发场景，原探针普通及ASan+UBSan复验均退出0，原失败证据保留。
+- CMake通过版本化lock校验官方Boost1.92.0 b2-nodocs归档与BSL原文，使用内部system headers、header-only Asio／Beast，Windows显式ws2_32／mswsock；工作流新增cmake路径触发。中文HTTP／架构／Companion与许可、状态文档同步。
+
+### 验证与范围
+
+- 根独立普通与完整C／C++两侧-Werror ASan+UBSan均16/16 CTest通过，完整服务依赖instrument的TSan HTTP1/1通过；独立补充分帧及实际EMFILE fatal accept清理普通／ASan通过。根证据out/research/http/root-verification.json及review/verification-fixed.json。
+- 作者三模式7组真实socket通过；慢接收探针实际响应完整缓冲，write_timeouts=0，不声称观察到阻塞写超时。AppleASan未启用LSan。原生文件I/O不保证硬抢占。
+- 当前提供共享C++监听服务；生命周期C ABI、两端应用启动和实际扩展、目标Windows10及最低macOS仍未验收。Windows会话和macOSInbox草稿不纳入提交。

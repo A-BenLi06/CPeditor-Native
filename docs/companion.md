@@ -1,6 +1,6 @@
 # Competitive Companion 解码与导入边界
 
-本文记录已实现的共享 payload 解码器、有界持久收件箱和原子会话导入准备器，以及后续 HTTP／原生导入的拟议边界。解码器是无 I/O 的 C++20 服务，不监听端口、不创建文档或文件、不分配稳定 ID，也不启动编译器／解答程序。收件箱已分配稳定 ID 并持久接纳原始载荷；四个 C ABI 接口提供分页／接纳／准备／确认；当前没有 Companion HTTP 接口或原生导入 UI；完整互操作状态见 [实施状态](status.md)。
+本文记录已实现的共享 payload 解码器、有界持久收件箱、原子会话导入准备器和回环 HTTP 服务，以及后续原生启停／导入的拟议边界。解码器是无 I/O 的 C++20 服务，不监听端口、不创建文档或文件、不分配稳定 ID，也不启动编译器／解答程序。收件箱已分配稳定 ID 并持久接纳原始载荷；四个 C ABI 接口提供分页／接纳／准备／确认；回环 HTTP 服务使用固定 Boost.Beast／Asio，原生启停及导入 UI 尚未验收；完整互操作状态见 [实施状态](status.md)。
 
 ## 已实现的接口
 
@@ -131,11 +131,11 @@ sequenceDiagram
 
 候选保存后、确认前崩溃：下次准备看到同一回执返回 `AlreadyApplied`，不会再添加文档，随后可继续确认。用户修改或删除已导入文档后仍由 workspace 回执防止重放创建。若收件箱已 Applied，但加载的旧会话缺回执，返回 `ReceiptMissing`，不自动重建；需要显式恢复处理。
 
-## 后续 HTTP／原生导入设计，尚未实现
+## 回环 HTTP 服务与后续原生导入
 
-监听器显式绑定 IPv4 127.0.0.1 和可用的 IPv6 ::1，端口由配置决定。验证 POST `/`、JSON 内容类型和 localhost Host；连接／header／body／读取／写入都有边界，停止时关闭监听并 join，不让工作线程调用 UI。Windows socket 监听不需要 HTTP.sys URL ACL。HTTP 后端须独立审查并锁定版本，不复用 Qt，也不手写简略分帧。
+监听器显式绑定 IPv4 127.0.0.1 和可用的 IPv6 ::1，端口由配置决定。验证 POST `/`、JSON 内容类型和 localhost Host；连接／header／body／读取／写入都有边界，停止时关闭监听并 join，不让工作线程调用 UI。Windows socket 监听不需要 HTTP.sys URL ACL。HTTP 后端已锁定 Boost 1.92.0，协议／预算／生命周期及依赖说明见 [回环 HTTP 服务](companion-http.md)。
 
-只有验证且持久接纳成功才返回 202；扩展发送完成不能作为接纳证据。原生协调器在 MainActor／DispatcherQueue 应用候选，采用前述会话先保存再确认的流程。C ABI 分页／接纳／准备／确认已实现，准确请求与预算见 [当前 Core API](core-api.md)。实际监听器以及两端原生收件箱界面仍待实施。导入不得自动打开 URL、读取远端 filename、编译或提交。
+只有验证且持久接纳成功才返回 202；扩展发送完成不能作为接纳证据。原生协调器在 MainActor／DispatcherQueue 应用候选，采用前述会话先保存再确认的流程。C ABI 分页／接纳／准备／确认已实现，准确请求与预算见 [当前 Core API](core-api.md)。监听生命周期 C ABI 及两端原生收件箱界面仍待验收。导入不得自动打开 URL、读取远端 filename、编译或提交。
 
 ## 测试夹具与验证
 
@@ -145,7 +145,7 @@ sequenceDiagram
 
 本轮在实际 macOS 主机以 Apple Clang 执行了独立 C++20／`-Wall -Wextra -Wpedantic -Werror` 编译和全部夹具／异常测试，普通与 ASan＋UBSan 均通过。该主机的 AddressSanitizer 不支持 LeakSanitizer，最终运行显式关闭 leak 检测，地址和未定义行为检测保持启用。根任务另以干净的 CMake 构建目录验证了完整 Core：普通与完整 `-Werror` ASan／UBSan 两套 15/15 CTest 入口通过，服务库和聚合归档均包含解码器与收件箱。新增 `companion_inbox_tests.cpp` 覆盖有界容量、重复／更新／批次冲突、原文和稳定身份、未来 schema／偏好、候选与实际回执、故障前后替换标志、回滚／分叉备份、跨实例与真实跨进程合作锁；独立审查推动补齐回滚备份的历史回归。Windows 收件箱目标机仍未执行。CTest 使用相对夹具路径并设置仓库工作目录，避免窄 argv 将中文绝对路径转换为系统代码页。
 
-PowerShell 7 未来监听验收可使用夹具原始字节：
+调用者启动监听服务后，PowerShell 7 监听验收可使用夹具原始字节：
 
 ```powershell
 $companionPort = 10045
@@ -154,6 +154,6 @@ Invoke-WebRequest -Uri "http://localhost:$companionPort/" -Method Post `
   -ContentType 'application/json; charset=utf-8' -Body $requestBytes
 ```
 
-这条 HTTP 命令在当前阶段不能证明导入功能可用，因为监听器尚未实现。后续验收还需目标 Windows、实际扩展、端口冲突、仅回环绑定、积压／关闭、批次去重和重启重放证据，不能用解码器测试代替。
+当前应用尚未提供监听启动入口；上述命令须在后续原生启停链路实现后按实际端口执行，不能证明文档已导入。后续验收还需目标 Windows、实际扩展、端口冲突、仅回环绑定、积压／关闭、批次去重和重启重放证据，不能用解码器测试代替。
 
 新增 `tests/abi/companion_api_tests.cpp` 验证纯 C／Swift 可导入头、四符号、完整页预算和不消费、buffer 配额占满不写盘、defaults 预验证、原文数值词法、4096 样例的有限写响应、实际回执／删除防重放、未来偏好／旧恢复／更新链、销毁后 buffer 仍有效，以及真实跨进程持锁中的并发 close。根普通和完整 ASan／UBSan 15/15 CTest 通过；目标 Windows C ABI 验证仍等待对应提交 CI。

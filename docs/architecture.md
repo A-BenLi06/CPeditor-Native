@@ -71,7 +71,7 @@ flowchart TB
 | `cpn_c_api` | 带版本的不透明句柄、带长度的缓冲区、请求和事件批次 | 服务层；隐藏 C++ 内存布局和异常 |
 | Windows／macOS 应用目标 | 原生编辑器、文档协调器、呈现模型、资源及组件组装 | 引擎 API／桥接、对应平台实现、选定编辑器 |
 
-在实现时选择并固定序列化库和 HTTP 后端，每个生态使用一套依赖清单／锁定机制。领域层和服务层的公开头文件不得出现 Qt、XAML、WinRT、AppKit、SwiftUI 或编辑器库类型。通过构建目标依赖和独立 Core 构建落实此约束。具体平台实现文件可以使用原生框架类型。
+共享 JSON 使用固定 nlohmann/json，回环 HTTP 使用固定 Boost.Beast／Asio；归档 SHA 和许可见 `third_party/core-dependencies.lock.json`，构建层仅引入内部网络头文件。每个生态使用一套依赖清单／锁定机制。领域层和服务层的公开头文件不得出现 Qt、XAML、WinRT、AppKit、SwiftUI 或编辑器库类型。通过构建目标依赖和独立 Core 构建落实此约束。具体平台实现文件可以使用原生框架类型。
 
 ## Windows 应用
 

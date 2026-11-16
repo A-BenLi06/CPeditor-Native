@@ -11,7 +11,7 @@
 | [实施状态](docs/status.md) | 当前已完成部分、实际验证证据与剩余工作 |
 | [总体架构](docs/architecture.md) | 组件边界、平台集成、依赖方向和拟议仓库布局 |
 | [外部 checker](docs/external-checker.md) | testlib 二元退出协议、原始字节、限额与 CLI 使用 |
-| [Companion 解码与导入](docs/companion.md) | 已实现的解码器、持久去重收件箱与原子会话回执，以及后续监听／原生接入边界 |
+| [Companion 解码与导入](docs/companion.md) | 已实现的解码器、持久去重收件箱、回环 HTTP 与原子会话回执，以及后续原生接入边界 |
 | [会话恢复](docs/session.md) | 工作区格式、原生偏好、保存点与并发恢复文件事务 |
 | [当前 Core API](docs/core-api.md) | 已实现的 C/C++ 接口、请求格式、任务与缓冲区限额 |
 | [Core 契约](docs/core-contracts.md) | 源码快照、任务生命周期、进程限制、判题结果、桥接所有权和持久化 |
