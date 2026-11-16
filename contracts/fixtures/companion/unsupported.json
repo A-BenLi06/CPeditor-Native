@@ -1,0 +1,14 @@
+{
+  "name": "Unsupported modes remain metadata",
+  "group": "Native fixtures",
+  "url": "https://example.org/problems/unsupported",
+  "interactive": true,
+  "memoryLimit": 0,
+  "timeLimit": 0,
+  "tests": [],
+  "testType": "futureTestType",
+  "input": { "type": "regex", "pattern": "../../secret.*" },
+  "output": { "type": "file", "fileName": "../result.txt" },
+  "batch": { "id": "opaque-compatible-batch", "size": 1 },
+  "futureMetadata": { "path": "../../outside", "shell": "echo do not execute" }
+}

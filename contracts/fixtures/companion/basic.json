@@ -1,0 +1,10 @@
+{
+  "name": "A. Sum",
+  "group": "Native integration fixtures",
+  "url": "https://example.org/problems/sum",
+  "memoryLimit": 256,
+  "timeLimit": 1500,
+  "tests": [
+    { "input": "7 8\n", "output": "15\n" }
+  ]
+}

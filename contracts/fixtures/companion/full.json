@@ -1,0 +1,29 @@
+{
+  "name": "原生样例 😀 e\u0301",
+  "group": "Native fixtures",
+  "url": "https://example.org/problems/unicode",
+  "interactive": false,
+  "memoryLimit": 256,
+  "timeLimit": 1500,
+  "tests": [
+    {
+      "input": "中文 😀 e\u0301\r\n\u0000tail",
+      "output": "中文 😀 e\u0301\r\n\u0000tail",
+      "futureTestMetadata": { "retained": true }
+    },
+    { "input": "", "output": "" }
+  ],
+  "testType": "multiNumber",
+  "input": { "type": "stdin", "futureInputMetadata": [1, 2] },
+  "output": { "type": "stdout" },
+  "languages": {
+    "java": { "mainClass": "Main", "taskClass": "NativeFixture", "future": true },
+    "futureLanguage": { "opaque": ["do not execute", null] }
+  },
+  "batch": { "id": "f7fe2c29-078e-4d21-9c32-2b12ec576476", "size": 2 },
+  "futureMetadata": {
+    "unrepresentableAsUint64": 18446744073709551616,
+    "numericLexeme": 1.2300e+03,
+    "opaque": { "nul": "\u0000", "command": "$(do not execute)" }
+  }
+}

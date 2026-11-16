@@ -84,9 +84,15 @@ sequenceDiagram
 
 恢复格式、限额、请求示例和合作锁／外部写入限制见 [会话恢复](session.md)。会话保存请求仍受引擎 `max_request_bytes` 约束。
 
+## Companion 解码器
+
+C++ 接口 `parse_companion_payload(std::string_view, CompanionBounds)` 位于 `cpn/companion.hpp`，返回不含 UI 或网络类型的 `CompanionCandidate`。解码器验证已知字段、原始 UTF-8、所有层级重复键及内容预算，保留完整原始 payload 和未知元数据；空答案保持存在。交互／文件／regex／未知 testType 带有普通 stdio 不兼容理由，不能被后续导入界面静默作为普通题目运行。
+
+该接口已进入 `cpn_services` 和单一 Core 归档，没有文件、网络或进程副作用。当前尚无对应 C ABI、HTTP 监听器、稳定导入 ID 或原生导入 UI，详细字段、边界和后续接纳流程见 [Companion 文档](companion.md)。
+
 ## 当前限制
 
 - 原生进程后端支持进程组／Windows Job Object、并发三管道、墙钟超时、取消、输出限制和最终排空。未实现内存硬限额；启动期限是软期限，不能中断阻塞的原生进程创建调用。
 - 比较循环分批响应取消；内存分配和释放仍同步，不是硬实时保证。
 - 每个任务创建独立 workspace，源码快照和产物自动清理。文件写入同目录临时文件后原子替换；POSIX 替换成功后目录持久化失败通过 `AtomicWriteError.destination_replaced` 区分。
-- 尚未包含 Companion、LSP、格式化、压力／交互测试和发布接口；这些按完整实施计划继续推进。
+- 尚未包含 Companion 监听／收件箱／导入 ABI、LSP、格式化、压力／交互测试和发布接口；这些按完整实施计划继续推进。

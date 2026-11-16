@@ -227,3 +227,19 @@ Core 规则区分空输入、缺少预期输出与预期输出为空、checker �
 - 根另独立以-Werror编译正式桥接并链接out/core/dev/libcpn_core.a，全部回归通过；含UINT64_MAX／2^53+1、raw NUL、空／缺答案、CE／RE、取消、有限配额下释放重跑、回调拒绝及并发close。保存基线回归复验通过。
 - 根实际PowerShell7.7解析4脚本通过，非Windowsverify退出1，所有自动／UI通过标志false，10项人工not_run／null；XML／JSON、XAML事件、英文资源和实际打包profile路径检查通过。
 - Windows MSVC／MIDL／WinUI／TSF／IME／DPI／UU和性能尚未执行；请按目标机脚本采集真实证据，未将便携结果计作原生验收或完整产品完成。
+
+## 2026-11-17T01:11:09+08:00 — 共享 Companion 解码器与导入架构边界
+
+### 改动与思路
+
+- 新增无 I/O 的 C++20 Companion 解码器，进入cpn_services和单一Core归档。已知字段严格类型，未知外部元数据完整保留；原始payload不经DOM重序列化，Unicode／NUL／未知大整数词法和空白原样保存。
+- 递归拒绝所有对象重复键，约束正文／深度／节点／各字符串／合计字符串／样例／批次边界，累计比较剩余预算防溢出。空答案不转为无答案，来源ms／MB仅存数据，不擅自改成执行限制。
+- 交互／文件／regex／未知testType给出结构化普通stdio不兼容理由。源码路径、Java类名、远端filename与pattern均只保存，不打开、解释或执行。固定TaskBuilder的空taskClass合法，独立核实后补夹具；fixed TestType只有single/multiNumber，未知multiEOF明确不兼容。
+- 中文Companion文档记录上游Any监听、解析前202、URL覆盖样例及扩展不检查response.ok的源码证据；设计回环HTTP、持久有界收件箱、稳定身份、去重／更新、会话先保存再Applied确认，但这些接入尚未实现。
+- CTest使用相对fixture参数和明确工作目录，支持Windows中文工作区而不依赖窄argv的ACP。更新README／Core API／实施状态入口，不新增空网络构建目标。
+
+### 验证与范围
+
+- 子agent普通及-Werror ASan／UBSan独立测试通过；4个fixture包含官方builder默认值回归与现代／旧载荷／不支持模式。未知字段、递归与escaped重复键、raw UTF8／surrogate／NFD／NUL、UINT64来源数据及每项预算均覆盖。
+- 根另在out/core/companion-review及companion-review-sanitize进行干净完整CMake构建，两套均13/13 CTest通过；sanitizer两侧完整instrument，显式detect_leaks=0，当前平台不支持LSan。
+- 尚未实现HTTP监听、导入收件箱／ABI、稳定ID分配、原生导入UI或实际扩展联调；解码器通过不计为完整Companion功能／目标Windows／产品完成。

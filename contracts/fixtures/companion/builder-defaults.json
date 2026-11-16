@@ -1,0 +1,14 @@
+{
+  "name": "",
+  "group": "",
+  "url": "https://example.org/problems/builder-defaults",
+  "interactive": false,
+  "memoryLimit": 1024,
+  "timeLimit": 1000,
+  "tests": [],
+  "testType": "single",
+  "input": { "type": "stdin" },
+  "output": { "type": "stdout" },
+  "languages": { "java": { "mainClass": "Main", "taskClass": "" } },
+  "batch": { "id": "b3daad57-90d9-4d67-a2c4-6c0cda3fc62c", "size": 1 }
+}
