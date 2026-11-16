@@ -1,6 +1,8 @@
 # Windows 原型第三方声明
 
-Windows 原型通过 NuGet 使用 `WinUIEdit 0.0.5-prerelease`。该二进制包提供 WinUI 3 编辑控件、Scintilla 和 Lexilla。源码研究入口固定为仓库的 `third_party/WinUIEdit` 子模块（提交 `d9f60dbca65c2af54ced590d873d9438de32ce77`）；NuGet 元数据没有给出与二进制包对应的源码提交，因此这里不将二者声明为同一个构建。
+Windows 原型从固定的 `third_party/WinUIEdit` 子模块提交 `d9f60dbca65c2af54ced590d873d9438de32ce77` 导出构建副本，并应用仓库内的 [committed snapshot 补丁](../../patches/winuiedit/README.md)。构建脚本校验源码、补丁与 overlay 的 SHA256；不修改研究子模块工作区。应用以正常 C++/WinRT 项目引用使用该副本构建的 WinMD、DLL 和 PRI，已经移除 `WinUIEdit 0.0.5-prerelease` 二进制包依赖。
+
+本项目的状态机 overlay 与补丁按照本仓库 GPL-3.0-or-later 许可分发；上游 WinUIEdit、Scintilla、Lexilla 的版权与原许可仍须随发行物保留。源码补丁不是上游已发布功能，尚未完成 Windows 编译、输入法和撤销验证。
 
 工程组织参考了 WinUIEdit 的 `CppDemoWinUI3` 示例，未复制其产品图标，也未加入上游清单中的临时工具绕过。原型的图标由 `tools/windows/generate-assets.py` 生成，为本项目的原创几何标记。
 

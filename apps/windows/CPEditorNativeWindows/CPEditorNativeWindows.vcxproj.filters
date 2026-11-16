@@ -37,6 +37,10 @@
   </ItemGroup>
   <ItemGroup>
     <Content Include="editor-profiles.json" />
+    <Content Include="$(CPNGeneratedToolchainsDir)\*.json" />
+    <Content Include="..\..\..\resources\profiles\cpp-clang.json" />
+    <Content Include="..\..\..\resources\profiles\cpp-gcc-windows.json" />
+    <Content Include="..\..\..\resources\profiles\python.json" />
     <None Include="packages.config" />
     <Content Include="..\NOTICE.md" />
     <Content Include="..\..\..\third_party\WinUIEdit\LICENSE" />

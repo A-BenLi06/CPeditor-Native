@@ -33,37 +33,35 @@ flowchart LR
 
 WinUIEdit 当前 API 没有公开输入法 composition 事务状态。原生缓冲区变更事件可能包含组合输入中的更新；本原型不通过延时、强制失焦或屏蔽输入来猜测事务是否完成。在确认中文候选选择、撤销、取消组合和焦点变化的实际行为，或补足可靠的 composition 接口前，不能声称编译使用的快照只包含已提交文本。
 
-## 固定依赖
+## 固定源码构建与目标机验证入口
 
-| 依赖 | 版本 | 用途 |
+WinUIEdit 改为固定源码构建，提交为 `d9f60dbca65c2af54ced590d873d9438de32ce77`。构建副本应用 [committed snapshot 补丁](../../patches/winuiedit/README.md)，补丁和 overlay 身份由 `patches/winuiedit/source-lock.json` 校验，不修改研究子模块。当前应用适配器仍使用 M0 的诊断导出，下一轮 UI 接入才会使用新增的 committed 接口；不能因为接口存在而宣称编译快照已经接入。
+
+| 依赖 | 固定版本或身份 | 用途 |
 | --- | --- | --- |
-| WinUIEdit | 0.0.5-prerelease | 原生编辑控件、Scintilla / Lexilla |
+| WinUIEdit | 固定源码提交与 source-lock | 原生编辑控件、Scintilla / Lexilla |
 | Microsoft.WindowsAppSDK | 1.7.260224002 | WinUI 3 与桌面窗口 |
 | Microsoft.Windows.CppWinRT | 2.0.240405.15 | WinRT 投影和代码生成 |
 | Microsoft.Windows.SDK.BuildTools | 10.0.28000.1839 | Windows 打包构建工具 |
+| Microsoft.Windows.ImplementationLibrary | 1.0.260126.7 | 上游控件实际使用的 WIL |
 
-WinUIEdit 的 NuGet 包导入 `WinUIEditor.winmd`，并复制对应架构的 DLL / PRI。原型不项目引用第三方工程，不修改 `UseWinUI3.txt`，不引入 WebView2。该控件仍属 prerelease，上游明确声明不适合生产使用。
-
-研究子模块的提交及许可证见 [NOTICE.md](NOTICE.md)。NuGet 包版本与研究源码提交分别固定；二进制包元数据没有对应提交，不能声称是由该研究提交构建。
-
-## Windows 构建与启动
-
-目标主机需要 PowerShell 7、Visual Studio 2022 v143 C++ 工具、Windows 10/11 SDK、C++/WinRT 与单项目 MSIX / WinUI 构建工具。ARM64 还需安装对应的 C++ ARM64 工具。框架依赖部署需要匹配架构的 Windows App SDK 1.7 运行时，以及开发人员模式所需的本地注册权限。
+目标主机需要 PowerShell 7、Visual Studio 2022 v143 C++ 工具、完整 Windows SDK、C++/WinRT 与单项目 MSIX / WinUI 构建工具。ARM64 还需安装对应的 C++ ARM64 工具。框架依赖部署需要匹配架构的 Windows App SDK 1.7 运行时，以及开发人员模式所需的本地注册权限。
 
 在项目根目录执行：
 
 ```powershell
-pwsh -File ./tools/windows/build.ps1 -Configuration Debug -Platform x64
-pwsh -File ./tools/windows/build.ps1 -Configuration Debug -Platform x64 -Launch
+pwsh -File ./tools/windows/verify.ps1 -Configuration Debug -Platform x64 -Deploy -Launch
 ```
 
-可使用 `-MSBuildPath` 和 `-WindowsSdkVersion` 显式指定工具。脚本默认从 vswhere 和 Windows Kits 注册项发现工具与 SDK，不假定用户安装盘符。工程默认 SDK 为 10.0.22621.0，脚本可覆盖为实际安装版本；最低 OS 版本为 10.0.17763.0，目标验收 OS 为 10.0.19045。
+脚本先确认真实主机，再通过 vswhere 发现 Visual Studio 2022、通过 Windows Kits 注册项发现 SDK，导入官方 Developer PowerShell 模块建立 MSVC 环境，然后构建共享 Core、列出并执行 CTest、构建并执行便携 committed 状态测试、准备并构建源码控件、构建应用。编译器路径及所需环境以数据配置生成 MSVC 工具链 profile，供 Explorer 启动的应用使用。
 
-输出位于 `out/windows/<Platform>/<Configuration>/`，包含二进制、MSIX layout、MSBuild binlog 和 `build-result.json`。脚本先还原 `packages.config`，然后构建；原生命令失败会保留错误，不自动将其解释为成功。
+可使用 `-MSBuildPath`、`-CMakePath`、`-NinjaPath` 和 `-WindowsSdkVersion` 显式指定工具，`-Parallelism` 控制构建并行度。发现 Ninja 时使用单配置生成器，否则使用 Visual Studio 2022；交叉架构只报告构建，不伪称已执行测试。工程默认 SDK 为 10.0.22621.0，脚本覆盖为实际安装版本；最低 OS 版本为 10.0.17763.0，目标验收 OS 为 10.0.19045 / SKU 161。
 
-`-Launch` 通过生成的 AppxManifest 注册包，再从包身份生成 AppsFolder 启动 URI。Windows 10 的 Appx 模块通过 PowerShell 7 的 Windows PowerShell 兼容宿主调用。运行时缺失由部署命令明确报错，先前生成的构建报告和 binlog 保留。`activationRequested` 仅表示启动请求，`uiValidationCompleted` 仍为 false；需要人工或目标机自动化补足运行证据。
+输出位于 `out/windows/<Platform>/<Configuration>/`，包括逐阶段日志、真实退出码、Core 测试名称、控件与包 SHA256、MSBuild binlog、MSIX layout、`build-result.json`、`verification-report.json` 和中文 `measurement-template.md`。源副本的目录名包含源码提交和完整 source-lock 身份；已有副本的原文件被修改时拒绝复用并保留改动。
 
-如果构建后缺少 `out/windows/.../layout/AppxManifest.xml`，应检查 MSIX 构建工具和 binlog。项目使用正常 WinMD 引用生成组件注册；没有复制上游示例清单中的临时 ActivatableClass 绕过，实际控件激活仍需 Windows 部署验证。
+`-Deploy` 注册生成的 AppxManifest；`-Launch` 同时请求部署与启动。Windows 10 Appx 模块通过 PowerShell 7 的 Windows PowerShell 兼容宿主调用。项目使用正常 WinMD 项目引用生成组件注册；没有临时 ActivatableClass 绕过。`activationRequested` 只表示启动请求，`uiValidationCompleted` 始终保持 false。10 个 IME、撤销、多标签、Core 取消、UTF-8、DPI、虚拟桌面、UU 和大文件场景默认 `not_run` / `passed: null`，只有完成目标机操作并附证据后才能记录通过。
+
+也可仅执行 `build.ps1` 构建。`verify.ps1` 不跳过 Core 测试。任何原生命令失败都保留错误与报告。在非 Windows 主机执行时，脚本写入失败报告及未执行模板，并以失败退出，不进行 Windows 构建或注册。
 
 ## 目标机验证
 
@@ -83,4 +81,4 @@ pwsh -File ./tools/windows/build.ps1 -Configuration Debug -Platform x64 -Launch
 
 ## 当前验证范围
 
-macOS 上只执行 XML / JSON 解析、项目静态引用检查、XAML 事件和资源键检查、源码 API 交叉核对及 `git diff --check`。这些检查不能发现全部 MIDL、XAML、C++/WinRT、NuGet 或 MSIX 运行问题。Windows 编译、UI、IME、DPI、UU 远程和性能验证尚未执行。
+macOS 上执行了 XML / JSON 解析、项目静态引用检查、XAML 事件和资源键检查、源码 API 交叉核对、PowerShell 语法解析、实际源码准备与篡改拒绝、非 Windows guard、便携状态模型 ASan/UBSan 以及 `git diff --check`。这些检查不能发现全部 MIDL、XAML、C++/WinRT、NuGet 或 MSIX 运行问题。Windows 编译、UI、IME、DPI、UU 远程和性能验证尚未执行。

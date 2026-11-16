@@ -1,12 +1,12 @@
 # 实施任务登记
 
-登记时间：2026-11-16T23:18:49+08:00。
+登记时间：2026-11-17T00:21:45+08:00。
 
 | 所有者 | 独占范围 | 工作 | 状态 |
 | --- | --- | --- | --- |
-| 根 agent | core/include、core/src/domain、core/src/services、tests/core、CMake、共享文档与提交 | 领域规则、头文件、引擎构建/集成和验收 | 进行中 |
-| process_backend | core/include/cpn/session.hpp、core/src/services/session.cpp、tests/core/session_tests.cpp | 进程／批处理修复已完成，新增会话服务 | 会话进行中 |
-| windows_poc | apps/windows、tools/windows | M0 原型／JobRegistry 已集成；source composition 契约与 Core 面板 | 下一变更进行中，Windows 验证待执行 |
-| macos_poc | apps/macos、script、.codex/environments | M0 已提交；Swift C ABI actor 与测试面板 | Core 原生链路进行中，系统矩阵待验证 |
+| 根 agent | 共享 Core、CMake、tests/core、共享文档与提交；已交由其他所有者的文件除外 | Core 契约／服务集成与统一验收 | 会话已提交，外部 checker 接入正在验收 |
+| process_backend | core/include/cpn/external_checker.hpp、core/src/services/external_checker.cpp、tests/core/external_checker_tests.cpp、tests/checker、tools/native/cpn_cli.cpp | 外部 checker 和 CLI 入口 | 服务已通过审查，CLI 正在接入 |
+| windows_poc | apps/windows、tools/windows、patches/winuiedit | 固定源码编辑器、验证入口和 Core UI | 脚本／补丁当前阶段已完成，Core UI 草稿尚未接入 |
+| macos_poc | apps/macos、script、.codex/environments | 会话恢复、协调保存和关闭流程 | 原生会话接入正在实施和验证 |
 
-子模块、根构建及 walkthrough 由根 agent 维护，其他所有者不得并行修改。
+根 agent 维护子模块、构建集成和 walkthrough，并在完整变更集通过检查后提交。审查期间暂停对应范围写入；不得将草稿或未执行的目标机验收纳入完成声明。

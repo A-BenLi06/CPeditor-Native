@@ -57,4 +57,12 @@ ctest --preset dev
 
 该检查覆盖文本／比较／摘要、真实子进程、文件事务、配置／JSON、批量判题、并发任务和 C ABI。Windows 需要已配置的 MSVC 开发环境和 Ninja；macOS 需要 Xcode 命令行工具。原生界面、最低系统和发布仍按实施状态继续验收。
 
+Windows 目标机验证入口（PowerShell 7）：
+
+```powershell
+pwsh -File ./tools/windows/verify.ps1 -Configuration Debug -Platform x64 -Deploy -Launch
+```
+
+工具前提、分阶段报告与中文实测模板见 [Windows 说明](apps/windows/README.md)。当前主机上的静态／便携检查不替代真实 Windows 构建和 UI 实测。
+
 macOS 应用入口为 `./script/build_and_run.sh --verify`，Windows 原型入口与前提见 [Windows 说明](apps/windows/README.md)。[macOS 说明](apps/macos/README.md)记录双编辑器及真实 UI 验证范围。无界面工具可通过 `out/core/dev/cpn-cli --help` 查看配置、源码和样例参数，语言／工具链定义位于 `resources/profiles`。

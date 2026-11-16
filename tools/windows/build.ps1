@@ -1,139 +1,153 @@
 #Requires -Version 7.0
 [CmdletBinding()]
 param(
-    [ValidateSet('Debug', 'Release')]
-    [string] $Configuration = 'Debug',
-    [ValidateSet('x64', 'arm64')]
-    [string] $Platform = 'x64',
-    [string] $MSBuildPath,
-    [string] $WindowsSdkVersion,
-    [switch] $Launch
+    [ValidateSet('Debug', 'Release')][string] $Configuration = 'Debug',
+    [ValidateSet('x64', 'arm64')][string] $Platform = 'x64',
+    [string] $MSBuildPath, [string] $CMakePath, [string] $NinjaPath, [string] $WindowsSdkVersion,
+    [ValidateRange(1, 64)][int] $Parallelism = 4,
+    [switch] $SkipCoreTests, [switch] $Deploy, [switch] $Launch
 )
-
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-if (-not $IsWindows) {
-    throw '此脚本仅支持 Windows 主机；不能在 macOS 上执行 Windows 构建或验收。'
-}
-
+Import-Module (Join-Path $PSScriptRoot 'Common.psm1') -Force
 $repositoryRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
-$windowsRoot = Join-Path $repositoryRoot 'apps/windows'
-$projectPath = Join-Path $windowsRoot 'CPEditorNativeWindows/CPEditorNativeWindows.vcxproj'
-$nugetConfigPath = Join-Path $windowsRoot 'NuGet.Config'
-$restorePath = Join-Path $windowsRoot 'packages'
 $outputRoot = Join-Path $repositoryRoot "out/windows/$Platform/$Configuration"
-$layoutPath = Join-Path $outputRoot 'layout'
-
-if ([string]::IsNullOrWhiteSpace($MSBuildPath)) {
-    $installerRoot = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer'
-    $vswherePath = Join-Path $installerRoot 'vswhere.exe'
-    if (-not (Test-Path -LiteralPath $vswherePath -PathType Leaf)) {
-        throw '未找到 vswhere.exe；请安装 Visual Studio 2022 C++/WinUI 工具，或传入 -MSBuildPath。'
-    }
-    $candidates = @(& $vswherePath -latest -products '*' `
-        -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
-        -find 'MSBuild\**\Bin\MSBuild.exe')
-    if ($LASTEXITCODE -ne 0) { throw "vswhere 失败，退出码：$LASTEXITCODE" }
-    $MSBuildPath = $candidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
-        Select-Object -First 1
-}
-if ([string]::IsNullOrWhiteSpace($MSBuildPath) -or
-    -not (Test-Path -LiteralPath $MSBuildPath -PathType Leaf)) {
-    throw '未找到 MSBuild。需要 Visual Studio 2022、v143 C++ 工具集和单项目 MSIX/WinUI 构建工具。'
-}
-$MSBuildPath = (Resolve-Path -LiteralPath $MSBuildPath).Path
-
-if ([string]::IsNullOrWhiteSpace($WindowsSdkVersion)) {
-    $kits = Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows Kits\Installed Roots'
-    $includePath = Join-Path $kits.KitsRoot10 'Include'
-    $sdkCandidates = @(Get-ChildItem -LiteralPath $includePath -Directory |
-        Where-Object {
-            $_.Name -match '^10\.0\.\d+\.0$' -and
-            (Test-Path -LiteralPath (Join-Path $_.FullName 'um/windows.h')) -and
-            (Test-Path -LiteralPath (Join-Path $_.FullName 'winrt/windows.foundation.h'))
-        } | Sort-Object { [version] $_.Name } -Descending)
-    if ($sdkCandidates.Count -eq 0) { throw '未找到完整 Windows 10/11 SDK；请安装 SDK 或指定 -WindowsSdkVersion。' }
-    $WindowsSdkVersion = $sdkCandidates[0].Name
-}
-if ($WindowsSdkVersion -notmatch '^10\.0\.\d+\.\d+$') {
-    throw 'Windows SDK 版本必须使用 10.0.build.revision 格式。'
-}
-
-$commonArguments = @(
-    $projectPath,
-    '/nologo',
-    '/m',
-    "/p:Configuration=$Configuration",
-    "/p:Platform=$Platform",
-    "/p:WindowsTargetPlatformVersion=$WindowsSdkVersion"
-)
-$restoreArguments = $commonArguments + @(
-    '/t:Restore',
-    '/p:RestorePackagesConfig=true',
-    "/p:RestoreRepositoryPath=$restorePath",
-    "/p:RestoreConfigFile=$nugetConfigPath"
-)
-Write-Host "正在还原 NuGet 包（$Platform / $Configuration）……"
-& $MSBuildPath @restoreArguments
-if ($LASTEXITCODE -ne 0) { throw "NuGet 还原失败，退出码：$LASTEXITCODE" }
-
 New-Item -ItemType Directory -Path $outputRoot -Force | Out-Null
-$buildArguments = $commonArguments + @(
-    '/t:Build',
-    '/p:AppxPackageSigningEnabled=false',
-    '/p:AppxBundle=Never',
-    "/bl:$(Join-Path $outputRoot 'build.binlog')"
-)
-Write-Host "正在构建 Windows 原型，SDK $WindowsSdkVersion ……"
-& $MSBuildPath @buildArguments
-if ($LASTEXITCODE -ne 0) { throw "Windows 构建失败，退出码：$LASTEXITCODE" }
-
-$manifestPath = Join-Path $layoutPath 'AppxManifest.xml'
-$report = [ordered]@{
-    schemaVersion = 1
-    generatedAt = [DateTimeOffset]::Now.ToString('o')
-    host = [Environment]::OSVersion.VersionString
-    powershellVersion = $PSVersionTable.PSVersion.ToString()
-    configuration = $Configuration
-    platform = $Platform
-    msbuildPath = $MSBuildPath
-    windowsSdkVersion = $WindowsSdkVersion
-    executablePath = Join-Path $outputRoot 'CPEditorNativeWindows.exe'
-    layoutManifestPath = $manifestPath
-    nativeBuildCompleted = $true
-    launchRequested = $Launch.IsPresent
-    activationRequested = $false
-    uiValidationCompleted = $false
-}
 $reportPath = Join-Path $outputRoot 'build-result.json'
-$report | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $reportPath -Encoding utf8
-
-if ($Launch) {
-    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
-        throw "未生成 MSIX 布局清单：$manifestPath。请检查项目的 MSIX 构建工具和 build.binlog。"
-    }
-    # Framework-dependent deployment requires the matching Windows App SDK runtime.
-    # Add-AppxPackage reports the missing dependency rather than hiding a deployment failure.
-    # Windows 10 Appx cmdlets use their supported Windows PowerShell compatibility host.
-    Import-Module Appx -UseWindowsPowerShell -ErrorAction Stop
-    Add-AppxPackage -Register $manifestPath -ErrorAction Stop
-    [xml] $manifest = Get-Content -LiteralPath $manifestPath -Raw
-    $namespace = [Xml.XmlNamespaceManager]::new($manifest.NameTable)
-    $namespace.AddNamespace('p', 'http://schemas.microsoft.com/appx/manifest/foundation/windows10')
-    $identity = $manifest.SelectSingleNode('/p:Package/p:Identity', $namespace)
-    $application = $manifest.SelectSingleNode('/p:Package/p:Applications/p:Application', $namespace)
-    if ($null -eq $identity -or $null -eq $application) { throw '生成的 MSIX 清单缺少应用身份。' }
-    $package = @(Get-AppxPackage -Name $identity.GetAttribute('Name')) |
-        Where-Object { $_.Publisher -eq $identity.GetAttribute('Publisher') } |
-        Sort-Object { [version] $_.Version } -Descending | Select-Object -First 1
-    if ($null -eq $package) { throw '注册后未找到应用包。' }
-    $activationUri = "shell:AppsFolder\$($package.PackageFamilyName)!$($application.GetAttribute('Id'))"
-    Start-Process explorer.exe -ArgumentList $activationUri
-    $report.activationRequested = $true
-    $report.packageFamilyName = $package.PackageFamilyName
-    Write-Host '已请求启动应用。启动请求不代表 UI、输入法或性能验收通过。'
+$report = [ordered]@{
+    schemaVersion = 2; generatedAt = [DateTimeOffset]::Now.ToString('o')
+    host = Get-CpnWindowsHost; configuration = $Configuration; platform = $Platform
+    stages = [Collections.Generic.List[object]]::new()
+    coreBuildCompleted = $false; coreTestsExecuted = $false; coreTestsPassed = $false
+    sourceEditorBuildCompleted = $false; appBuildCompleted = $false
+    deploymentRequested = $Deploy.IsPresent -or $Launch.IsPresent; deploymentCompleted = $false
+    activationRequested = $false; uiValidationCompleted = $false; failure = $null
 }
-
-$report | ConvertTo-Json -Depth 4 |
-    Set-Content -LiteralPath $reportPath -Encoding utf8
-Write-Host "构建证据：$reportPath"
+try {
+    if (-not $IsWindows) { throw '此脚本仅支持 Windows 主机；当前主机的结果不能用作 Windows 验证。' }
+    $toolchain = Get-CpnWindowsToolchain -Platform $Platform -MSBuildPath $MSBuildPath -CMakePath $CMakePath `
+        -NinjaPath $NinjaPath -WindowsSdkVersion $WindowsSdkVersion
+    $report.toolchain = $toolchain
+    Invoke-CpnNativeStage -Name 'cmake-version' -Executable $toolchain.cmake -Arguments @('--version') -Report $report -OutputRoot $outputRoot
+    Invoke-CpnNativeStage -Name 'msbuild-version' -Executable $toolchain.msbuild -Arguments @('/nologo', '/version') -Report $report -OutputRoot $outputRoot
+    if ($toolchain.ninja) { Invoke-CpnNativeStage -Name 'ninja-version' -Executable $toolchain.ninja -Arguments @('--version') -Report $report -OutputRoot $outputRoot }
+    $coreBuild = Join-Path $outputRoot 'core'
+    $configure = @('-S', $repositoryRoot, '-B', $coreBuild, '-G', $toolchain.generator, '-DBUILD_TESTING=ON')
+    if ($toolchain.generator -eq 'Ninja') {
+        $configure += @("-DCMAKE_BUILD_TYPE=$Configuration", "-DCMAKE_MAKE_PROGRAM=$($toolchain.ninja)",
+                        "-DCMAKE_CXX_COMPILER=$($toolchain.compiler)", "-DCMAKE_C_COMPILER=$($toolchain.compiler)")
+    } else {
+        $cmakePlatform = if ($Platform -eq 'arm64') { 'ARM64' } else { 'x64' }
+        $configure += @('-A', $cmakePlatform, "-DCMAKE_SYSTEM_VERSION=$($toolchain.windowsSdkVersion)")
+    }
+    Invoke-CpnNativeStage -Name 'core-configure' -Executable $toolchain.cmake -Arguments $configure -Report $report -OutputRoot $outputRoot
+    Invoke-CpnNativeStage -Name 'core-build' -Executable $toolchain.cmake `
+        -Arguments @('--build', $coreBuild, '--config', $Configuration, '--parallel', "$Parallelism") -Report $report -OutputRoot $outputRoot
+    $report.coreBuildCompleted = $true
+    $coreLibraryDir = if ($toolchain.generator -eq 'Ninja') { $coreBuild } else { Join-Path $coreBuild $Configuration }
+    $coreLibrary = Join-Path $coreLibraryDir 'cpn_core.lib'
+    if (-not (Test-Path -LiteralPath $coreLibrary -PathType Leaf)) { throw "未生成共享 Core 归档：$coreLibrary" }
+    $report.coreLibrary = [ordered]@{ path = $coreLibrary; sha256 = (Get-FileHash -LiteralPath $coreLibrary -Algorithm SHA256).Hash.ToLowerInvariant() }
+    Invoke-CpnNativeStage -Name 'ctest-plan' -Executable $toolchain.ctest `
+        -Arguments @('--test-dir', $coreBuild, '-C', $Configuration, '--show-only=json-v1') -Report $report -OutputRoot $outputRoot
+    $testPlan = Get-Content -LiteralPath (Join-Path $outputRoot 'ctest-plan.log') -Raw | ConvertFrom-Json
+    $report.coreTestNames = @($testPlan.tests | ForEach-Object { $_.name })
+    if ($report.coreTestNames.Count -eq 0) { throw 'CTest 计划为空；不能把没有执行测试报告为通过。' }
+    $nativeTestPlatform = $report.host.osArchitecture -eq $Platform -or ($Platform -eq 'x64' -and $report.host.osArchitecture -eq 'X64')
+    if (-not $SkipCoreTests -and $nativeTestPlatform) {
+        $report.coreTestsExecuted = $true
+        Invoke-CpnNativeStage -Name 'ctest' -Executable $toolchain.ctest `
+            -Arguments @('--test-dir', $coreBuild, '-C', $Configuration, '--output-on-failure', '--no-tests=error') -Report $report -OutputRoot $outputRoot
+        $report.coreTestsPassed = $true
+    } else {
+        $report.coreTestsSkippedReason = if ($SkipCoreTests) { '用户指定 SkipCoreTests；没有执行测试。' } else { '输出架构与执行主机不一致；未将交叉编译报告为运行验证。' }
+    }
+    $stateTestExe = Join-Path $outputRoot 'committed-text-tests.exe'
+    Invoke-CpnNativeStage -Name 'committed-state-build' -Executable $toolchain.compiler -Arguments @(
+        '/nologo', '/std:c++20', '/EHsc', '/W4', '/utf-8',
+        (Join-Path $repositoryRoot 'patches/winuiedit/tests/committed_text_tests.cpp'),
+        "/Fo:$(Join-Path $outputRoot 'committed-text-tests.obj')", "/Fe:$stateTestExe"
+    ) -Report $report -OutputRoot $outputRoot
+    if ($nativeTestPlatform) { Invoke-CpnNativeStage -Name 'committed-state-test' -Executable $stateTestExe -Report $report -OutputRoot $outputRoot }
+    $sourceLockPath = Join-Path $repositoryRoot 'patches/winuiedit/source-lock.json'
+    $sourceLock = Get-Content -LiteralPath $sourceLockPath -Raw | ConvertFrom-Json
+    $sourceLockHash = (Get-FileHash -LiteralPath $sourceLockPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $sourceIdentity = "$($sourceLock.source_commit.Substring(0, 12))-$($sourceLockHash.Substring(0, 12))"
+    $prepared = & (Join-Path $PSScriptRoot 'prepare-winuiedit.ps1') -OutputRoot (Join-Path $repositoryRoot "out/windows/dependencies/winuiedit/$sourceIdentity")
+    $report.preparedEditor = $prepared
+    $nugetConfig = Join-Path $repositoryRoot 'apps/windows/NuGet.Config'
+    $sourcePackages = Join-Path $prepared.root 'packages'
+    $editorBinary = Join-Path $outputRoot 'editor/bin'
+    $editorObject = Join-Path $outputRoot 'editor/obj'
+    $editorGenerated = Join-Path $editorObject 'Generated Files'
+    $sourceArguments = @($prepared.project, '/nologo', "/m:$Parallelism", "/p:Configuration=$Configuration",
+        "/p:Platform=$Platform", '/p:WinUIEditorUseWinUI3=true', "/p:WindowsTargetPlatformVersion=$($toolchain.windowsSdkVersion)",
+        "/p:SolutionDir=$($prepared.root)\", "/p:OutDir=$editorBinary\", "/p:IntDir=$editorObject\", "/p:GeneratedFilesDir=$editorGenerated\")
+    Invoke-CpnNativeStage -Name 'editor-restore' -Executable $toolchain.msbuild -Arguments ($sourceArguments + @(
+        '/t:Restore', '/p:RestorePackagesConfig=true', "/p:RestoreRepositoryPath=$sourcePackages", "/p:RestoreConfigFile=$nugetConfig"
+    )) -Report $report -OutputRoot $outputRoot
+    Invoke-CpnNativeStage -Name 'editor-build' -Executable $toolchain.msbuild -Arguments ($sourceArguments + @('/t:Build', "/bl:$(Join-Path $outputRoot 'editor-build.binlog')")) -Report $report -OutputRoot $outputRoot
+    $report.sourceEditorBuildCompleted = $true
+    $report.editorPackageHashes = Get-CpnPackageHashes -PackagesConfig (Join-Path $prepared.root 'WinUIEditor/packages.config') -PackagesRoot $sourcePackages
+    foreach ($artifact in @('WinUIEditor.dll', 'WinUIEditor.winmd', 'WinUIEditor.pri')) {
+        if (-not (Test-Path -LiteralPath (Join-Path $editorBinary $artifact) -PathType Leaf)) { throw "控件构建产物缺失：$artifact" }
+    }
+    $report.editorArtifacts = @('WinUIEditor.dll', 'WinUIEditor.winmd', 'WinUIEditor.pri') | ForEach-Object {
+        $artifactPath = Join-Path $editorBinary $_
+        [ordered]@{ path = $artifactPath; sha256 = (Get-FileHash -LiteralPath $artifactPath -Algorithm SHA256).Hash.ToLowerInvariant() }
+    }
+    # The app's MSVC profile carries the discovered compiler environment into an Explorer-launched process.
+    $generatedToolchains = Join-Path $outputRoot 'toolchains'
+    New-Item -ItemType Directory -Path $generatedToolchains -Force | Out-Null
+    $msvcProfile = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'profiles/cpp-msvc.json') -Raw | ConvertFrom-Json
+    $msvcProfile.build.executable = $toolchain.compiler
+    $environmentConfig = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'msvc-environment.json') -Raw | ConvertFrom-Json
+    $msvcProfile.environment = @($environmentConfig.variables | ForEach-Object {
+        $value = [Environment]::GetEnvironmentVariable($_, 'Process')
+        if ($null -ne $value) { [pscustomobject]@{ name = $_; value = $value } }
+    })
+    $msvcProfile | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $generatedToolchains 'cpp-msvc.json') -Encoding utf8
+    $appProject = Join-Path $repositoryRoot 'apps/windows/CPEditorNativeWindows/CPEditorNativeWindows.vcxproj'
+    $appPackages = Join-Path $repositoryRoot 'apps/windows/packages'
+    $appArguments = @($appProject, '/nologo', "/m:$Parallelism", "/p:Configuration=$Configuration", "/p:Platform=$Platform",
+        '/p:WinUIEditorUseWinUI3=true', "/p:WindowsTargetPlatformVersion=$($toolchain.windowsSdkVersion)",
+        "/p:CPNWinUIEditProject=$($prepared.project)", "/p:CPNEditorBinaryDir=$editorBinary\",
+        "/p:CPNEditorObjectDir=$editorObject\", "/p:CPNEditorGeneratedDir=$editorGenerated\",
+        "/p:CPNPreparedEditorRoot=$($prepared.root)\", "/p:CPNCoreLibraryDir=$coreLibraryDir",
+        "/p:CPNGeneratedToolchainsDir=$generatedToolchains", '/p:AppxPackageSigningEnabled=false', '/p:AppxBundle=Never')
+    Invoke-CpnNativeStage -Name 'app-restore' -Executable $toolchain.msbuild -Arguments ($appArguments + @(
+        '/t:Restore', '/p:RestorePackagesConfig=true', "/p:RestoreRepositoryPath=$appPackages", "/p:RestoreConfigFile=$nugetConfig"
+    )) -Report $report -OutputRoot $outputRoot
+    Invoke-CpnNativeStage -Name 'app-build' -Executable $toolchain.msbuild -Arguments ($appArguments + @('/t:Build', "/bl:$(Join-Path $outputRoot 'app-build.binlog')")) -Report $report -OutputRoot $outputRoot
+    $report.appBuildCompleted = $true
+    $report.appPackageHashes = Get-CpnPackageHashes -PackagesConfig (Join-Path (Split-Path $appProject) 'packages.config') -PackagesRoot $appPackages
+    $manifestPath = Join-Path $outputRoot 'layout/AppxManifest.xml'
+    $report.layoutManifestPath = $manifestPath
+    $report.executablePath = Join-Path $outputRoot 'CPEditorNativeWindows.exe'
+    if ($Deploy -or $Launch) {
+        if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw "缺少 MSIX layout 清单：$manifestPath" }
+        Import-Module Appx -UseWindowsPowerShell -ErrorAction Stop
+        Add-AppxPackage -Register $manifestPath -ErrorAction Stop
+        $report.deploymentCompleted = $true
+        [xml] $manifest = Get-Content -LiteralPath $manifestPath -Raw
+        $namespace = [Xml.XmlNamespaceManager]::new($manifest.NameTable)
+        $namespace.AddNamespace('p', 'http://schemas.microsoft.com/appx/manifest/foundation/windows10')
+        $identity = $manifest.SelectSingleNode('/p:Package/p:Identity', $namespace)
+        $application = $manifest.SelectSingleNode('/p:Package/p:Applications/p:Application', $namespace)
+        $package = @(Get-AppxPackage -Name $identity.GetAttribute('Name')) |
+            Where-Object { $_.Publisher -eq $identity.GetAttribute('Publisher') } |
+            Sort-Object { [version] $_.Version } -Descending | Select-Object -First 1
+        if ($null -eq $package) { throw '注册后未找到应用包。' }
+        $report.packageFamilyName = $package.PackageFamilyName
+        if ($Launch) {
+            Start-Process explorer.exe -ArgumentList "shell:AppsFolder\$($package.PackageFamilyName)!$($application.GetAttribute('Id'))"
+            $report.activationRequested = $true
+            Write-Host '已请求启动；此状态不代表 UI、IME 或性能验收通过。'
+        }
+    }
+} catch { $report.failure = $_.Exception.Message; throw }
+finally {
+    $report.completedAt = [DateTimeOffset]::Now.ToString('o')
+    $report | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $reportPath -Encoding utf8
+    Write-Host "构建报告：$reportPath"
+}

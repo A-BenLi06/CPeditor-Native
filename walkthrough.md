@@ -131,3 +131,19 @@ Core 规则区分空输入、缺少预期输出与预期输出为空、checker �
 
 - macOS 普通及完整 -Werror／ASan+UBSan 构建成功，10/10 CTest 入口通过。会话覆盖原始字节、数字与schema校验、损坏保留、提交前后故障、两实例冲突及取消；真实 helper 验证跨进程锁。
 - 合作锁不保证绕过锁的外部writer无法竞争最终replace；文档明确此限制。Windows编译／运行与两端原生会话接入保持待验收，未纳入本次完成声明。
+
+## 2026-11-17T00:21:45+08:00 — Windows 验证入口与 WinUIEdit 快照事务补丁
+
+### 改动与思路
+
+- 按用户“先提供 Windows 验证脚本”的选择，新增 PowerShell 7 工具发现、固定源码准备和统一 verify 入口。脚本建立官方 MSVC 开发环境，构建 Core／执行 CTest，构建源码控件和宿主，并可显式部署／请求启动。
+- 逐阶段保存退出码、日志、版本、源码／依赖／产物 SHA256、binlog 和报告；中文手工实测模板的 10 个场景默认未执行。启动请求与真实UI验收独立；空CTest计划被拒绝，交叉架构不伪称执行测试。
+- 固定 WinUIEdit 源码以git archive导出独立副本，应用哈希锁定的patch／overlay；不修改研究子模块，身份或文件变化拒绝复用且保留改动。修正Windows receipt路径分隔符规范化。
+- 补齐Scintilla committed事务的原生锁／队列barrier、净文本revision和原子字节／光标快照，覆盖先SetText再composition-start。新增快照跟踪可用性，永久fault与暂时pending分开；异常在原生边界处理，跟踪失效不阻断后续原生输入。
+- 统一CppWinRT依赖、保留实际WIL、移除未使用WebView2构建残留；通过正常WinMD项目引用连接源码控件。当前宿主仍为M0，Core UI草稿没有纳入本阶段提交。
+
+### 验证与限制
+
+- macOS ARM64上的PowerShell7.7语法解析4文件通过；实际准备、重复校验、故意篡改拒绝且未覆盖、恢复后校验通过。最终patch SHA256为 1c5d596b71af578dd07708a6a87bf0fb0c600da5ccb3fbb61e3838aa5319d32e；9个after文件和overlay哈希独立核对一致。
+- Clang C++20严格警告和ASan／UBSan便携状态测试通过，含组合输入、取消、嵌套、NUL及分配／消费者异常注入。根重新编译运行了状态测试。
+- 非Windows执行verify实际退出1并生成失败报告，自动通过标志false，10项实测均not_run／null；子模块保持干净。Windows MSVC／MIDL／WinRT／UI／TSF／IME／DPI／UU和性能尚未执行，必须使用目标机验证入口采集。

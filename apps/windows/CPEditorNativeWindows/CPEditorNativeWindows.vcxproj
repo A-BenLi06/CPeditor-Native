@@ -77,11 +77,12 @@
       <LanguageStandard>stdcpp20</LanguageStandard>
       <ConformanceMode>true</ConformanceMode>
       <AdditionalOptions>/utf-8 /bigobj %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>$(GeneratedFilesDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(MSBuildThisFileDirectory)..\..\..\core\include;$(MSBuildThisFileDirectory)..\..\..\third_party\json\include;$(GeneratedFilesDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
-      <AdditionalDependencies>windowsapp.lib;ole32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>cpn_core.lib;windowsapp.lib;ole32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(CPNCoreLibraryDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
@@ -96,6 +97,7 @@
     <Link>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
+      <AdditionalLibraryDirectories>$(CPNCoreLibraryDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -176,17 +178,40 @@
   <ItemGroup Condition="'$(DisableMsixProjectCapabilityAddedByProject)'!='true' and '$(EnablePreviewMsixTooling)'=='true'">
     <ProjectCapability Include="Msix" />
   </ItemGroup>
+  <ItemGroup>
+    <Content Include="$(CPNGeneratedToolchainsDir)\*.json">
+      <Link>Toolchains\%(Filename)%(Extension)</Link>
+    </Content>
+    <Content Include="..\..\..\resources\profiles\cpp-clang.json">
+      <Link>Toolchains\cpp-clang.json</Link>
+    </Content>
+    <Content Include="..\..\..\resources\profiles\cpp-gcc-windows.json">
+      <Link>Toolchains\cpp-gcc-windows.json</Link>
+    </Content>
+    <Content Include="..\..\..\resources\profiles\python.json">
+      <Link>Toolchains\python.json</Link>
+    </Content>
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="$(CPNWinUIEditProject)">
+      <Project>{290647E3-D8CB-46B5-87CE-409F721E441A}</Project>
+      <BuildReference>false</BuildReference>
+      <AdditionalProperties>WinUIEditorUseWinUI3=true;OutDir=$(CPNEditorBinaryDir);IntDir=$(CPNEditorObjectDir);GeneratedFilesDir=$(CPNEditorGeneratedDir);SolutionDir=$(CPNPreparedEditorRoot)</AdditionalProperties>
+    </ProjectReference>
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
     <Import Project="..\packages\Microsoft.Windows.CppWinRT.2.0.240405.15\build\native\Microsoft.Windows.CppWinRT.targets" Condition="Exists('..\packages\Microsoft.Windows.CppWinRT.2.0.240405.15\build\native\Microsoft.Windows.CppWinRT.targets')" />
     <Import Project="..\packages\Microsoft.Windows.SDK.BuildTools.10.0.28000.1839\build\Microsoft.Windows.SDK.BuildTools.targets" Condition="Exists('..\packages\Microsoft.Windows.SDK.BuildTools.10.0.28000.1839\build\Microsoft.Windows.SDK.BuildTools.targets')" />
-    <Import Project="..\packages\WinUIEdit.0.0.5-prerelease\build\native\WinUIEdit.targets" Condition="Exists('..\packages\WinUIEdit.0.0.5-prerelease\build\native\WinUIEdit.targets')" />
     <Import Project="..\packages\Microsoft.WindowsAppSDK.1.7.260224002\build\native\Microsoft.WindowsAppSDK.targets" Condition="Exists('..\packages\Microsoft.WindowsAppSDK.1.7.260224002\build\native\Microsoft.WindowsAppSDK.targets')" />
   </ImportGroup>
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
     <Error Condition="!Exists('..\packages\Microsoft.WindowsAppSDK.1.7.260224002\build\native\Microsoft.WindowsAppSDK.targets')" Text="请先还原 NuGet 包。缺少文件：..\packages\Microsoft.WindowsAppSDK.1.7.260224002\build\native\Microsoft.WindowsAppSDK.targets" />
     <Error Condition="!Exists('..\packages\Microsoft.Windows.SDK.BuildTools.10.0.28000.1839\build\Microsoft.Windows.SDK.BuildTools.targets')" Text="请先还原 NuGet 包。缺少文件：..\packages\Microsoft.Windows.SDK.BuildTools.10.0.28000.1839\build\Microsoft.Windows.SDK.BuildTools.targets" />
     <Error Condition="!Exists('..\packages\Microsoft.Windows.CppWinRT.2.0.240405.15\build\native\Microsoft.Windows.CppWinRT.targets')" Text="请先还原 NuGet 包。缺少文件：..\packages\Microsoft.Windows.CppWinRT.2.0.240405.15\build\native\Microsoft.Windows.CppWinRT.targets" />
-    <Error Condition="!Exists('..\packages\WinUIEdit.0.0.5-prerelease\build\native\WinUIEdit.targets')" Text="请先还原 NuGet 包。缺少文件：..\packages\WinUIEdit.0.0.5-prerelease\build\native\WinUIEdit.targets" />
+  </Target>
+  <Target Name="EnsureNativeCoreAndEditor" BeforeTargets="PrepareForBuild">
+    <Error Condition="'$(CPNWinUIEditProject)'=='' Or !Exists('$(CPNWinUIEditProject)')" Text="请使用 tools/windows/verify.ps1 准备固定源码控件工程。" />
+    <Error Condition="'$(CPNCoreLibraryDir)'=='' Or !Exists('$(CPNCoreLibraryDir)\cpn_core.lib')" Text="缺少共享 Core 归档；请使用 tools/windows/verify.ps1 构建。" />
   </Target>
 </Project>

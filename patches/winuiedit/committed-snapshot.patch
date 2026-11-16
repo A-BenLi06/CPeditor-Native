@@ -1,0 +1,438 @@
+--- a/WinUIEditor/CodeEditorControl.cpp
++++ b/WinUIEditor/CodeEditorControl.cpp
+@@ -28,6 +28,10 @@
+ 		SetScintilla(_call);
+ 		SetLexilla(CreateLexer);
+ 		Initialize();
++        const auto snapshotOwner = get_weak();
++        _editor->CommittedSnapshotAvailabilityChanged([snapshotOwner](IInspectable const &, bool available) {
++            if (auto owner = snapshotOwner.get()) owner->_committedSnapshotAvailabilityChanged(*owner, available);
++        });
+ 		_editor->DpiChanged({ this, &CodeEditorControl::Editor_DpiChanged });
+ 		_editor->InternalNotifyMessageReceived.add({ this, &CodeEditorControl::Editor_NotifyMessageReceived });
+ 
+@@ -255,6 +259,21 @@
+ 		_syntaxHighlightingAppliedEvent.remove(token);
+ 	}
+ 
++
++    bool CodeEditorControl::IsCompositionActive() { return _editor->IsCompositionActive(); }
++    bool CodeEditorControl::IsCommittedSnapshotAvailable() { return _editor->IsCommittedSnapshotAvailable(); }
++    bool CodeEditorControl::IsCommittedSnapshotTrackingAvailable() { return _editor->IsCommittedSnapshotTrackingAvailable(); }
++    uint64_t CodeEditorControl::CommittedRevision() { return _editor->CommittedRevision(); }
++    Windows::Storage::Streams::IBuffer CodeEditorControl::ReadCommittedText(uint64_t &revision, int64_t &caretByte, int64_t &anchorByte) {
++        return _editor->ReadCommittedText(revision, caretByte, anchorByte);
++    }
++    event_token CodeEditorControl::CommittedSnapshotAvailabilityChanged(EventHandler<bool> const &handler) {
++        return _committedSnapshotAvailabilityChanged.add(handler);
++    }
++    void CodeEditorControl::CommittedSnapshotAvailabilityChanged(event_token const &token) noexcept {
++        _committedSnapshotAvailabilityChanged.remove(token);
++    }
++
+ 	void CodeEditorControl::ApplyDefaultsToDocument()
+ 	{
+ 		ChangeDocumentDefaults();
+--- a/WinUIEditor/CodeEditorControl.h
++++ b/WinUIEditor/CodeEditorControl.h
+@@ -12,6 +12,13 @@
+ 		CodeEditorControl();
+ 		int64_t SendMessage(ScintillaMessage const &message, uint64_t wParam, int64_t lParam);
+ 		WinUIEditor::Editor Editor();
++        bool IsCompositionActive();
++        bool IsCommittedSnapshotAvailable();
++        bool IsCommittedSnapshotTrackingAvailable();
++        uint64_t CommittedRevision();
++        Windows::Storage::Streams::IBuffer ReadCommittedText(uint64_t &revision, int64_t &caretByte, int64_t &anchorByte);
++        event_token CommittedSnapshotAvailabilityChanged(Windows::Foundation::EventHandler<bool> const &handler);
++        void CommittedSnapshotAvailabilityChanged(event_token const &token) noexcept;
+ 		void OnApplyTemplate();
+ 		void OnKeyDown(DUX::Input::KeyRoutedEventArgs const &e);
+ 
+@@ -34,6 +41,7 @@
+ 		com_ptr<EditorBaseControl> _editor{ nullptr };
+ 		std::shared_ptr<Scintilla::ScintillaCall> _call{ nullptr };
+ 		event<Windows::Foundation::EventHandler<int64_t>> _notifyMessageReceived;
++        event<Windows::Foundation::EventHandler<bool>> _committedSnapshotAvailabilityChanged;
+ 
+ 		event<Windows::Foundation::EventHandler<DUX::ElementTheme>> _defaultColorsChangedEvent;
+ 		event<Windows::Foundation::EventHandler<DUX::ElementTheme>> _syntaxHighlightingAppliedEvent;
+--- a/WinUIEditor/EditorBaseControl.cpp
++++ b/WinUIEditor/EditorBaseControl.cpp
+@@ -54,6 +54,10 @@
+ 
+ 		_scintilla->SetWndProcTag(*this);
+ 		_scintilla->SetWndProc(&EditorBaseControl::WndProc);
++        const auto snapshotOwner = get_weak();
++        _scintilla->SetCommittedAvailabilityCallback([snapshotOwner](bool available) {
++            if (auto owner = snapshotOwner.get()) owner->_committedSnapshotAvailabilityChanged(*owner, available);
++        });
+ 
+ #ifndef WINUI3
+ 		if (_hasFcu)
+@@ -74,8 +78,24 @@
+ 
+ 	EditorBaseControl::~EditorBaseControl()
+ 	{
++        _scintilla->SetCommittedAvailabilityCallback({});
+ 		_scintilla->Finalize();
+ 	}
++
++
++    bool EditorBaseControl::IsCompositionActive() { return _scintilla->IsCompositionActive(); }
++    bool EditorBaseControl::IsCommittedSnapshotAvailable() { return _scintilla->IsCommittedSnapshotAvailable(); }
++    bool EditorBaseControl::IsCommittedSnapshotTrackingAvailable() { return _scintilla->IsCommittedSnapshotTrackingAvailable(); }
++    uint64_t EditorBaseControl::CommittedRevision() { return _scintilla->CommittedRevision(); }
++    Windows::Storage::Streams::IBuffer EditorBaseControl::ReadCommittedText(uint64_t &revision, int64_t &caretByte, int64_t &anchorByte) {
++        return _scintilla->ReadCommittedText(revision, caretByte, anchorByte);
++    }
++    event_token EditorBaseControl::CommittedSnapshotAvailabilityChanged(EventHandler<bool> const &handler) {
++        return _committedSnapshotAvailabilityChanged.add(handler);
++    }
++    void EditorBaseControl::CommittedSnapshotAvailabilityChanged(event_token const &token) noexcept {
++        _committedSnapshotAvailabilityChanged.remove(token);
++    }
+ 
+ 	WinUIEditor::Editor EditorBaseControl::Editor()
+ 	{
+--- a/WinUIEditor/EditorBaseControl.h
++++ b/WinUIEditor/EditorBaseControl.h
+@@ -15,6 +15,13 @@
+ 		~EditorBaseControl();
+ 
+ 		WinUIEditor::Editor Editor();
++        bool IsCompositionActive();
++        bool IsCommittedSnapshotAvailable();
++        bool IsCommittedSnapshotTrackingAvailable();
++        uint64_t CommittedRevision();
++        Windows::Storage::Streams::IBuffer ReadCommittedText(uint64_t &revision, int64_t &caretByte, int64_t &anchorByte);
++        event_token CommittedSnapshotAvailabilityChanged(Windows::Foundation::EventHandler<bool> const &handler);
++        void CommittedSnapshotAvailabilityChanged(event_token const &token) noexcept;
+ 		std::shared_ptr<Scintilla::ScintillaCall> Call() noexcept { return _call; }
+ 
+ 		void OnApplyTemplate();
+@@ -63,6 +70,7 @@
+ 		float _dpiScale{ 0 };
+ 		event<Windows::Foundation::EventHandler<double>> _dpiChangedEvent;
+ 		event<Windows::Foundation::EventHandler<int64_t>> _notifyMessageReceived;
++        event<Windows::Foundation::EventHandler<bool>> _committedSnapshotAvailabilityChanged;
+ 		DUX::FrameworkElement::SizeChanged_revoker _imageTargetSizeChangedRevoker{};
+ 		void ImageTarget_SizeChanged(Windows::Foundation::IInspectable const &sender, DUX::SizeChangedEventArgs const &args);
+ 		DUX::UIElement::PointerMoved_revoker _imageTargetPointerMovedRevoker{};
+--- a/WinUIEditor/IEditorAccess.idl
++++ b/WinUIEditor/IEditorAccess.idl
+@@ -6,5 +6,11 @@
+ 	{
+ 		Int64 SendMessage(ScintillaMessage message, UInt64 wParam, Int64 lParam);
+ 		event Windows.Foundation.EventHandler<Int64> NotifyMessageReceived;
++        Boolean IsCompositionActive { get; };
++        Boolean IsCommittedSnapshotAvailable { get; };
++        Boolean IsCommittedSnapshotTrackingAvailable { get; };
++        UInt64 CommittedRevision { get; };
++        event Windows.Foundation.EventHandler<Boolean> CommittedSnapshotAvailabilityChanged;
++        Windows.Storage.Streams.IBuffer ReadCommittedText(out UInt64 revision, out Int64 caretByte, out Int64 anchorByte);
+ 	}
+ }
+--- a/WinUIEditor/WinUIEditor.vcxproj
++++ b/WinUIEditor/WinUIEditor.vcxproj
+@@ -97,6 +97,7 @@
+       <PrecompiledHeaderOutputFile>$(IntDir)pch.pch</PrecompiledHeaderOutputFile>
+       <AdditionalIncludeDirectories>..\scintilla\winui;..\scintilla\include;..\scintilla\src;..\lexilla\include\;..\lexilla\lexlib;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+       <WarningLevel>Level4</WarningLevel>
++      <LanguageStandard>stdcpp20</LanguageStandard>
+       <AdditionalOptions>%(AdditionalOptions) /bigobj</AdditionalOptions>
+       <PreprocessorDefinitions>SCI_EMPTYCATALOGUE;_CRT_SECURE_NO_DEPRECATE;_SCL_SECURE_NO_WARNINGS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+       <PreprocessorDefinitions>NOMINMAX;_WINRT_DLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+@@ -287,7 +288,6 @@
+   <ImportGroup Label="ExtensionTargets">
+     <Import Project="..\packages\Microsoft.Windows.CppWinRT.2.0.240405.15\build\native\Microsoft.Windows.CppWinRT.targets" Condition="Exists('..\packages\Microsoft.Windows.CppWinRT.2.0.240405.15\build\native\Microsoft.Windows.CppWinRT.targets')" />
+     <Import Project="..\packages\Microsoft.Windows.SDK.BuildTools.10.0.28000.1839\build\Microsoft.Windows.SDK.BuildTools.targets" Condition="Exists('..\packages\Microsoft.Windows.SDK.BuildTools.10.0.28000.1839\build\Microsoft.Windows.SDK.BuildTools.targets')" />
+-    <Import Project="..\packages\Microsoft.Web.WebView2.1.0.4022.49\build\native\Microsoft.Web.WebView2.targets" Condition="$(WinUIEditorUseWinUI3) And Exists('..\packages\Microsoft.Web.WebView2.1.0.4022.49\build\native\Microsoft.Web.WebView2.targets')" />
+     <Import Project="..\packages\Microsoft.WindowsAppSDK.1.7.260224002\build\native\Microsoft.WindowsAppSDK.targets" Condition="$(WinUIEditorUseWinUI3) And Exists('..\packages\Microsoft.WindowsAppSDK.1.7.260224002\build\native\Microsoft.WindowsAppSDK.targets')" />
+     <Import Project="..\packages\Microsoft.Windows.ImplementationLibrary.1.0.260126.7\build\native\Microsoft.Windows.ImplementationLibrary.targets" Condition="Exists('..\packages\Microsoft.Windows.ImplementationLibrary.1.0.260126.7\build\native\Microsoft.Windows.ImplementationLibrary.targets')" />
+   </ImportGroup>
+@@ -299,7 +299,6 @@
+     <Error Condition="!Exists('..\packages\Microsoft.Windows.CppWinRT.2.0.240405.15\build\native\Microsoft.Windows.CppWinRT.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Microsoft.Windows.CppWinRT.2.0.240405.15\build\native\Microsoft.Windows.CppWinRT.targets'))" />
+     <Error Condition="!Exists('..\packages\Microsoft.Windows.SDK.BuildTools.10.0.28000.1839\build\Microsoft.Windows.SDK.BuildTools.props')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Microsoft.Windows.SDK.BuildTools.10.0.28000.1839\build\Microsoft.Windows.SDK.BuildTools.props'))" />
+     <Error Condition="!Exists('..\packages\Microsoft.Windows.SDK.BuildTools.10.0.28000.1839\build\Microsoft.Windows.SDK.BuildTools.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Microsoft.Windows.SDK.BuildTools.10.0.28000.1839\build\Microsoft.Windows.SDK.BuildTools.targets'))" />
+-    <Error Condition="$(WinUIEditorUseWinUI3) And !Exists('..\packages\Microsoft.Web.WebView2.1.0.4022.49\build\native\Microsoft.Web.WebView2.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Microsoft.Web.WebView2.1.0.4022.49\build\native\Microsoft.Web.WebView2.targets'))" />
+     <Error Condition="$(WinUIEditorUseWinUI3) And !Exists('..\packages\Microsoft.WindowsAppSDK.1.7.260224002\build\native\Microsoft.WindowsAppSDK.props')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Microsoft.WindowsAppSDK.1.7.260224002\build\native\Microsoft.WindowsAppSDK.props'))" />
+     <Error Condition="$(WinUIEditorUseWinUI3) And !Exists('..\packages\Microsoft.WindowsAppSDK.1.7.260224002\build\native\Microsoft.WindowsAppSDK.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Microsoft.WindowsAppSDK.1.7.260224002\build\native\Microsoft.WindowsAppSDK.targets'))" />
+     <Error Condition="!Exists('..\packages\Microsoft.Windows.ImplementationLibrary.1.0.260126.7\build\native\Microsoft.Windows.ImplementationLibrary.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Microsoft.Windows.ImplementationLibrary.1.0.260126.7\build\native\Microsoft.Windows.ImplementationLibrary.targets'))" />
+--- a/WinUIEditor/packages.config
++++ b/WinUIEditor/packages.config
+@@ -1,7 +1,6 @@
+ ﻿<?xml version="1.0" encoding="utf-8"?>
+ <packages>
+-  <package id="Microsoft.Web.WebView2" version="1.0.4022.49" targetFramework="native" />
+-  <package id="Microsoft.Windows.CppWinRT" version="2.0.250303.1" targetFramework="native" />
++  <package id="Microsoft.Windows.CppWinRT" version="2.0.240405.15" targetFramework="native" />
+   <package id="Microsoft.Windows.ImplementationLibrary" version="1.0.260126.7" targetFramework="native" />
+   <package id="Microsoft.Windows.SDK.BuildTools" version="10.0.28000.1839" targetFramework="native" />
+   <package id="Microsoft.WindowsAppSDK" version="1.7.260224002" targetFramework="native" />
+--- a/scintilla/winui/ScintillaWin.cxx
++++ b/scintilla/winui/ScintillaWin.cxx
+@@ -861,6 +861,8 @@
+ 	// Todo: conflated with the incorrectly spelled version
+ 	void ScintillaWinUI::Finalize()
+ 	{
++        _committedText.finalize();
++        PublishCommittedAvailability();
+ 		ScintillaBase::Finalise();
+ 		StopTimers();
+ 		SetIdle(false);
+@@ -1115,7 +1117,12 @@
+ 	{
+ 		if (_lock == NONE)
+ 		{
++            if (lock == READWRITE && _committedText.tracking_available() && !_committedText.transaction_open()) {
++                try { _committedText.begin_native_update(CaptureSnapshotText()); }
++                catch (...) { _committedText.invalidate(); }
++            }
+ 			_lock = static_cast<LockTypes>(lock);
++            PublishCommittedAvailability();
+ 			return true;
+ 		}
+ 		return false;
+@@ -1123,9 +1130,10 @@
+ 
+ 	void ScintillaWinUI::TsfCoreUnlock()
+ 	{
+-		ProcessQueues();
+-
++        try { ProcessQueues(); }
++        catch (...) { _committedText.invalidate(); }
+ 		_lock = NONE;
++        PublishCommittedAvailability();
+ 	}
+ 
+ 	IFACEMETHODIMP ScintillaWinUI::UnadviseSink(IUnknown *)
+@@ -1139,6 +1147,7 @@
+ 		{
+ 			return E_INVALIDARG;
+ 		}
++        try {
+ 		if (_tfTextStoreACPSink == nullptr)
+ 		{
+ 			return E_UNEXPECTED;
+@@ -1179,17 +1188,26 @@
+ 		{
+ 			if (dwLockFlags & (TS_LF_READWRITE & ~TS_LF_READ))
+ 			{
++                if (_committedText.tracking_available() && !_committedText.transaction_open()) {
++                    try { _committedText.begin_native_update(CaptureSnapshotText()); }
++                    catch (...) { _committedText.invalidate(); }
++                }
+ 				ImeEndComposition();
+ 			}
+ 
+ 			// Lock it and give it to the manager.
+ 			_lock = static_cast<LockTypes>(dwLockFlags & TS_LF_READWRITE);
++            PublishCommittedAvailability();
+ 
+ 			*phrSession = _tfTextStoreACPSink->OnLockGranted(_lock);
+ 
+ 			while (_lockAsync && _tfTextStoreACPSink != NULL)
+ 			{
+ 				// Grant the pending async read/write lock if there's one.
++                if (_lockAsync == READWRITE && _committedText.tracking_available() && !_committedText.transaction_open()) {
++                    try { _committedText.begin_native_update(CaptureSnapshotText()); }
++                    catch (...) { _committedText.invalidate(); }
++                }
+ 				_lock = _lockAsync;
+ 				_lockAsync = NONE;
+ 				_tfTextStoreACPSink->OnLockGranted(_lock);
+@@ -1198,16 +1216,30 @@
+ 			_multiInsert = 0;
+ 			_multiCorrect = 0; // Todo: Should we update text if this is set? Arguably yes, based on how TSFCore does it. Check the log and see what GetText is called. Maybe not? Lots of queued notifications
+ 
+-			ProcessQueues();
+-
++            ProcessQueues();
+ 			_lock = NONE;
++            PublishCommittedAvailability();
+ 		}
+ 
+ 		return hr;
++        } catch (...) {
++            const auto failure = winrt::to_hresult();
++            _lock = NONE;
++            _lockAsync = NONE;
++            _committedText.invalidate();
++            PublishCommittedAvailability();
++            *phrSession = failure;
++            return failure;
++        }
+ 	}
+ 
+ 	void ScintillaWinUI::ProcessQueues()
+ 	{
++        struct DrainScope {
++            std::size_t &depth;
++            explicit DrainScope(std::size_t &value) : depth(value) { ++depth; }
++            ~DrainScope() { --depth; }
++        } drain(_snapshotDrainDepth);
+ 		while (!msgq.empty())
+ 		{
+ #ifdef EnableTsfDebugMessages
+@@ -1890,7 +1922,8 @@
+ #ifdef EnableTsfDebugMessages
+ 		DebugOut(L"OnEndComposition\n");
+ #endif
+-		//ImeEndComposition(); // Todo: Maybe
++        _committedText.end_composition();
++        PublishCommittedAvailability();
+ 		return S_OK;
+ 	}
+ 
+@@ -1899,12 +1932,24 @@
+ #ifdef EnableTsfDebugMessages
+ 		DebugOut(L"OnStartComposition\n");
+ #endif
+-		if (pfOk)
+-		{
+-			*pfOk = TRUE;
+-		}
+-		//view.imeCaretBlockOverride = true;
+-		return S_OK;
++        if (!pfOk) return E_POINTER;
++        *pfOk = FALSE;
++        try {
++            std::string baseline;
++            if (_committedText.tracking_available() && !_committedText.transaction_open()) {
++                try { baseline = CaptureSnapshotText(); }
++                catch (...) { _committedText.invalidate(); }
++            }
++            _committedText.begin_composition(std::move(baseline));
++            *pfOk = TRUE;
++            PublishCommittedAvailability();
++            return S_OK;
++        } catch (...) {
++            _committedText.invalidate();
++            PublishCommittedAvailability();
++            *pfOk = FALSE;
++            return winrt::to_hresult();
++        }
+ 	}
+ 
+ 	IFACEMETHODIMP ScintillaWinUI::OnUpdateComposition(ITfCompositionView *pComposition, ITfRange *pRangeNew)
+@@ -2355,6 +2400,12 @@
+ 
+ 	void ScintillaWinUI::NotifyParent(Scintilla::NotificationData scn)
+ 	{
++        if (scn.nmhdr.code == Scintilla::Notification::Modified &&
++            (FlagSet(scn.modificationType, Scintilla::ModificationFlags::InsertText) ||
++             FlagSet(scn.modificationType, Scintilla::ModificationFlags::DeleteText))) {
++            try { _committedText.text_changed(); }
++            catch (...) { _committedText.invalidate(); PublishCommittedAvailability(); }
++        }
+ 		if (_lock != NONE)
+ 		{
+ 			// Todo: notification queue might defeat the point of "before" notifications
+@@ -2447,6 +2498,66 @@
+ 	void ScintillaWinUI::AddToPopUp(const char *label, int cmd, bool enabled)
+ 	{
+ 	}
++
++
++    bool ScintillaWinUI::SnapshotNativeIdle() const noexcept {
++        return _lock == NONE && _lockAsync == NONE && msgq.empty() && notifyq.empty() && _snapshotDrainDepth == 0;
++    }
++    bool ScintillaWinUI::IsCompositionActive() const {
++        if (GetCurrentThreadId() != _snapshotOwnerThread) winrt::throw_hresult(RPC_E_WRONG_THREAD);
++        return _committedText.composing();
++    }
++    bool ScintillaWinUI::IsCommittedSnapshotAvailable() const {
++        return GetCurrentThreadId() == _snapshotOwnerThread && !_snapshotReadBusy &&
++            _committedText.available(SnapshotNativeIdle());
++    }
++    bool ScintillaWinUI::IsCommittedSnapshotTrackingAvailable() const {
++        if (GetCurrentThreadId() != _snapshotOwnerThread) winrt::throw_hresult(RPC_E_WRONG_THREAD);
++        return _committedText.tracking_available();
++    }
++    uint64_t ScintillaWinUI::CommittedRevision() const {
++        if (GetCurrentThreadId() != _snapshotOwnerThread) winrt::throw_hresult(RPC_E_WRONG_THREAD);
++        return _committedText.revision();
++    }
++    std::string ScintillaWinUI::CaptureSnapshotText() const {
++        const auto length = pdoc->Length();
++        if (length < 0 || static_cast<uint64_t>(length) > std::numeric_limits<uint32_t>::max())
++            winrt::throw_hresult(E_BOUNDS);
++        std::string text(static_cast<std::size_t>(length), '\0');
++        if (length) pdoc->GetCharRange(text.data(), 0, length);
++        return text;
++    }
++    winrt::Windows::Storage::Streams::IBuffer ScintillaWinUI::ReadCommittedText(uint64_t &revision, int64_t &caretByte, int64_t &anchorByte) {
++        if (GetCurrentThreadId() != _snapshotOwnerThread) winrt::throw_hresult(RPC_E_WRONG_THREAD);
++        if (!IsCommittedSnapshotTrackingAvailable()) winrt::throw_hresult(E_FAIL);
++        if (!IsCommittedSnapshotAvailable()) winrt::throw_hresult(E_PENDING);
++        if (!IsUnicodeMode()) winrt::throw_hresult(E_ILLEGAL_METHOD_CALL);
++        struct ReadScope {
++            bool &busy;
++            explicit ReadScope(bool &value) : busy(value) { busy = true; }
++            ~ReadScope() { busy = false; }
++        } reading(_snapshotReadBusy);
++        // Capture bytes and revision before calling any WinRT activation/allocation API.
++        const auto text = CaptureSnapshotText();
++        const auto capturedRevision = _committedText.revision();
++        const auto capturedCaret = sel.MainCaret();
++        const auto capturedAnchor = sel.MainAnchor();
++        winrt::Windows::Storage::Streams::Buffer buffer{static_cast<uint32_t>(text.size())};
++        buffer.Length(static_cast<uint32_t>(text.size()));
++        if (!text.empty()) std::memcpy(buffer.data(), text.data(), text.size());
++        revision = capturedRevision;
++        caretByte = capturedCaret;
++        anchorByte = capturedAnchor;
++        return buffer;
++    }
++    void ScintillaWinUI::SetCommittedAvailabilityCallback(std::function<void(bool)> callback) {
++        _committedAvailabilityCallback = std::move(callback);
++    }
++    void ScintillaWinUI::PublishCommittedAvailability() noexcept {
++        _committedText.publish_availability(SnapshotNativeIdle(), _lastSnapshotAvailable,
++            [this] { return CaptureSnapshotText(); },
++            [this](bool available) { if (_committedAvailabilityCallback) _committedAvailabilityCallback(available); });
++    }
+ 
+ 	void ScintillaWinUI::DpiChanged()
+ 	{
+--- a/scintilla/winui/ScintillaWin.h
++++ b/scintilla/winui/ScintillaWin.h
+@@ -10,6 +10,8 @@
+ #include "Wrapper.h"
+ #include "MainWrapper.h"
+ #include "CallTipWrapper.h"
++#include "CommittedTextState.h"
++#include <winrt/Windows.Storage.Streams.h>
+ 
+ namespace Scintilla::Internal {
+ 	enum class ScrollEventType : int32_t
+@@ -82,6 +84,12 @@
+ 		void KeyDown(winrt::Windows::System::VirtualKey key, winrt::Windows::System::VirtualKeyModifiers modifiers, bool const isExtendedKey, bool *handled);
+ 		void StopTimers();
+ 		void Finalize();
++        bool IsCompositionActive() const;
++        bool IsCommittedSnapshotAvailable() const;
++        bool IsCommittedSnapshotTrackingAvailable() const;
++        uint64_t CommittedRevision() const;
++        winrt::Windows::Storage::Streams::IBuffer ReadCommittedText(uint64_t &revision, int64_t &caretByte, int64_t &anchorByte);
++        void SetCommittedAvailabilityCallback(std::function<void(bool)> callback);
+ 		void CharacterReceived(char16_t character);
+ 		bool ShouldShowContextMenu(winrt::Windows::Foundation::Point const &point);
+ 		void HandleCallTipClick(winrt::Windows::Foundation::Point const &point);
+@@ -115,6 +123,15 @@
+ 
+ 	private:
+ 		bool _tsfCore;
++        CPNWinUIEdit::CommittedTextState _committedText;
++        const DWORD _snapshotOwnerThread{GetCurrentThreadId()};
++        std::size_t _snapshotDrainDepth{0};
++        bool _snapshotReadBusy{false};
++        bool _lastSnapshotAvailable{true};
++        std::function<void(bool)> _committedAvailabilityCallback;
++        bool SnapshotNativeIdle() const noexcept;
++        std::string CaptureSnapshotText() const;
++        void PublishCommittedAvailability() noexcept;
+ 
+ 		bool hasOKText{ false };
+ 
