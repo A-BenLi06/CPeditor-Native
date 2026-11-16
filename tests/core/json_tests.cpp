@@ -29,6 +29,12 @@ int main(){
         doc["tests"][1]["id"]="absent";
         rejected([&]{(void)cpn::parse_batch_request(doc.dump(),{16,64,10});},"JSON byte limit");
         rejected([&]{(void)cpn::parse_batch_request(doc.dump(),{65536,64,1});},"testcase limit");
+        const auto samples=cpn::parse_test_cases(doc["tests"].dump());
+        expect(samples.size()==2 && samples[0].expected=="" && !samples[1].expected && samples[1].input==std::string("a\0b",3),"standalone testcase parser preserves empty and binary");
+        for (const auto* invalid : {R"([{"id":"one"}])",R"([{"id":"one","input":"","extra":1}])",R"([{"id":"one","input":"","id":"two"}])",
+                                  R"([{"id":"one","input":{"encoding":"base64","data":"YQBi","unknown":1}}])"})
+            rejected([&]{(void)cpn::parse_test_cases(invalid);},"standalone testcase schema strict");
+        rejected([&]{(void)cpn::parse_test_cases(doc["tests"].dump(),{65536,64,1});},"standalone testcase count bound");
         cpn::BatchResult result;result.document_id="中文";result.revision=17;
         cpn::TestResult test;test.testcase_id="binary";test.process.standard_output=std::string("a\0\xff",3);result.tests.push_back(test);
         auto json=Json::parse(cpn::serialize_batch_result(result));

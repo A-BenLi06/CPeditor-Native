@@ -10,6 +10,8 @@ struct RequestBounds {
     std::size_t max_tests{4096};
 };
 [[nodiscard]] BatchRequest parse_batch_request(std::string_view, RequestBounds = {});
+[[nodiscard]] std::vector<TestCase> parse_test_cases(std::string_view, RequestBounds = {});
+[[nodiscard]] ExternalCheckerSpec parse_external_checker_spec(std::string_view);
 [[nodiscard]] std::string serialize_batch_result(const BatchResult&);
 [[nodiscard]] std::string encode_base64(std::string_view);
 [[nodiscard]] std::string decode_base64(std::string_view);

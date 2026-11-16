@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 #include "cpn/checker.hpp"
+#include "cpn/command.hpp"
+#include "cpn/external_checker.hpp"
 #include "cpn/files.hpp"
 #include "cpn/process.hpp"
 #include <cstdint>
@@ -11,10 +13,6 @@
 #include <string_view>
 #include <vector>
 namespace cpn {
-struct CommandTemplate {
-    std::string executable;
-    std::vector<std::string> arguments;
-};
 struct ToolchainProfile {
     std::string id;
     std::string language_id;
@@ -46,6 +44,7 @@ struct BatchRequest {
     std::vector<TestCase> tests;
     ComparisonMode comparison{ComparisonMode::cp_editor_ignore_trailing_spaces};
     std::size_t max_retained_output_bytes{64 * 1024 * 1024};
+    std::optional<ExternalCheckerSpec> external_checker;
 };
 enum class Verdict { accepted, wrong_answer, time_limit, runtime_error, output_limit,
                      unchecked, cancelled, not_run, checker_error, infrastructure_error };
@@ -55,6 +54,7 @@ struct TestResult {
     Verdict verdict{Verdict::not_run};
     ProcessResult process;
     std::string detail;
+    std::optional<ExternalCheckerResult> checker{};
 };
 struct BatchResult {
     std::string document_id;
@@ -68,7 +68,6 @@ struct BatchResult {
 };
 enum class BatchPhase { building, running, checking };
 using BatchObserver = std::function<void(BatchPhase, const std::string& testcase_id)>;
-using ProcessExecutor = std::function<ProcessResult(const ProcessSpec&,std::stop_token)>;
 
 class BatchService {
 public:

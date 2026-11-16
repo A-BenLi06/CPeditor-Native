@@ -3,6 +3,7 @@
 #include "cpn/digest.hpp"
 #include "cpn/text.hpp"
 #include <algorithm>
+#include <limits>
 #include <map>
 #include <set>
 #include <stdexcept>
@@ -13,6 +14,25 @@ std::string bounded_detail(std::string_view detail) {
     auto end=std::min(detail.size(),maximum);
     if(end<detail.size()) while(end>0 && (static_cast<unsigned char>(detail[end])&0xc0)==0x80) --end;
     return std::string(detail.substr(0,end));
+}
+void retain_outputs(ProcessResult& result,const ProcessLimits& limits) {
+    result.stdout_total_bytes=std::max<std::uint64_t>(result.stdout_total_bytes,result.standard_output.size());
+    result.stderr_total_bytes=std::max<std::uint64_t>(result.stderr_total_bytes,result.standard_error.size());
+    const auto out=std::min<std::uint64_t>(result.standard_output.size(),std::min(limits.stdout_bytes,limits.combined_bytes));
+    const auto err=std::min<std::uint64_t>(result.standard_error.size(),std::min(limits.stderr_bytes,limits.combined_bytes-out));
+    result.stdout_truncated=result.stdout_truncated || out<result.standard_output.size();
+    result.stderr_truncated=result.stderr_truncated || err<result.standard_error.size();
+    result.standard_output.resize(static_cast<std::size_t>(out));
+    result.standard_error.resize(static_cast<std::size_t>(err));
+    const auto maximum=std::numeric_limits<std::uint64_t>::max();
+    const auto total=result.stderr_total_bytes>maximum-result.stdout_total_bytes?maximum:
+        result.stdout_total_bytes+result.stderr_total_bytes;
+    const auto exceeded=result.stdout_truncated || result.stderr_truncated ||
+        result.stdout_total_bytes>limits.stdout_bytes || result.stderr_total_bytes>limits.stderr_bytes || total>limits.combined_bytes;
+    if (exceeded && result.termination==ProcessTermination::exited) {
+        result.termination=ProcessTermination::output_limit;
+        if (result.detail.empty()) result.detail="Process output exceeded configured byte limit";
+    }
 }
 class Workspace {
 public:
@@ -71,6 +91,7 @@ BatchResult BatchService::run(const BatchRequest& request,std::stop_token stop,B
     std::optional<std::size_t> active_test;
     try {
         validate_toolchain_profile(request.toolchain);
+        if (request.external_checker) validate_external_checker(*request.external_checker);
         if(!request.max_retained_output_bytes) throw std::runtime_error("Invalid retained output budget");
         if(request.source.document_id.empty() || decode_utf8(request.source.text).error_offset)
             throw std::runtime_error("Invalid source snapshot");
@@ -79,6 +100,7 @@ BatchResult BatchService::run(const BatchRequest& request,std::stop_token stop,B
             if(test.id.empty() || !ids.insert(test.id).second) throw std::runtime_error("Missing or duplicate testcase ID");
         if(stop.stop_requested()){result.build_outcome=BuildOutcome::cancelled;remaining(result,request,0,Verdict::cancelled);return result;}
         Workspace workspace(files_);
+        workspace.path=std::filesystem::absolute(workspace.path);
         const auto source=workspace.path/path_from_utf8(request.toolchain.source_filename);
         const auto artifact=workspace.path/path_from_utf8(request.toolchain.artifact_name);
         files_->write_atomic(source,request.source.text);
@@ -96,6 +118,7 @@ BatchResult BatchService::run(const BatchRequest& request,std::stop_token stop,B
             auto build_limits=request.toolchain.build_limits;
             build_limits.combined_bytes=std::min<std::uint64_t>(build_limits.combined_bytes,request.max_retained_output_bytes);
             result.build=process_(command(*request.toolchain.build,request.toolchain,build_limits,values,workspace.path),stop);
+            retain_outputs(*result.build,build_limits);
             result.build->detail=bounded_detail(result.build->detail);
             retained=result.build->standard_output.size()+result.build->standard_error.size();
             if(result.build->termination==ProcessTermination::cancelled) result.build_outcome=BuildOutcome::cancelled;
@@ -118,6 +141,7 @@ BatchResult BatchService::run(const BatchRequest& request,std::stop_token stop,B
             auto limits=request.toolchain.run_limits;
             limits.combined_bytes=std::min<std::uint64_t>(limits.combined_bytes,request.max_retained_output_bytes-retained);
             auto process=process_(command(request.toolchain.run,request.toolchain,limits,values,workspace.path,test.input),stop);
+            retain_outputs(process,limits);
             process.detail=bounded_detail(process.detail);
             retained+=process.standard_output.size()+process.standard_error.size();
             TestResult current;current.testcase_id=test.id;current.verdict=process_verdict(process);current.detail=process.detail;
@@ -125,12 +149,28 @@ BatchResult BatchService::run(const BatchRequest& request,std::stop_token stop,B
             auto& checked=result.tests.back();
             if(checked.verdict==Verdict::unchecked && test.expected) {
                 if(observer) observer(BatchPhase::checking,test.id);
-                const auto comparison=compare_outputs(checked.process.standard_output,*test.expected,request.comparison,stop);
-                checked.verdict=comparison.verdict==ComparisonVerdict::accepted?Verdict::accepted:
-                    comparison.verdict==ComparisonVerdict::wrong_answer?Verdict::wrong_answer:
-                    comparison.verdict==ComparisonVerdict::cancelled?Verdict::cancelled:Verdict::checker_error;
-                if(comparison.verdict==ComparisonVerdict::encoding_error) checked.detail="Invalid UTF-8 in text comparison";
-                if(comparison.verdict==ComparisonVerdict::cancelled) checked.detail="Cancelled during output comparison";
+                if (request.external_checker) {
+                    auto spec=*request.external_checker;
+                    spec.limits.combined_bytes=std::min<std::uint64_t>(spec.limits.combined_bytes,
+                        retained<request.max_retained_output_bytes?request.max_retained_output_bytes-retained:0);
+                    checked.checker=ExternalCheckerService(files_,process_).run(spec,
+                        CheckerInput{test.input,checked.process.standard_output,*test.expected,original_directory},stop);
+                    retained+=checked.checker->process.standard_output.size()+checked.checker->process.standard_error.size();
+                    switch (checked.checker->verdict) {
+                        case ExternalCheckerVerdict::accepted: checked.verdict=Verdict::accepted; break;
+                        case ExternalCheckerVerdict::wrong_answer: checked.verdict=Verdict::wrong_answer; break;
+                        case ExternalCheckerVerdict::cancelled: checked.verdict=Verdict::cancelled; break;
+                        case ExternalCheckerVerdict::checker_error: checked.verdict=Verdict::checker_error; break;
+                    }
+                    checked.detail=checked.checker->detail;
+                } else {
+                    const auto comparison=compare_outputs(checked.process.standard_output,*test.expected,request.comparison,stop);
+                    checked.verdict=comparison.verdict==ComparisonVerdict::accepted?Verdict::accepted:
+                        comparison.verdict==ComparisonVerdict::wrong_answer?Verdict::wrong_answer:
+                        comparison.verdict==ComparisonVerdict::cancelled?Verdict::cancelled:Verdict::checker_error;
+                    if(comparison.verdict==ComparisonVerdict::encoding_error) checked.detail="Invalid UTF-8 in text comparison";
+                    if(comparison.verdict==ComparisonVerdict::cancelled) checked.detail="Cancelled during output comparison";
+                }
             }
             active_test.reset();
             if(result.tests.back().verdict==Verdict::cancelled){remaining(result,request,i+1,Verdict::cancelled);break;}

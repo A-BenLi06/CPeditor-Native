@@ -147,3 +147,18 @@ Core 规则区分空输入、缺少预期输出与预期输出为空、checker �
 - macOS ARM64上的PowerShell7.7语法解析4文件通过；实际准备、重复校验、故意篡改拒绝且未覆盖、恢复后校验通过。最终patch SHA256为 1c5d596b71af578dd07708a6a87bf0fb0c600da5ccb3fbb61e3838aa5319d32e；9个after文件和overlay哈希独立核对一致。
 - Clang C++20严格警告和ASan／UBSan便携状态测试通过，含组合输入、取消、嵌套、NUL及分配／消费者异常注入。根重新编译运行了状态测试。
 - 非Windows执行verify实际退出1并生成失败报告，自动通过标志false，10项实测均not_run／null；子模块保持干净。Windows MSVC／MIDL／WinRT／UI／TSF／IME／DPI／UU和性能尚未执行，必须使用目标机验证入口采集。
+
+## 2026-11-17T00:26:18+08:00 — 外部 checker、批量接入与严格 CLI
+
+### 改动与思路
+
+- 添加独立 ExternalCheckerService，raw input／actual／expected 三文件、结构化 argv、单次模板展开、独立工作区及清理。默认testlib0为AC、1／2为WA，其余包含7为CheckerError；显式自定义二元映射可覆盖，未实现评分解析。
+- 将CommandTemplate／ProcessExecutor提取为公共command.hpp，消除Batch与checker头循环。批量请求按值拥有可选配置，解答正常且有答案才运行；结果与JSON／C ABI保留独立checker进程、原始输出、限额和取消。
+- checker输出共享batch总保留预算。独立审查复现违约执行器100字节输出使3字节预算下溢并误判AC，修复build／solver回收时的防御截断、totals／truncated与OLE分类，补 regression并防御剩余空间减法。
+- CLI增加--checker；原有默认TestDocument宏会忽略字段并将缺input置空，改为共享parse_test_cases。统一strict schema、base64、空／缺答案、4096测试限额和参数拒绝；中文文档记录实际能力与限制。
+
+### 验证与范围
+
+- macOS普通及完整-Werror／ASan+UBSan构建成功，12/12 CTest通过。真实helper、受控异常／取消、预算故障、Unicode／NUL／0xFF、C ABI终态与释放均覆盖。
+- 子agent执行17次真实CLI验证；根另执行raw-byte AC／空答案／Unchecked以及7项严格schema／参数检查。checker崩溃／超时／超限保持独立错误，不伪装解答TLE／RE。
+- Windows真实运行、原生checker设置／诊断面板、checker编译、完整评分、压力／交互和其余高级服务仍未完成，未将此局部功能当作完整产品验收。

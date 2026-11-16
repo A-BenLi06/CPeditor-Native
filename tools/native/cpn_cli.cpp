@@ -15,20 +15,28 @@ namespace {
 std::atomic<bool> interrupted{false};
 static_assert(std::atomic<bool>::is_always_lock_free);
 void on_signal(int){interrupted.store(true,std::memory_order_relaxed);}
-struct TestDocument{std::string id,input;nlohmann::json expected;bool enabled{true};};
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(TestDocument,id,input,expected,enabled)
 int run(const std::vector<std::string>& arguments){
     try {
         std::map<std::string,std::string> options;
+        bool help=false;
         for(std::size_t i=1;i<arguments.size();++i){
             if(arguments[i]=="--help"){
-                std::cout<<"cpn-cli --profile PROFILE.json --source FILE --tests TESTS.json [--comparison strict|trailing|byte] [--output RESULT.json]\n";return 0;
+                if(help)throw std::runtime_error("Duplicate option: --help");
+                help=true;continue;
             }
-            if(i+1>=arguments.size())throw std::runtime_error("Missing option value");
-            const auto key=arguments[i++];
-            if(key!="--profile" && key!="--source" && key!="--tests" && key!="--comparison" && key!="--output")
+            const auto key=arguments[i];
+            if(key!="--profile" && key!="--source" && key!="--tests" && key!="--comparison" && key!="--checker" && key!="--output")
                 throw std::runtime_error("Unknown option: "+key);
+            if(i+1>=arguments.size() || arguments[i+1].starts_with("--"))
+                throw std::runtime_error("Missing option value: "+key);
+            ++i;
             if(!options.emplace(key,arguments[i]).second)throw std::runtime_error("Duplicate option: "+key);
+        }
+        if(help){
+            std::cout<<"cpn-cli --profile PROFILE.json --source FILE --tests TESTS.json [--checker CHECKER.json] [--comparison strict|trailing|byte] [--output RESULT.json]\n"
+                <<"--checker runs an external checker for cases with an expected output.\n"
+                <<"--comparison selects built-in comparison when no external checker is configured.\n";
+            return 0;
         }
         for(const auto key:{"--profile","--source","--tests"})if(!options.contains(key))throw std::runtime_error("Required option missing: "+std::string(key));
         auto files=cpn::native_file_store();cpn::BatchRequest request;
@@ -36,12 +44,10 @@ int run(const std::vector<std::string>& arguments){
         request.source.document_id=cpn::path_to_utf8(request.source.original_path);request.source.revision=1;
         request.source.text=files->read(request.source.original_path,16*1024*1024);
         request.toolchain=cpn::load_toolchain_profile(cpn::path_from_utf8(options.at("--profile")),*files);
-        const auto tests=nlohmann::json::parse(files->read(cpn::path_from_utf8(options.at("--tests")),64*1024*1024)).get<std::vector<TestDocument>>();
-        for(const auto& test:tests){
-            cpn::TestCase sample{test.id,test.input,std::nullopt,test.enabled};
-            if(!test.expected.is_null())sample.expected=test.expected.get<std::string>();
-            request.tests.push_back(std::move(sample));
-        }
+        if(options.contains("--checker"))
+            request.external_checker=cpn::parse_external_checker_spec(files->read(cpn::path_from_utf8(options.at("--checker")),1024*1024));
+        cpn::RequestBounds test_bounds;test_bounds.max_json_bytes=64*1024*1024;
+        request.tests=cpn::parse_test_cases(files->read(cpn::path_from_utf8(options.at("--tests")),test_bounds.max_json_bytes),test_bounds);
         if(options.contains("--comparison")){
             const auto& mode=options.at("--comparison");
             if(mode=="strict")request.comparison=cpn::ComparisonMode::cp_editor_strict;

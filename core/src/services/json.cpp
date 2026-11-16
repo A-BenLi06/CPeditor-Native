@@ -2,12 +2,33 @@
 #include "cpn/json.hpp"
 #include "cpn/text.hpp"
 #include <nlohmann/json.hpp>
+#include <algorithm>
 #include <limits>
 #include <set>
 #include <stdexcept>
 namespace cpn {
 namespace {
 using Json=nlohmann::json;
+void fields(const Json& object, std::initializer_list<std::string_view> allowed) {
+    if (!object.is_object()) throw std::invalid_argument("Expected JSON object");
+    for (const auto& [key, value] : object.items()) {
+        (void)value;
+        if (std::find(allowed.begin(), allowed.end(), key)==allowed.end())
+            throw std::invalid_argument("Unknown request field: "+key);
+    }
+}
+Json parse_strict(std::string_view text, std::size_t maximum) {
+    if (text.size()>maximum) throw std::invalid_argument("JSON exceeds byte limit");
+    std::vector<std::set<std::string>> keys;
+    return Json::parse(text,[&](int depth,Json::parse_event_t event,Json& parsed) {
+        if (depth>64) throw std::invalid_argument("JSON nesting exceeds limit");
+        if (event==Json::parse_event_t::object_start) keys.emplace_back();
+        else if (event==Json::parse_event_t::object_end) keys.pop_back();
+        else if (event==Json::parse_event_t::key && !keys.back().insert(parsed.get<std::string>()).second)
+            throw std::invalid_argument("Duplicate JSON field");
+        return true;
+    });
+}
 std::uint64_t integer(const Json& value,std::uint64_t maximum,const char* name){
     if(!value.is_number_integer() || (value.is_number_integer() && !value.is_number_unsigned() && value.get<std::int64_t>()<0))
         throw std::invalid_argument(std::string(name)+" must be a nonnegative integer");
@@ -17,8 +38,26 @@ std::uint64_t integer(const Json& value,std::uint64_t maximum,const char* name){
 }
 std::string raw(const Json& value){
     if(value.is_string())return value.get<std::string>();
-    if(value.is_object() && value.at("encoding")=="base64")return decode_base64(value.at("data").get<std::string>());
+    if(value.is_object() && value.at("encoding")=="base64") {
+        fields(value,{"encoding","data"});
+        return decode_base64(value.at("data").get<std::string>());
+    }
     throw std::invalid_argument("Bytes must be a string or base64 object");
+}
+std::vector<TestCase> test_cases(const Json& tests,std::size_t maximum) {
+    std::vector<TestCase> result;
+    if(!tests.is_array() || tests.size()>maximum)throw std::invalid_argument("Invalid testcase count");
+    std::set<std::string> ids;
+    for(const auto& test:tests){
+        fields(test,{"id","input","expected","enabled"});
+        TestCase sample;sample.id=test.at("id").get<std::string>();sample.input=raw(test.at("input"));
+        if(sample.id.empty() || sample.id.size()>1024 || sample.id.find('\0')!=std::string::npos || !ids.insert(sample.id).second)
+            throw std::invalid_argument("Missing or duplicate testcase ID");
+        if(test.contains("expected") && !test.at("expected").is_null())sample.expected=raw(test.at("expected"));
+        if(test.contains("enabled"))sample.enabled=test.at("enabled").get<bool>();
+        result.push_back(std::move(sample));
+    }
+    return result;
 }
 Json bytes(std::string_view value){return {{"encoding","base64"},{"data",encode_base64(value)}};}
 Json process(const ProcessResult& value){
@@ -73,6 +112,60 @@ std::string decode_base64(std::string_view value){
     }
     return bytes;
 }
+std::vector<TestCase> parse_test_cases(std::string_view text,RequestBounds bounds) {
+    return test_cases(parse_strict(text,bounds.max_json_bytes),bounds.max_tests);
+}
+ExternalCheckerSpec parse_external_checker_spec(std::string_view text) {
+    const auto json=parse_strict(text,1024*1024);
+    fields(json,{"schema_version","command","limits","accepted_exit_codes","wrong_answer_exit_codes",
+                 "inherit_environment","environment"});
+    if (integer(json.at("schema_version"),1,"checker schema_version")!=1)
+        throw std::invalid_argument("Unsupported checker schema version");
+    ExternalCheckerSpec spec;
+    const auto& command=json.at("command");
+    fields(command,{"executable","arguments"});
+    spec.command.executable=command.at("executable").get<std::string>();
+    const auto& arguments=command.at("arguments");
+    if (!arguments.is_array() || arguments.size()>ExternalCheckerBounds{}.max_arguments)
+        throw std::invalid_argument("Invalid checker argument count");
+    for (const auto& argument : arguments) spec.command.arguments.push_back(argument.get<std::string>());
+    if (const auto limit=json.find("limits");limit!=json.end()) {
+        fields(*limit,{"spawn_timeout_ms","wall_timeout_ms","terminate_grace_ms","drain_timeout_ms",
+                       "stdout_bytes","stderr_bytes","combined_bytes"});
+        const auto duration=[&](const char* name,std::chrono::milliseconds& target) {
+            if (limit->contains(name)) target=std::chrono::milliseconds(integer(limit->at(name),
+                static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()),name));
+        };
+        duration("spawn_timeout_ms",spec.limits.spawn_timeout);
+        duration("wall_timeout_ms",spec.limits.wall_timeout);
+        duration("terminate_grace_ms",spec.limits.terminate_grace);
+        duration("drain_timeout_ms",spec.limits.drain_timeout);
+        for (const auto& [name,target] : std::vector<std::pair<const char*,std::uint64_t*>>{
+            {"stdout_bytes",&spec.limits.stdout_bytes},{"stderr_bytes",&spec.limits.stderr_bytes},
+            {"combined_bytes",&spec.limits.combined_bytes}})
+            if (limit->contains(name)) *target=integer(limit->at(name),
+                static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()),name);
+    }
+    const auto codes=[&](const char* name,std::vector<int>& target) {
+        if (const auto mapping=json.find(name);mapping!=json.end()) {
+            if (!mapping->is_array() || mapping->size()>256) throw std::invalid_argument("Invalid checker exit mapping");
+            target.clear();
+            for (const auto& code : *mapping) target.push_back(static_cast<int>(integer(code,255,name)));
+        }
+    };
+    codes("accepted_exit_codes",spec.accepted_exit_codes);
+    codes("wrong_answer_exit_codes",spec.wrong_answer_exit_codes);
+    if (json.contains("inherit_environment")) spec.inherit_environment=json.at("inherit_environment").get<bool>();
+    if (const auto env=json.find("environment");env!=json.end()) {
+        if (!env->is_array() || env->size()>256) throw std::invalid_argument("Invalid checker environment");
+        for (const auto& pair : *env) {
+            fields(pair,{"name","value"});
+            spec.environment.emplace_back(pair.at("name").get<std::string>(),pair.at("value").get<std::string>());
+        }
+    }
+    validate_external_checker(spec);
+    return spec;
+}
 BatchRequest parse_batch_request(std::string_view text,RequestBounds bounds){
     if(text.size()>bounds.max_json_bytes)throw std::invalid_argument("Request exceeds byte limit");
     std::vector<std::set<std::string>> object_keys;
@@ -86,8 +179,10 @@ BatchRequest parse_batch_request(std::string_view text,RequestBounds bounds){
     });
     if(!json.is_object() || integer(json.at("schema_version"),1,"schema_version")!=1)
         throw std::invalid_argument("Unsupported batch schema version");
+    fields(json,{"schema_version","source","toolchain","tests","comparison","max_retained_output_bytes","external_checker"});
     BatchRequest request;
     const auto& source=json.at("source");
+    fields(source,{"document_id","revision","text","original_path"});
     request.source.document_id=source.at("document_id").get<std::string>();
     request.source.revision=integer(source.at("revision"),std::numeric_limits<std::uint64_t>::max(),"revision");
     request.source.text=source.at("text").get<std::string>();
@@ -96,17 +191,7 @@ BatchRequest parse_batch_request(std::string_view text,RequestBounds bounds){
     if(source.contains("original_path") && !source.at("original_path").is_null())
         request.source.original_path=path_from_utf8(source.at("original_path").get<std::string>());
     request.toolchain=parse_toolchain_profile(json.at("toolchain").dump());
-    const auto& tests=json.at("tests");
-    if(!tests.is_array() || tests.size()>bounds.max_tests)throw std::invalid_argument("Invalid testcase count");
-    std::set<std::string> ids;
-    for(const auto& test:tests){
-        TestCase sample;sample.id=test.at("id").get<std::string>();sample.input=raw(test.at("input"));
-        if(sample.id.empty() || sample.id.size()>1024 || sample.id.find('\0')!=std::string::npos || !ids.insert(sample.id).second)
-            throw std::invalid_argument("Missing or duplicate testcase ID");
-        if(test.contains("expected") && !test.at("expected").is_null())sample.expected=raw(test.at("expected"));
-        if(test.contains("enabled"))sample.enabled=test.at("enabled").get<bool>();
-        request.tests.push_back(std::move(sample));
-    }
+    request.tests=test_cases(json.at("tests"),bounds.max_tests);
     const auto policy=json.value("comparison",std::string("trailing"));
     if(policy=="strict")request.comparison=ComparisonMode::cp_editor_strict;
     else if(policy=="trailing")request.comparison=ComparisonMode::cp_editor_ignore_trailing_spaces;
@@ -116,6 +201,8 @@ BatchRequest parse_batch_request(std::string_view text,RequestBounds bounds){
     if(json.contains("max_retained_output_bytes"))
         request.max_retained_output_bytes=integer(json.at("max_retained_output_bytes"),bounds.max_retained_output_bytes,"max_retained_output_bytes");
     if(!request.max_retained_output_bytes)throw std::invalid_argument("Retained output limit must be positive");
+    if (const auto checker=json.find("external_checker");checker!=json.end() && !checker->is_null())
+        request.external_checker=parse_external_checker_spec(checker->dump());
     return request;
 }
 std::string serialize_batch_result(const BatchResult& value){
@@ -123,8 +210,14 @@ std::string serialize_batch_result(const BatchResult& value){
         {"profile_id",value.profile_id},{"source_digest",value.source_digest},
         {"build_outcome",build_outcome_name(value.build_outcome)},{"error",value.error},{"tests",Json::array()}};
     if(value.build)json["build"]=process(*value.build);
-    for(const auto& test:value.tests)json["tests"].push_back({{"testcase_id",test.testcase_id},
-        {"verdict",verdict_name(test.verdict)},{"process",process(test.process)},{"detail",test.detail}});
+    for(const auto& test:value.tests) {
+        auto row=Json{{"testcase_id",test.testcase_id},{"verdict",verdict_name(test.verdict)},
+            {"process",process(test.process)},{"detail",test.detail}};
+        if (test.checker) row["checker"]={{"verdict",external_checker_verdict_name(test.checker->verdict)},
+            {"process_attempted",test.checker->process_attempted},{"process",process(test.checker->process)},
+            {"detail",test.checker->detail}};
+        json["tests"].push_back(std::move(row));
+    }
     const auto capabilities=process_capabilities();
     json["capabilities"]={{"managed_process_group",capabilities.managed_process_group},
         {"memory_limit",capabilities.memory_limit},{"spawn_deadline",capabilities.spawn_deadline}};
