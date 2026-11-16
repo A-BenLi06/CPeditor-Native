@@ -1,6 +1,6 @@
 # Competitive Companion 解码与导入边界
 
-本文记录已实现的共享 payload 解码器，以及后续 HTTP／持久导入收件箱的拟议边界。解码器是无 I/O 的 C++20 服务，不监听端口、不创建文档或文件、不分配稳定 ID，也不启动编译器／解答程序。当前没有 Companion HTTP 接口、C ABI 导入入口或原生导入 UI；完整互操作状态见 [实施状态](status.md)。
+本文记录已实现的共享 payload 解码器、有界持久收件箱和原子会话导入准备器，以及后续 HTTP／原生导入的拟议边界。解码器是无 I/O 的 C++20 服务，不监听端口、不创建文档或文件、不分配稳定 ID，也不启动编译器／解答程序。收件箱已分配稳定 ID 并持久接纳原始载荷；当前没有 Companion HTTP 接口、C ABI 导入入口或原生导入 UI；完整互操作状态见 [实施状态](status.md)。
 
 ## 已实现的接口
 
@@ -81,15 +81,61 @@ CP Editor 固定基线为 `77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c`：
 - [CompanionServer.cpp:67](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Extensions/CompanionServer.cpp#L67) 收集正文，[83 行](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Extensions/CompanionServer.cpp#L83) 在解析前返回 202；原生接纳必须先完成验证和有界持久化。
 - [appwindow.cpp:1141](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/appwindow.cpp#L1141) 按 URL 找标签页，[mainwindow.cpp:680](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/mainwindow.cpp#L680) 清空现有样例。原生不能将重复接收等同于覆盖用户修改。
 
-## 后续 HTTP／收件箱设计，尚未实现
+## 已实现的有界持久收件箱
 
-监听器显式绑定 IPv4 127.0.0.1 和可用的 IPv6 ::1，端口由配置决定。验证 POST `/`、JSON 内容类型和 localhost Host；连接／header／body／读取／写入都有边界，停止时关闭监听并 join，不让工作线程调用 UI。Windows socket 监听不需要 HTTP.sys URL ACL；不要为了普通回环接收要求管理员操作。HTTP 后端须独立审查并锁定版本，不能复用 Qt，也不应手写简略分帧。
+`cpn/companion_inbox.hpp` 中的 `CompanionInboxService` 提供 `load`、`accept` 和 `mark_applied`；实现位于 `core/src/services/companion_inbox.cpp`，进入服务库和单一 Core 归档。同步文件操作必须由后台协调器调用。服务通过 `FileStore` 注入文件事务，不依赖 Qt／UI／HTTP，不读取源码或执行题目。
 
-共享收件箱在接纳时生成稳定 import／problem／document／test ID，持久化完整元数据、批次及 `Accepted → Applied` 状态。只有验证且持久接纳成功才返回 202。原生协调器在 MainActor／DispatcherQueue 应用候选，先成功保存恢复数据再确认 Applied；中途崩溃按预分配文档 ID 重放，避免重复创建。
+版本 1 收件箱绑定 `workspace_id`，使用独立 inbox／backup／lock 路径。首次接纳创建随机 inbox 身份；import、problem、document、test ID 由该身份和接纳序列的有域分隔摘要生成，接纳后稳定保存。题目按原始 URL 关联；URL 不变成文档身份或本地路径。整数序列／revision 到上限明确返回 `IdExhausted`，不能回绕。
 
-去重键可采用 batch 身份＋原始问题 URL，另保存结构化 payload 摘要。完全相同投递复用既有 import ID；同键不同数据产生待处理更新，不清空用户样例或覆盖源码。batch size 不一致要报告冲突；缺失批次项目保持可见，不无限等待。待应用项目、未完成批次和去重记录都需独立的容量／保留边界。
+接纳先验证完整载荷，再持合作锁重读最新主文件和备份。相同投递组（batch id 或明确缺失）与原始 URL 下，SHA-256 和最终原文逐字节都相同才是 `Duplicate`，复用既有身份；仅 JSON 空白变化也属于新的投递。相同题目但新原文生成新的 Pending import／document／test ID，保存 `previous_import_id`，不会清空旧文档或用户样例。同批次 size 变化、超过 size 的不同问题、容量耗尽均明确拒绝，不无限等待补齐批次。
 
-当前会话没有共享题目／来源字段，初版可由共享收件箱关联稳定 document ID，之后再显式演进会话 schema。原生源文件路径只由用户操作或已验证映射决定，导入不得自动读取远端 filename、打开 URL、编译或提交。
+每次写入先将原主文件保存为备份，再以同目录原子事务替换主文件。响应区分 `inbox_replaced`、`backup_replaced` 与 `disk_digest`；`DurabilityUnknown` 表示替换可能已发生，不能当作无副作用失败盲目重试。合作锁之外，替换前再次检查主文件摘要以发现非合作写入；这不是任意外部进程的原子 compare-and-swap 保证。
+
+已有备份必须是主文件历史的非回退前缀：身份／原文／previous link 不得分叉，sequence／revision／next_sequence 不得领先，Applied 不得退回 Pending，已确认的会话证据不得改变。同 revision 要有相同逻辑快照。缺失 main 却存在 backup、主文件回滚或分叉都保留双方原件并拒绝写入，等待显式恢复；不能取较大的计数来覆盖唯一较新原文。`load` 只读取主文件，不自动选择或替换备份；写入时额外验证备份历史。
+
+| 收件箱默认边界 | 值 |
+| --- | --- |
+| 持久 JSON 文件 | 128 MiB |
+| 所有原始 payload 合计 | 64 MiB |
+| 全部记录（含 Applied） | 256 |
+| Pending 记录 | 128 |
+| 批次 | 64 |
+| 所有样例合计 | 16384 |
+| JSON 深度／节点 | 48／262144 |
+| 身份／路径 | 1024／32768 字节 |
+
+原载荷仍受前文 `CompanionBounds` 限制；调用方可通过 `CompanionInboxBounds` 配置有界容量。Applied 原文、更新历史和未知原生偏好不自动淘汰，满容量返回背压。自动清理、归档及用户恢复选择尚未实现。内部 schema 严格拒绝重复／未知字段、浮点版本及不合法身份；未来版本不降级重写。
+
+## 已实现的原子导入准备与回执
+
+纯函数 `prepare_import_application(session, snapshot, import_id, defaults)` 返回一个同时包含新文档和 workspace 回执的候选 `WorkspaceSession`。源码初始正文、语言／工具链选择和原生偏好由 `ImportDocumentDefaults` 提供；远端 filename／Java 类名等不会成为执行配置。完整样例保留原始字节和稳定 test ID，空答案仍是存在的 expected。
+
+文档偏好 `cpeditor.native.companion.document` 保存来源身份及普通 stdio 能力；工作区偏好 `cpeditor.native.companion.receipts` 保存导入回执。原生 Run 协调器必须读取能力并阻止不兼容模式进入普通 Run All。两端尚未接入导入 UI，不能宣称这一门禁已经完成。自身未来偏好（包括 v1 与未来版本共存）保持不透明且拒绝新导入；其他 owner 的原文不改写。偏好、文档或回执满容量不删除已有记录来腾空间。
+
+```mermaid
+sequenceDiagram
+    participant Native as 原生后台协调器
+    participant Inbox as 收件箱
+    participant Session as 会话事务
+    Native->>Inbox: accept 原始载荷
+    Inbox-->>Native: Pending 稳定身份（已持久接纳）
+    Native->>Native: prepare 单一文档＋回执候选
+    Native->>Session: 原子保存候选并检查替换状态
+    Session-->>Native: 实际恢复文件及摘要
+    Native->>Inbox: mark_applied 恢复／备份／锁路径
+    Inbox->>Session: 持锁读取实际恢复文件并校验回执
+    Inbox-->>Native: Applied 或具体拒绝原因
+```
+
+`mark_applied` 固定按 Inbox → Session 顺序持合作锁，检查实际恢复文件中的 workspace 和完整回执；调用方仅有内存回执不能确认 Applied。恢复保存失败或回执不匹配时保留 Pending。源码与收件箱／恢复／备份／锁路径别名被拒绝，避免覆盖源码或自锁。
+
+候选保存后、确认前崩溃：下次准备看到同一回执返回 `AlreadyApplied`，不会再添加文档，随后可继续确认。用户修改或删除已导入文档后仍由 workspace 回执防止重放创建。若收件箱已 Applied，但加载的旧会话缺回执，返回 `ReceiptMissing`，不自动重建；需要显式恢复处理。
+
+## 后续 HTTP／原生导入设计，尚未实现
+
+监听器显式绑定 IPv4 127.0.0.1 和可用的 IPv6 ::1，端口由配置决定。验证 POST `/`、JSON 内容类型和 localhost Host；连接／header／body／读取／写入都有边界，停止时关闭监听并 join，不让工作线程调用 UI。Windows socket 监听不需要 HTTP.sys URL ACL。HTTP 后端须独立审查并锁定版本，不复用 Qt，也不手写简略分帧。
+
+只有验证且持久接纳成功才返回 202；扩展发送完成不能作为接纳证据。原生协调器在 MainActor／DispatcherQueue 应用候选，采用前述会话先保存再确认的流程。实际监听器、C ABI 分页／接纳／准备／确认以及两端原生收件箱界面仍待实施。导入不得自动打开 URL、读取远端 filename、编译或提交。
 
 ## 测试夹具与验证
 
@@ -97,7 +143,7 @@ CP Editor 固定基线为 `77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c`：
 
 `builder-defaults.json` 按固定 TaskBuilder 默认状态构造，显式设置合法 URL 和稳定夹具 batch ID，覆盖空 name／group／taskClass 及空 tests。它是依据源码构造的回归夹具，不是浏览器实测导出证据。
 
-本轮在实际 macOS 主机以 Apple Clang 执行了独立 C++20／`-Wall -Wextra -Wpedantic -Werror` 编译和全部夹具／异常测试，普通与 ASan＋UBSan 均通过。该主机的 AddressSanitizer 不支持 LeakSanitizer，最终运行显式关闭 leak 检测，地址和未定义行为检测保持启用。根任务另以干净的 CMake 构建目录验证了完整 Core：普通严格警告与 ASan／UBSan 两套 13/13 CTest 入口通过，服务库和聚合归档均包含解码器。Windows 目标机仍未执行。CTest 使用相对夹具路径并设置仓库工作目录，避免窄 argv 将中文绝对路径转换为系统代码页。
+本轮在实际 macOS 主机以 Apple Clang 执行了独立 C++20／`-Wall -Wextra -Wpedantic -Werror` 编译和全部夹具／异常测试，普通与 ASan＋UBSan 均通过。该主机的 AddressSanitizer 不支持 LeakSanitizer，最终运行显式关闭 leak 检测，地址和未定义行为检测保持启用。根任务另以干净的 CMake 构建目录验证了完整 Core：普通与完整 `-Werror` ASan／UBSan 两套 14/14 CTest 入口通过，服务库和聚合归档均包含解码器与收件箱。新增 `companion_inbox_tests.cpp` 覆盖有界容量、重复／更新／批次冲突、原文和稳定身份、未来 schema／偏好、候选与实际回执、故障前后替换标志、回滚／分叉备份、跨实例与真实跨进程合作锁；独立审查推动补齐回滚备份的历史回归。Windows 收件箱目标机仍未执行。CTest 使用相对夹具路径并设置仓库工作目录，避免窄 argv 将中文绝对路径转换为系统代码页。
 
 PowerShell 7 未来监听验收可使用夹具原始字节：
 

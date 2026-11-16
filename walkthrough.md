@@ -293,3 +293,19 @@ Core 规则区分空输入、缺少预期输出与预期输出为空、checker �
 - macOS 上 domain 连续 20 次通过；core.autocrlf=true 的独立 checkout-index 副本与 source-lock 的 overlay／patch SHA 均完全一致。
 - 原运行 https://github.com/A-BenLi06/CPeditor-Native/actions/runs/43922420294 的 Debug 12/13、Release 13/13 与 bridge-tests 日志保留在 out/windows/ci/43922420294；本修复实际 Windows 构建需等待提交触发的后续 CI。
 - 仅提交测试／进程警告／属性及本记录，共享 Inbox 与 Windows 恢复草稿另行验收。CI 不计为目标 Windows 10／IME／UU／DPI／虚拟桌面验收。
+
+## 2026-11-17T01:58:59+08:00 — Companion 持久收件箱与原子会话导入回执
+
+### 改动与思路
+
+- 新增 CompanionInboxService 与纯 prepare_import_application，接入服务库／单一 Core 归档及 CTest。完整原始载荷按 workspace 绑定的稳定身份保存，相同投递用摘要加最终字节比较去重；更新保留原样例与文档并记录 previous link。
+- 有界正文／记录／Pending／批次／样例容量，合作锁下重读最新文件，备份和主文件原子事务保留替换标志／持久性不明。内部未知／浮点版本严格拒绝，外部未知原文完整保留，不自动删 Applied／偏好腾空间。
+- 文档与 workspace 回执放在同一个候选；实际恢复保存后，mark_applied 按 Inbox → Session 锁序读取并验证磁盘回执。删除文档后仍防重放；Applied 与旧恢复缺回执明确冲突，不猜测重建。
+- 独立审查发现合法旧 main 与较新 backup 会复用序列并覆盖唯一新原文；已验证历史非回退前缀、同 revision 同逻辑快照、Applied 证据单调，并补回滚／分叉回归。保留冲突原件，不用 max(counter) 掩盖问题。
+- 中文文档明确当前服务与后续 C ABI／HTTP／原生接入边界、容量／错误和运行能力门禁。
+
+### 验证与范围
+
+- 根独立普通 Core 14/14 CTest 通过；干净 out/core/inbox-review-sanitize 完整两侧 -Werror ASan／UBSan 14/14 通过。当前 Apple 运行时不支持 LSan，显式 detect_leaks=0，不声称泄漏检测通过。
+- 覆盖原字节／稳定身份、异常与容量、未知 schema／偏好、候选保存失败／确认失败、实际磁盘回执、回滚／分叉／同 revision、两实例及真实跨进程合作锁；独立审查与作者修复复核均通过。
+- 本提交不纳入 Windows 会话草稿；未实现 HTTP／C ABI 导入／原生界面，不计为完整 Companion 或目标 Windows／最低 macOS／产品发布验收。
