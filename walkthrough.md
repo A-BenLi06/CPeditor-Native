@@ -279,3 +279,17 @@ Core 规则区分空输入、缺少预期输出与预期输出为空、checker �
 - 官方 actions/checkout v5 与 actions/upload-artifact v4 标签 SHA 通过 git ls-remote 核实；当前仓库 Actions 已开启，此变更没有修改平台权限或设置。
 - YAML 解析、触发器和 PowerShell 入口检查通过；静态确认 Debug／Release 矩阵和有界超时、日志范围。实际 Windows 构建结论必须等待本次 push 触发的对应提交运行，不预先宣称通过。
 - 仅提交工作流、README 与本记录；Windows 会话和共享 Inbox 的在途草稿不纳入此提交。
+
+## 2026-11-17T01:57:11+08:00 — Windows CI 取消竞态与固定补丁字节
+
+### 改动与思路
+
+- 实际 Windows Server 2022 Debug CI 的 domain 测试失败于“in-progress comparison cancellation”。原测试用 1ms 休眠推断比较仍在运行，Windows 定时器／线程调度不保证此条件；取消与正常完成可以合法竞争。去掉休眠，接受精确答案的正常完成或 Cancelled，保留 3s 响应上界，并 join 后再次验证已取消 token 必须立即返回 Cancelled。没有改变比较算法或增加产品延时。
+- Release CI 的 Core 13/13、正式桥接测试实际通过，随后准备阶段拒绝 CommittedTextState.h 的原字节 SHA。根仓库添加 patches/winuiedit/** 的 -text 属性，避免 Windows autocrlf 改写 overlay／混合换行补丁；原 SHA 和篡改拒绝保持有效。
+- 清理 Windows 进程后端的局部 result 遮蔽警告，取消仍返回同一结果语义。
+
+### 验证与范围
+
+- macOS 上 domain 连续 20 次通过；core.autocrlf=true 的独立 checkout-index 副本与 source-lock 的 overlay／patch SHA 均完全一致。
+- 原运行 https://github.com/A-BenLi06/CPeditor-Native/actions/runs/43922420294 的 Debug 12/13、Release 13/13 与 bridge-tests 日志保留在 out/windows/ci/43922420294；本修复实际 Windows 构建需等待提交触发的后续 CI。
+- 仅提交测试／进程警告／属性及本记录，共享 Inbox 与 Windows 恢复草稿另行验收。CI 不计为目标 Windows 10／IME／UU／DPI／虚拟桌面验收。

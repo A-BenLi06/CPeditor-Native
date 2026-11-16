@@ -318,7 +318,7 @@ ProcessResult run_process(const ProcessSpec& spec, std::stop_token stop) {
         startup.StartupInfo.hStdInput = input.child.get(); startup.StartupInfo.hStdOutput = output.child.get();
         startup.StartupInfo.hStdError = error.child.get(); startup.lpAttributeList = attributes.list;
         PROCESS_INFORMATION information{};
-        if (stop.stop_requested()) { ProcessResult result; result.termination = ProcessTermination::cancelled; return result; }
+        if (stop.stop_requested()) { result.termination = ProcessTermination::cancelled; return result; }
         const auto spawn_begin = Clock::now();
         require(::CreateProcessW(executable.c_str(), command_line.data(), nullptr, nullptr, TRUE,
                                  CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT,

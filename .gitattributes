@@ -1,0 +1,2 @@
+# Source-lock hashes cover exact bytes, including mixed line endings in patches.
+/patches/winuiedit/** -text
