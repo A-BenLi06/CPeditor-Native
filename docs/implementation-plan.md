@@ -1,75 +1,75 @@
-# Implementation plan and acceptance
+# 实施计划与验收
 
-Status: planned work. The only completed work is source acquisition and architecture research recorded in `walkthrough.md`.
+状态：拟议工作。当前已完成的工作仅包括 `walkthrough.md` 中记录的源码获取与架构研究。
 
-## Milestones
+## 里程碑
 
-| Milestone | Deliverable | Exit evidence |
+| 里程碑 | 交付内容 | 验收证据 |
 | --- | --- | --- |
-| M0: baseline and editor risk | Minimal WinUI 3/WinUIEdit host, macOS CodeEditorView/STTextView comparison, exact upstream/reference locks | Builds/launches on target hosts; common editor fixtures and original Windows reproduction matrix pass; actual latency/memory observations recorded |
-| M1: portable engine | CMake C++20 domain/services/ports, process hosts, checker policies, C ABI and headless harness | Standalone Core builds without Qt or UI dependencies on Windows/macOS; process, race, Unicode, checker and ABI tests pass |
-| M2: Windows vertical slice | Document tabs, captured-source build/run, sample results, cancellation and versioned recovery | Open/edit unsaved C++ source → configure toolchain → Run All → compare → cancel → restart/recover; stable source/test IDs and correct cleanup |
-| M3: interoperability | Companion import, sample filename profiles, legacy session/settings importer, testlib/custom checkers | Real protocol/config fixtures import without loss; malformed input cannot replace current work; custom checker errors classify correctly |
-| M4: macOS vertical slice | Chosen editor, Swift C ABI client, native commands/panels/preferences, same engine workflows | Same headless fixture outcomes as Windows; native editing/undo/IME and session recovery pass on selected minimum OS |
-| M5: language and advanced services | clangd diagnostics/completion, formatter, terminal capability, stress and interactive services, optional judge adapters | Feature-specific protocol/cancellation/revision tests; no unverified mode is exposed as working |
-| M6: release | Dependency/provenance review, performance budgets, MSIX and signed/notarized macOS artifacts | Clean install/update/recovery on supported hosts; native input regression suite; measured budgets and distribution/runtime checks |
+| M0：基线与编辑器风险 | 最小 WinUI 3/WinUIEdit 宿主、macOS CodeEditorView/STTextView 对照原型、准确固定的上游与参考版本 | 在目标主机上构建并启动；通过通用编辑器测试样本和原有 Windows 问题复现矩阵；记录实际延迟与内存观测结果 |
+| M1：可移植引擎 | CMake C++20 领域层、服务层、接口层、进程宿主、比较策略、C ABI 和无界面验证工具 | Core 在 Windows/macOS 上独立构建，不依赖 Qt 或 UI；通过进程、竞态、Unicode、checker 和 ABI 测试 |
+| M2：Windows 完整功能链路 | 文档标签页、基于源码快照的编译运行、样例结果、取消及带版本的恢复 | 打开并编辑未保存的 C++ 源码 → 配置工具链 → Run All → 比较 → 取消 → 重启恢复；源码和测试 ID 稳定，清理正确 |
+| M3：互操作 | Companion 导入、样例文件名配置、旧版会话与设置导入器、testlib/自定义 checker | 实际协议与配置样本无损导入；畸形输入不能覆盖当前工作；自定义 checker 错误正确分类 |
+| M4：macOS 完整功能链路 | 选定编辑器、Swift C ABI 客户端、原生命令/面板/偏好设置及相同引擎工作流 | 无界面测试样本的结果与 Windows 一致；在选定最低系统版本上通过原生编辑、撤销、输入法和会话恢复测试 |
+| M5：语言与高级服务 | clangd 诊断与补全、格式化器、终端能力、压力测试和交互题服务、可选评测平台适配器 | 通过各功能的协议、取消和版本一致性测试；未经验证的模式不得表现为可用功能 |
+| M6：发布 | 依赖与来源审查、性能预算、MSIX 及签名/公证后的 macOS 分发产物 | 在支持的主机上验证全新安装、更新与恢复；通过原生输入回归测试；完成性能预算测量和分发/运行时检查 |
 
-M0 freezes the editor adapter contract and rejects unsuitable candidates before full UI work. Windows M0 leads; the macOS comparison can run independently. After M1 contracts stabilize, the two shells can proceed in parallel. LSP/formatting can be moved earlier when needed for a useful vertical slice, while keeping their revision gates intact. No calendar estimate substitutes for these exit gates.
+M0 固定编辑器适配契约，在完整 UI 开发前排除不适合的候选。先推进 Windows M0；macOS 对照实验可独立进行。M1 契约稳定后，两端界面可以并行开发。为形成有用的完整功能链路，可适当前移 LSP 与格式化工作，但必须保留源码版本校验。日历工期估算不能替代这些验收条件。
 
-## First implementation slice
+## 首个实现阶段
 
-1. Add a Windows C++/WinRT WinUI 3 host with pinned WinUIEdit and discoverable Visual Studio/MSBuild tooling through PowerShell 7. Keep native background capabilities compatible with Windows 10.
-2. Open the same C++ fixture as CP Editor. Implement open/save, committed edit/revision reporting, selection, scrolling and focus lifecycle; capture text snapshots without a compilation engine yet.
-3. Record Chinese IME, Unicode, mixed-DPI, pointer and UU/virtual-desktop results alongside an empty native host and ordinary native text control. Include the user's affected Qt 5 build; compare the current Qt 6 upstream build when available.
-4. Implement the same fixture suite in CodeEditorView and STTextView hosts. Include a real C++ lexical configuration where required; measure integration work, not merely blank-editor rendering.
-5. Choose candidates and pin their transitive dependencies only after the build, license and editor gates have evidence. Add the engine vertical slice after these gates.
+1. 添加 Windows C++/WinRT WinUI 3 宿主，固定 WinUIEdit 版本，并通过 PowerShell 7 发现 Visual Studio/MSBuild 工具。原生背景能力必须兼容 Windows 10。
+2. 打开与 CP Editor 相同的 C++ 测试文件。实现打开/保存、已提交编辑及版本上报、选择、滚动和焦点生命周期；此时先捕获文本快照，尚不接入编译引擎。
+3. 记录中文输入法、Unicode、混合 DPI、鼠标指针以及 UU/虚拟桌面的测试结果，并与空原生宿主和普通原生文本控件对照。包含用户受影响的 Qt 5 构建；条件允许时对比当前 Qt 6 上游构建。
+4. 在 CodeEditorView 和 STTextView 宿主中实现相同的测试样本集。需要时添加真实的 C++ 词法配置；评估集成工作，而非仅测量空白编辑器渲染。
+5. 获得构建、许可及编辑器验收证据后，再选择候选并固定其传递依赖。随后添加引擎的完整功能链路。
 
-The prototypes are experiment hosts, without product copy describing development requirements. If the original input problem persists in empty/native-control hosts, investigate the system/remote/input path and record it. Do not claim native reconstruction has solved it or insert sleeps/suppress pointer events to disguise it.
+原型是实验宿主，产品文案中不应出现开发要求。如果原有输入问题在空宿主或原生控件宿主中仍然出现，应调查并记录系统、远程控制和输入路径。不得直接宣称原生重构已解决问题，也不得通过插入延时或屏蔽指针事件来掩盖问题。
 
-## Verification matrix
+## 验证矩阵
 
-| Area | Required cases |
+| 领域 | 必测场景 |
 | --- | --- |
-| Process execution | Missing tool, launch failure, space/CJK paths, explicit argv/quoting, large stdin plus simultaneous stderr/stdout, no implicit shell |
-| Lifetimes and limits | Cancel at spawn/build/run/check; natural exit versus timeout/cancel; retained-output caps including final drain; inherited pipes; process-tree/group cleanup; close/shutdown while running |
-| Outcome correctness | Empty input; absent versus empty answer; CE versus infrastructure errors; TLE/RE/OLE; explicit memory capability; checker timeout/crash/start failure and unsupported scoring |
-| Comparison compatibility | CRLF/CR/LF, terminal empty lines, Unicode whitespace, leading/internal spaces, NUL/invalid UTF-8 artifacts, testlib path order and code mapping |
-| Document consistency | Type during compilation; formatting/completion on stale revisions; delete/reorder samples while running; undo back to savepoint; IME composition during diagnostics |
-| Recovery/import | Unsaved documents; external disk changes; damaged/unknown-version JSON; atomic-save failure; preserved recovery; actual QSettings aliases/QVariant exports; unsupported migration values; safe filenames |
-| Companion | Real extension payloads, batch/deduplication, valid empty samples, optional/unknown fields, malformed/oversized JSON, port conflicts, loopback-only bind, unsupported interactive/file modes |
-| Native editing | CJK, emoji and combining marks; correct UTF-8/UTF-16/LSP conversion; accessibility, selection/focus lifecycle, scroll/DPI/Spaces/desktop switching and disposal |
-| Bridge | ABI version mismatch, allocator ownership, invalid handle/cancel, bounded event draining, shutdown while event task is active; no UI-thread process work |
+| 进程执行 | 工具缺失、启动失败、含空格/CJK 的路径、显式 argv 与引号处理、大量 stdin 与同时输出的 stderr/stdout、不隐式调用 shell |
+| 生命周期与限制 | 在创建进程、编译、运行、检查阶段取消；自然退出与超时/取消竞态；包含最终排空阶段的输出保留上限；继承管道；进程树/进程组清理；运行中关闭文档或应用 |
+| 结果正确性 | 空输入；缺少答案与答案为空；CE 与基础设施错误；TLE/RE/OLE；明确的内存能力；checker 超时、崩溃、启动失败及不支持的评分模式 |
+| 比较兼容性 | CRLF/CR/LF、末尾空行、Unicode 空白、前导与内部空格、NUL/无效 UTF-8 输出产物、testlib 路径参数顺序及退出码映射 |
+| 文档一致性 | 编译期间继续输入；对旧版本应用格式化/补全；运行时删除或重排样例；撤销回到保存点；诊断期间进行输入法组合输入 |
+| 恢复与导入 | 未保存文档；外部磁盘变更；损坏或未知版本 JSON；原子保存失败；保留恢复会话；实际 QSettings 别名/QVariant 导出；不支持的迁移值；安全文件名 |
+| Companion | 实际扩展载荷、批次/去重、有效空样例、可选/未知字段、畸形或超大 JSON、端口冲突、仅绑定回环地址、不支持的交互/文件模式 |
+| 原生编辑 | CJK、emoji 和组合字符；正确的 UTF-8/UTF-16/LSP 转换；辅助功能、选择/焦点生命周期、滚动/DPI/Spaces/桌面切换及释放 |
+| 桥接 | ABI 版本不匹配、分配器所有权、无效句柄/取消、有限事件排空、事件任务活动时关闭引擎；UI 线程不执行进程工作 |
 
-Start with unit tests for pure comparisons, profile/schema resolution, revision maps and lifecycle transitions. Use real small helper processes for the process tests; mocks alone cannot establish pipe drainage, child termination or encoding correctness. Run editor conformance on rendered applications using the native target host. Performance measurements are separate from correctness assertions and recorded with environment metadata.
+先为纯比较函数、配置/模式解析、版本映射和生命周期转换编写单元测试。进程测试使用实际的小型辅助进程；仅靠模拟对象无法证明管道排空、子进程终止或编码正确性。编辑器契约测试应在目标原生主机上的实际渲染应用中执行。性能测量与正确性断言分开，记录环境元数据。
 
-## Windows regression and performance evidence
+## Windows 回归与性能证据
 
-Use the same machine, source fixture, editor operation sequence and input hardware for every comparison. Record OS edition/build, Windows App SDK and editor revision, toolchain, display scale/refresh, mouse polling rate, remote software version and run configuration. Compare affected CP Editor, current Qt 6 CP Editor when buildable, empty WinUI host, ordinary native-control host and WinUIEdit host.
+所有对照使用相同机器、源码测试文件、编辑操作序列和输入硬件。记录系统版本/构建号、Windows App SDK 与编辑器版本、工具链、显示缩放/刷新率、鼠标轮询率、远程软件版本和运行配置。对比受影响的 CP Editor、可构建时的当前 Qt 6 CP Editor、空 WinUI 宿主、普通原生控件宿主和 WinUIEdit 宿主。
 
-Repeat UU remote connection/disconnection and rapid four-finger Windows virtual-desktop switching. Include Alt+Tab, minimize/restore, rapid reactivate → Ctrl+A, mixed-DPI moves and available 125–8000 Hz mouse settings. Track system cursor motion separately from edit/selection dispatch and presentation. Trace input event timestamps, dispatch queues/text-store locks, frame/input-to-paint latency distributions, CPU, working set and cold/warm startup. Native framework choice is not evidence of lower latency or memory.
+重复 UU 远程连接/断开和快速四指切换 Windows 虚拟桌面。涵盖 Alt+Tab、最小化/恢复、快速重新激活 → Ctrl+A、混合 DPI 移动及可用的 125–8000 Hz 鼠标设置。分别跟踪系统光标移动、编辑/选择事件分发和画面呈现。采集输入事件时间戳、分发队列/文本存储锁、帧耗时/输入至绘制延迟分布、CPU、工作集及冷/热启动数据。选择原生框架本身不能证明延迟或内存更低。
 
-Measure ordinary, long-line and large-file fixtures with highlighting/minimap/LSP independently toggled. Freeze fixture sizes/content digests and measurement methodology, establish baseline-derived latency/startup/memory budgets before choosing a production candidate, and keep raw measurement artifacts outside source control with a compact result summary. A candidate must have correct text/IME/selection behavior, bounded queues/lifetimes and no repeatable introduced native-host regression. The original defect must be resolved in its reproduction or explicitly remain a release blocker for the intended fix claim.
+分别开关高亮、Minimap 和 LSP，测量普通、长行和大文件测试样本。固定文件大小、内容摘要与测量方法；选择生产候选前，根据基线确定延迟、启动和内存预算。原始测量产物不纳入源码管理，仅保留精简结果说明。候选必须保证文本、输入法和选择行为正确，队列及生命周期有界，且未引入可重复的原生宿主回归。原有缺陷必须在其复现流程中解决；若尚未解决，应明确将其保留为对应修复目标的发布阻碍。
 
-## Build and delivery policy
+## 构建与交付规则
 
-- Use CMake targets for the engine and a headless test executable; use MSVC on Windows and Apple Clang on macOS. Select/pin the CMake and compiler minimums during M1 rather than inheriting upstream's C++14 build configuration.
-- Keep Windows scripts PowerShell 7 compatible, discover tools (for example with installed VS tooling discovery), avoid drive-specific paths, and check native command exit codes. Document platform prerequisites and exact package resolutions from the verified build.
-- Use Windows-specific CI for WinUI restore/build/launch and macOS CI for Swift/C++ ABI and minimum-OS/editor verification. Include a clean Core-only job to catch UI/Qt dependency leakage. Interactive hardware/remote regressions remain explicitly tracked manual target-machine evidence.
-- Pin Windows App SDK/editor packages, Swift packages and native third-party revisions. A research reference commit is not an approved runtime lock. Avoid floating branches in shipped dependency definitions.
-- Keep runtime compiler discovery/configuration separate from development toolchain discovery. A user may select GCC/Clang/MSVC or an interpreted profile without having the application's build environment.
-- Package Windows as signed MSIX and macOS as a Developer ID signed/notarized direct-distribution app initially. Portable Windows and App Store/sandbox options require separate deployment/permission testing.
-- Every completed implementation change updates root `walkthrough.md` with a machine-generated timestamp/UTC offset, rationale and validation, then receives a Git commit.
+- 引擎和无界面测试程序使用 CMake 目标；Windows 使用 MSVC，macOS 使用 Apple Clang。在 M1 选择并固定 CMake 与编译器最低版本，不直接继承上游 C++14 构建配置。
+- Windows 脚本兼容 PowerShell 7，通过工具发现机制定位安装的工具，例如 Visual Studio 工具发现；不假设固定盘符或路径，并检查原生命令退出码。依据验证过的构建记录平台前提与准确解析的依赖版本。
+- Windows CI 验证 WinUI 还原依赖、构建和启动；macOS CI 验证 Swift/C++ ABI、最低系统版本及编辑器。添加纯 Core 的干净构建任务，检测 UI/Qt 依赖泄漏。交互硬件和远程问题作为目标机器上的手动证据明确跟踪。
+- 固定 Windows App SDK/编辑器包、Swift 包和原生第三方版本。研究用参考提交不等于已确认的运行时依赖锁；分发依赖定义不使用浮动分支。
+- 将运行时编译器发现/配置与应用开发工具链发现分开。用户可以选择 GCC/Clang/MSVC 或解释型语言配置，无需具备应用本身的构建环境。
+- 初期 Windows 以签名 MSIX 分发，macOS 以 Developer ID 签名并公证的应用直接分发。Windows 便携版和 App Store/沙盒方案需要单独验证部署与权限行为。
+- 每个完整实现变更完成后，更新根目录 `walkthrough.md`，附机器生成的时间戳、UTC 偏移、思路和验证结果，然后创建 Git 提交。
 
-## Decisions remaining
+## 尚待确定的决策
 
-| Decision | Evidence needed | Planned resolution |
+| 决策 | 所需证据 | 计划解决阶段 |
 | --- | --- | --- |
-| Production Windows editor/version | WinUIEdit IME/focus/accessibility/lifecycle and target Windows tests | M0; evaluate direct Scintilla HWND only if required |
-| Production macOS editor and OS/Xcode floor | Pinned component builds, actual C++ features, license choice, responsiveness | M0/M4; compare CodeEditorView/STTextView, then CodeEditSourceEditor |
-| Serialization/HTTP libraries | Non-Qt support, cancellation behavior, provenance and package lock | M1/M3; inject through ports |
-| Legacy complex settings conversion | Real Qt INI/QVariant exports and unsupported-value inventory | M3; optional isolated Qt export utility if decoder coverage is insufficient |
-| CPU/memory and descendant guarantees | Native backend resource/process tests and limitations | M1/M6; report unsupported capabilities honestly |
-| Large-file and performance budgets | Target-hardware baselines and enabled-feature costs | M0/M6; configurable policy grounded in measurements |
-| Distribution license and bundled dependencies | Exact copied-code provenance and resolved license graph | Before implementation reuse/distribution; plan GPL-compatible derivation if upstream code is ported |
+| Windows 生产编辑器及版本 | WinUIEdit 输入法、焦点、辅助功能、生命周期及目标 Windows 测试 | M0；确有需要时才评估直接承载 Scintilla HWND |
+| macOS 生产编辑器及 OS/Xcode 下限 | 固定组件构建、实际 C++ 功能、许可选择和响应性能 | M0/M4；先比较 CodeEditorView/STTextView，再考虑 CodeEditSourceEditor |
+| 序列化/HTTP 库 | 非 Qt 支持、取消行为、来源和依赖锁 | M1/M3；通过接口层注入 |
+| 旧版复杂设置转换 | 实际 Qt INI/QVariant 导出和不支持值清单 | M3；解码覆盖不足时可使用独立 Qt 导出工具 |
+| CPU/内存与后代进程保证 | 原生后端的资源/进程测试及限制 | M1/M6；如实报告不支持的能力 |
+| 大文件与性能预算 | 目标硬件基线及启用功能的成本 | M0/M6；采用有测量依据的可配置策略 |
+| 分发许可证与捆绑依赖 | 准确的复制代码来源及解析后的许可依赖图 | 实现复用/分发之前；移植上游代码时规划 GPL 兼容的派生实现 |
 
-No Windows/macOS editor build, native runtime check, latency benchmark, or distribution validation has been performed in this architecture-only change. Those are the next implementation gates.
+首次架构变更没有执行 Windows/macOS 编辑器构建、原生运行时检查、延迟测试或分发验证。这些是后续实现的验收条件。

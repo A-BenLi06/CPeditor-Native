@@ -1,11 +1,11 @@
-# Local operating-system and IDE state
+# 本地操作系统与 IDE 状态
 .DS_Store
 Thumbs.db
 .vs/
 *.user
 xcuserdata/
 
-# Future build and measurement outputs
+# 后续构建与测量输出
 /out/
 /build/
 /.build/

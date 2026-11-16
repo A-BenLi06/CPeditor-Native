@@ -1,33 +1,54 @@
-# Walkthrough
+# 改动与验证记录
 
-## 2026-11-16T20:11:27+08:00 — Initial source acquisition and native architecture
+## 2026-11-16T20:11:27+08:00 — 首次源码获取与原生架构设计
 
-### Changes
+### 改动内容
 
-- Initialized the empty CPEditor-Native directory as a Git repository on `main`.
-- Cloned `https://github.com/cpeditor/cpeditor` as `references/cpeditor`, pinned at `77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c`, and initialized all six nested upstream submodules. The 7.0.2 tag/history is available for the supplied evaluation baseline.
-- Added root repository instructions and build/IDE-output exclusions. No original CP Editor implementation was modified.
-- Added README and five English design documents covering architecture, Core contracts, source migration, editor evaluation and implementation gates.
+- 将空的 CPEditor-Native 目录初始化为 Git 仓库，分支为 `main`。
+- 将 `https://github.com/cpeditor/cpeditor` 克隆为 `references/cpeditor`，固定在 `77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c`，并初始化其全部六个嵌套上游子模块。7.0.2 标签及历史可用于用户提供的评估基线。
+- 添加根目录协作要求以及构建/IDE 输出排除规则，没有修改原版 CP Editor 实现。
+- 添加 README 和五份设计文档，当时以英文编写，涵盖架构、Core 契约、源码迁移、编辑器评估和实施验收条件。
 
-### Reasoning
+### 设计思路
 
-The current upstream snapshot declares 7.3.0/C++14/Qt 6, while the supplied assessment describes 7.0.2/Qt 5. Its Core, test model, settings, sessions and extensions still contain Qt/UI dependencies. The design therefore preserves useful competition semantics and explicit import compatibility while implementing a Qt-free C++20 service layer with native process/file/protocol adapters. WinUI 3/C++/WinRT and SwiftUI/AppKit own their native document/editor/window behavior. Windows calls the engine's C++ facade; Swift uses a stable C ABI with explicit lifetime and event ownership.
+当前上游快照声明 7.3.0/C++14/Qt 6，而用户提供的评估基于 7.0.2/Qt 5。上游 Core、测试模型、设置、会话和扩展仍包含 Qt/UI 依赖。因此设计保留有价值的竞赛语义与明确的导入兼容性，同时规划不依赖 Qt 的 C++20 服务层及原生进程、文件和协议适配器。WinUI 3/C++/WinRT 与 SwiftUI/AppKit 分别管理原生文档、编辑器和窗口行为。Windows 调用引擎的 C++ 接口；Swift 使用稳定 C ABI，明确生命周期与事件所有权。
 
-Editor selection remains gated by actual prototypes. Source research corrected WinUIEdit's MIT description, STTextView's current GPL/commercial license, and CodeEditorView's missing C++ lexical configuration. CodeEdit/BriskEdit remain architecture references; CPH-NG remains a workflow reference. Dependency/provenance claims refer to immutable source commits rather than floating README descriptions.
+编辑器选择仍须通过实际原型验收。源码研究修正了 WinUIEdit 的 MIT 许可描述，确认了 STTextView 当前 GPL/商业许可及 CodeEditorView 缺少 C++ 词法配置的情况。CodeEdit/BriskEdit 作为架构参考，CPH-NG 作为工作流参考。依赖与来源说明基于不可变源码提交，而非浮动的 README 描述。
 
-Core rules distinguish empty input, absent versus empty expected output, checker errors and solution verdicts. They preserve CP Editor newline/Unicode-whitespace comparison semantics and introduce explicit source revisions, stable testcase IDs, raw-output byte limits, process cancellation and safe recovery. Read-only review corrected the state diagram's checker prerequisite, background-tab undo retention and completed-event backpressure.
+Core 规则区分空输入、缺少预期输出与预期输出为空、checker 错误和解答判题结果。保留 CP Editor 的换行符及 Unicode 空白比较语义，并引入明确的源码版本、稳定测试 ID、原始输出字节限制、进程取消和安全恢复。只读审查修正了状态图的 checker 前提、后台标签页撤销历史保留以及已完成事件的背压。
 
-### Validation and scope
+### 验证与范围
 
-- Confirmed the fetched CP Editor revision, 7.0.2 baseline and all nested submodule checkouts; upstream worktree is clean.
-- Inspected source/manifests/licenses using local Git history and immutable GitHub source URLs; independent read-only reviews covered Core migration and both native editor paths.
-- Design documents distinguish observed facts, proposed contracts and unexecuted acceptance gates.
-- Final repository/document integrity checks are recorded below before commit.
-- Execution host is macOS with zsh; PowerShell 7 is unavailable on this host. Windows 10 22H2 Professional for Workstations/PowerShell 7 remain the primary target requirements. No native/editor build, original application build, runtime benchmark, legacy export-fixture generation or deployment was performed. Those belong to the documented implementation milestones.
+- 确认已获取的 CP Editor 版本、7.0.2 基线和全部嵌套子模块检出状态；上游工作区干净。
+- 通过本地 Git 历史及固定版本的 GitHub 源码 URL 检查实现、依赖清单和许可证；独立只读审查覆盖 Core 迁移与两端编辑器方案。
+- 设计文档区分已观察事实、拟议契约和未执行验收条件。
+- 提交前的最终仓库与文档完整性检查记录如下。
+- 执行主机为 macOS，shell 为 zsh，未安装 PowerShell 7。主要目标环境仍为 Windows 10 22H2 专业工作站版/PowerShell 7。没有执行原生/编辑器构建、原版应用构建、运行时性能测试、旧版导出样本生成或部署；这些属于文档中后续实施阶段的工作。
 
-### 2026-11-16T20:11:53+08:00 — Final integrity results
+### 2026-11-16T20:11:53+08:00 — 最终完整性检查结果
 
-- Passed UTF-8 Markdown integrity checks for eight documents, fifteen local links and thirty-two immutable CP Editor source path/line citations.
-- Recursive submodule status confirms the exact pinned reference and all six nested modules are initialized; source diff is empty.
-- Core consistency review findings were resolved; final macOS/editor/bridge review reported no material findings.
-- Whitespace checks passed; the completed architecture/source-acquisition change is ready for its initial Git commit.
+- 八份 UTF-8 Markdown 文档、十五个本地链接及三十二条固定版本 CP Editor 源文件路径/行号引用通过完整性检查。
+- 递归子模块状态确认参考版本准确固定，六个嵌套模块均已初始化；源码差异为空。
+- Core 一致性审查发现的问题已修正；最终 macOS/编辑器/桥接审查未发现实质问题。
+- 空白字符检查通过，完整的架构与源码获取变更可进行首次 Git 提交。
+
+## 2026-11-16T21:17:43+08:00 — 项目文档中文化
+
+### 改动内容
+
+- 将 README、五份设计文档、AGENTS.md 和 walkthrough 历史记录全部翻译为简体中文，同时翻译 Mermaid 可见说明、目录布局注释和 .gitignore 注释。
+- 保留原有文件路径、命令、API/类型/字段标识符、版本号、提交哈希与引用 URL；历史记录保留原始时间戳与当时的事实。
+- 更新仓库语言要求：项目文档使用中文，应用默认语言为英文，用户可见文本通过原生本地化资源管理。
+- 澄清判题结果段落的中文表述：仅 MemoryLimitExceeded 依赖内存限制后端，其他基础结果不能误读为可选。
+
+### 改动思路
+
+按用户最新要求，将文档语言统一为中文，方便直接阅读架构、迁移与验收说明。保留技术标识符和固定版本引用，使中文说明仍能准确对应源码与接口；区分文档语言要求和产品语言设置。此次没有改变架构方案或上游参考版本。
+
+### 验证结果
+
+- 八份 Markdown 文档均可按 UTF-8 读取，标题及说明已中文化。
+- 十五个本地链接与三十二条固定版本 CP Editor 源码路径/行号引用通过检查，全部链接目标与翻译前一致。
+- 技术标识符集合、原有标题/表格结构、命令代码块、Mermaid 状态转换/组件关系和拟议目录布局检查通过。
+- 翻译自查及最终核对保留源码观察、拟议设计和未验证行为的区别；空白字符检查通过。
+- CP Editor 及全部嵌套子模块的工作区保持干净；本次仅修改项目文档与注释，无需执行应用构建或运行时测试。

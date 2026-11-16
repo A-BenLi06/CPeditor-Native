@@ -1,83 +1,83 @@
-# CP Editor source audit and migration map
+# CP Editor 源码审计与迁移映射
 
-Research date: 2026-11-16 (UTC+08:00). Findings are observations of fixed source revisions; destinations and improvements are proposed architecture.
+研究日期：2026-11-16（UTC+08:00）。审计结论来自固定源码版本的观察；迁移目标和改进措施属于拟议架构。
 
-## Source acquisition and baselines
+## 源码获取与基线
 
-| Source | Revision | Use |
+| 来源 | 提交版本 | 用途 |
 | --- | --- | --- |
-| Local reference `references/cpeditor`, upstream `master` | `77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c` | Current source migration baseline; declares project version 7.3.0 |
-| CP Editor tag `7.0.2` | `8f8cfafae7c6f3ab4923ce0e08cdb60c2b0e0640` | Baseline used by the supplied evaluation; available in the cloned history |
+| 本地参考目录 `references/cpeditor`，上游分支 `master` | `77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c` | 当前源码的迁移基线；声明项目版本为 7.3.0 |
+| CP Editor 标签 `7.0.2` | `8f8cfafae7c6f3ab4923ce0e08cdb60c2b0e0640` | 用户提供的评估采用此基线；已克隆的历史中可以访问 |
 
-The first row records the fetched commit, rather than a claim about the latest published release. The local clone includes upstream history and all nested submodules. The parent repository tracks a gitlink, not a copy of upstream implementation inside the new Core. Inspect exact revisions with the commands in [README](../README.md).
+表格第一行记录的是实际获取的提交，不代表对最新发布版本的判断。本地克隆包含上游历史和全部嵌套子模块。父仓库通过 gitlink 固定参考版本，并未将上游实现复制到新的 Core 中。可使用 [README](../README.md) 中的命令检查准确版本。
 
-[Current CMake](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/CMakeLists.txt#L7) declares 7.3.0, C++14, Qt 6 Widgets/Network/Core5Compat, and KF6 syntax highlighting. [7.0.2 CMake](https://github.com/cpeditor/cpeditor/blob/8f8cfafae7c6f3ab4923ce0e08cdb60c2b0e0640/CMakeLists.txt#L7) uses C++14, Qt 5 and KF5. Native performance experiments must distinguish the affected Qt 5 build from the current Qt 6 source.
+[当前 CMake 配置](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/CMakeLists.txt#L7) 声明 7.3.0、C++14、Qt 6 Widgets/Network/Core5Compat，以及 KF6 语法高亮。[7.0.2 的 CMake 配置](https://github.com/cpeditor/cpeditor/blob/8f8cfafae7c6f3ab4923ce0e08cdb60c2b0e0640/CMakeLists.txt#L7) 使用 C++14、Qt 5 和 KF5。原生性能实验必须区分出现问题的 Qt 5 构建与当前 Qt 6 源码。
 
-## Migration inventory
+## 迁移清单
 
-All CP Editor links below refer to the current pinned commit.
+下列所有 CP Editor 链接均指向当前固定提交。
 
-| Upstream component | Observed dependency or behavior | Native destination |
+| 上游组件 | 已观察到的依赖或行为 | 原生架构中的目标 |
 | --- | --- | --- |
-| [Compiler](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Core/Compiler.cpp#L56) | `QObject`, `QProcess`, Qt settings/files/codecs; language-name branches for C++/Java/Python; interpreted Python bypasses compilation; C++ adds original include directory | `BuildService`, declarative toolchain profiles and native process host; preserve useful include/runtime rules |
-| [Runner](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Core/Runner.cpp#L60) | Qt process/timers, redirected temporary input file, command construction, detached terminal paths | `RunService` and native `ProcessHost`; separate terminal/interactive capabilities |
-| [Checker](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Core/Checker.hpp#L31) | Includes a Widget header for verdicts; built-in text checks and runtime compilation of bundled testlib/custom checkers | Pure comparison policies, domain verdicts and external-checker service |
-| [SessionManager](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Core/SessionManager.cpp#L18) | Includes generated app UI and window classes; restores tabs directly; Qt JSON/timer/file behavior | Versioned `SessionRepository`; native shells restore their own views |
-| [SettingsManager](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Settings/SettingsManager.cpp#L148) | User settings are QSettings INI/QVariant; JSON file drives Qt setting/UI generation | Typed config schema, native preference resources and isolated legacy importer |
-| [TestCase](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Widgets/TestCase.hpp#L38) / [TestCases](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Widgets/TestCases.cpp#L547) | Test bytes, selection, checker settings and AC/WA/TLE/RE enum reside in QWidget classes; cases are renumbered | Stable-ID test records and independent native presentation models |
-| [CompanionServer](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Extensions/CompanionServer.cpp#L56) | Qt/qhttp listener and JSON parsing; accepts HTTP before parsing; carries original JSON plus URL/time/sample values | Bounded loopback protocol service, versioned field mapping and transactional import |
-| [LanguageServer](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Extensions/LanguageServer.hpp#L21) | Direct `CodeEditor` and Qt dependencies; one document reference, full-text lint sync, display-language branches | Independent JSON-RPC/LSP service over native process transport; versioned document mirror and editor adapters |
-| [CodeFormatter](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Extensions/CodeFormatter.cpp#L31) | Direct editor/cursor handling and QProcess-based formatting | Snapshot formatter service and revision-checked native undo transaction |
-| [CFTool](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Extensions/CFTool.cpp#L42) | External process, Codeforces URL parsing, translated log/toast behavior | Optional judge/CLI adapter; process rules shared, notifications native |
-| [StressTesting](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Widgets/StressTesting.cpp#L315) | Generator/reference/candidate orchestration inside QWidget, editor/settings and C++/Java/Python decisions | Dedicated cancellable stress service using snapshot/profile/seed data |
-| Editor/highlighter, styles, translator, main windows | Qt text/layout, KSyntaxHighlighting, signals, preferences and window orchestration | New native shells/editor adapters and resource-backed localization |
+| [Compiler](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Core/Compiler.cpp#L56) | 依赖 `QObject`、`QProcess`、Qt 设置／文件／编码转换；按 C++/Java/Python 的语言名称分支；解释执行的 Python 跳过编译；C++ 添加原文件的包含目录 | `BuildService`、声明式工具链配置和原生进程宿主；保留有价值的包含目录及运行规则 |
+| [Runner](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Core/Runner.cpp#L60) | Qt 进程／定时器、重定向的临时输入文件、命令构造和独立终端路径 | `RunService` 与原生 `ProcessHost`；分别定义终端和交互执行能力 |
+| [Checker](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Core/Checker.hpp#L31) | 为获取判定结果类型而包含 Widget 头文件；提供内置文本检查，并在运行时编译附带的 testlib／自定义 checker | 纯比较策略、领域层判定结果和外部 checker 服务 |
+| [SessionManager](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Core/SessionManager.cpp#L18) | 包含生成的应用 UI 和窗口类；直接恢复标签页；使用 Qt JSON／定时器／文件行为 | 带版本的 `SessionRepository`；由两端原生外壳恢复各自视图 |
+| [SettingsManager](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Settings/SettingsManager.cpp#L148) | 用户设置采用 QSettings INI/QVariant；JSON 文件驱动 Qt 设置／UI 生成 | 类型化配置模式、原生偏好设置资源和独立的旧版导入器 |
+| [TestCase](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Widgets/TestCase.hpp#L38) / [TestCases](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Widgets/TestCases.cpp#L547) | 测试数据字节、选中状态、checker 设置和 AC/WA/TLE/RE 枚举位于 QWidget 类中；测试用例会重新编号 | 使用稳定 ID 的测试记录，以及独立的原生展示模型 |
+| [CompanionServer](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Extensions/CompanionServer.cpp#L56) | Qt/qhttp 监听与 JSON 解析；在解析前就接受 HTTP 请求；携带原始 JSON 及 URL／时限／样例值 | 有容量限制的回环协议服务、带版本的字段映射和事务化导入 |
+| [LanguageServer](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Extensions/LanguageServer.hpp#L21) | 直接依赖 `CodeEditor` 和 Qt；保存单个文档引用、同步全文进行检查，并按语言显示名称分支 | 基于原生进程传输的独立 JSON-RPC/LSP 服务；带版本的文档镜像与编辑器适配器 |
+| [CodeFormatter](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Extensions/CodeFormatter.cpp#L31) | 直接处理编辑器／光标，并通过 QProcess 格式化 | 基于快照的格式化服务，以及校验版本的原生撤销事务 |
+| [CFTool](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Extensions/CFTool.cpp#L42) | 外部进程、Codeforces URL 解析，以及翻译后的日志／通知行为 | 可选的评测平台／CLI 适配器；共享进程规则，由原生端展示通知 |
+| [StressTesting](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Widgets/StressTesting.cpp#L315) | 在 QWidget 内协调生成器／参考程序／待测程序，依赖编辑器／设置并包含 C++/Java/Python 判断 | 使用快照／配置／随机种子数据的专用、可取消压力测试服务 |
+| 编辑器／高亮器、样式、翻译器、主窗口 | Qt 文本／布局、KSyntaxHighlighting、信号、偏好设置和窗口协调 | 新的原生外壳／编辑器适配器，以及基于资源的本地化 |
 
-Use the old project as a behavioral oracle and migration source. Do not rename its Qt-dependent classes and describe the result as a portable Core. The target contracts are specified in [Core contracts](core-contracts.md).
+将原项目作为行为对照基准和迁移来源。仅重命名依赖 Qt 的类，不能得到可移植 Core。目标契约见 [Core 契约](core-contracts.md)。
 
-## Compatibility rules to retain
+## 需要保留的兼容规则
 
-- [Strict and trailing-space implementations](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Core/Checker.cpp#L233): Strict converts CRLF and CR to LF. IgnoreTrailingSpaces also trims trailing Unicode whitespace and terminal whitespace-only lines. Preserve these modes with fixtures; byte-exact and ASCII-only comparison are separate policies.
-- [Checker mode inventory](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Core/Checker.hpp#L47): `ncmp`, `rcmp4`, `rcmp6`, `rcmp9`, `wcmp`, `nyesno`, plus the two built-in modes and custom checker. Testlib is a separate dependency with its own provenance.
-- [External checker invocation](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Core/Checker.cpp#L297): arguments are input path, actual-output path and expected-output path, in that order.
-- [Sample filename rules](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Widgets/TestCases.cpp#L595): templates include `${filename}`, `${basename}`, `${0-index}`, `${1-index}`. Do not hardcode every sample to `.in/.out`.
-- [Source snapshots/status](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/mainwindow.cpp#L533): saved text and editor text are distinct. Preserve unsaved source and restoration priority.
-- [Preserved recovery](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Core/SessionManager.cpp#L113): current master can avoid autosaving over a preserved session, a behavior added after the 7.0.2 baseline.
+- [Strict 与行尾空白检查实现](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Core/Checker.cpp#L233)：Strict 将 CRLF 和 CR 转为 LF。IgnoreTrailingSpaces 还会移除行尾 Unicode 空白和末尾仅含空白的行。通过测试夹具保留这些模式；逐字节精确比较和仅处理 ASCII 的比较属于独立策略。
+- [Checker 模式清单](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Core/Checker.hpp#L47)：包括 `ncmp`、`rcmp4`、`rcmp6`、`rcmp9`、`wcmp`、`nyesno`，以及两个内置模式和自定义 checker。Testlib 是独立依赖，需要单独记录来源。
+- [外部 checker 调用](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Core/Checker.cpp#L297)：参数依次为输入文件路径、实际输出路径、预期输出路径。
+- [样例文件名规则](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Widgets/TestCases.cpp#L595)：模板包括 `${filename}`、`${basename}`、`${0-index}`、`${1-index}`。不要将所有样例文件名硬编码为 `.in/.out`。
+- [源码快照／状态](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/mainwindow.cpp#L533)：已保存文本与编辑器文本是不同状态。保留未保存源码及其恢复优先级。
+- [保留恢复会话](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Core/SessionManager.cpp#L113)：当前 master 可避免自动保存覆盖已保留的会话，这是 7.0.2 基线之后新增的行为。
 
-## Deliberate corrections, without silent compatibility claims
+## 明确提出的修正及兼容边界
 
-| Observed behavior | Proposed correction |
+| 已观察到的行为 | 拟议修正 |
 | --- | --- |
-| [Runner timer](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Core/Runner.cpp#L92) starts before the `started` signal; elapsed time begins later | Separate spawn timeout, execution wall deadline and cleanup/drain timeout with monotonic timestamps |
-| [Output reads](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Core/Runner.cpp#L180) remove NUL; retained buffers are byte-counted while UI says characters | Preserve raw byte artifacts, explicit caps and display decoding; never compare silently filtered/truncated output |
-| [Checker exits](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Core/Checker.cpp#L172) map `_fail` and points/partial outcomes to WA; unknown exits only log | Distinguish checker failure from wrong answer; support scoring only through an explicit adapter |
-| [Empty-answer gate](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/mainwindow.cpp#L1567) uses an option to decide whether an empty expected string is checked | Optional expected-output value distinguishes absent from explicitly empty; importer records the selected legacy interpretation |
-| Process destruction kills owned QProcess, without Job Object/group/memory-enforcement support in the audited paths | Native process backends implement and test declared capabilities; no inherited sandbox/MLE guarantee |
-| [LSP diagnostics](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Extensions/LanguageServer.cpp#L232) are applied to a stored editor reference | Stable document IDs/revisions, typed position conversions and stale-response rejection |
+| [Runner 定时器](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Core/Runner.cpp#L92) 在 `started` 信号之前启动，耗时统计却在之后开始 | 使用单调时间戳，分别定义进程创建超时、执行墙钟截止时间和清理／管道排空超时 |
+| [输出读取](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Core/Runner.cpp#L180) 删除 NUL；保留的缓冲区按字节计数，UI 却称为字符 | 保留原始字节产物、明确上限和展示解码规则；不得在静默过滤／截断后继续正常比较输出 |
+| [Checker 退出处理](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Core/Checker.cpp#L172) 将 `_fail` 和计分／部分得分结果映射为 WA；未知退出码只记录日志 | 区分 checker 故障与答案错误；仅通过明确的适配器支持计分 |
+| [空答案检查条件](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/mainwindow.cpp#L1567) 使用选项决定是否检查空的预期字符串 | 通过可选的预期输出值区分“缺失”和“明确为空”；导入器记录采用的旧版解释方式 |
+| 进程销毁时终止所持有的 QProcess；已审计路径未提供 Job Object／进程组／内存限额强制执行支持 | 原生进程后端实现并测试其声明的能力；不能继承或宣称已有沙箱／MLE 保证 |
+| [LSP 诊断](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Extensions/LanguageServer.cpp#L232) 应用到已保存的编辑器引用 | 使用稳定文档 ID／版本、类型化位置转换并拒绝过期响应 |
 
-The normal Runner's temporary-file stdin flow is batch execution. Interactive judging needs bidirectional solution/interactor channels, independent limits, EOF handling, idle/overall deadlines and cancellation. Stress testing needs explicit generator/reference/candidate snapshots, reproducible seed/arguments, bounded iterations and persisted counterexamples. Neither should be implemented as an unchecked flag inside the batch runner.
+普通 Runner 使用临时文件提供 stdin，属于批量执行。交互判题需要待测程序与 interactor 之间的双向通道、独立限额、EOF 处理、空闲／整体截止时间及取消机制。压力测试需要明确的生成器／参考程序／待测程序快照、可重现的随机种子／参数、有界迭代和持久化反例。这两类功能都不应仅作为未经检查的标志添加到批量 Runner 中。
 
-## Session and settings import
+## 会话与设置导入
 
-[Session JSON](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Core/SessionManager.cpp#L126) has `currentIndex` and `tabs`, without a top-level schema version. [Tab serialization](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/mainwindow.cpp#L477) includes source/saved text, path/language/compile command, problem URL, cursor/anchor, scroll positions, input/expected arrays, checker choices, selected-test flags and splitter values.
+[会话 JSON](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Core/SessionManager.cpp#L126) 包含 `currentIndex` 和 `tabs`，没有顶层模式版本。[标签页序列化](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/mainwindow.cpp#L477) 包括源码／已保存文本、路径／语言／编译命令、题目 URL、光标／选区锚点、滚动位置、输入／预期输出数组、checker 选择、测试选中标志和分隔条数值。
 
-`editorCursor`/`editorAnchor` come from `QTextCursor`: treat them as UTF-16 positions and convert to typed source anchors against the imported text. Qt scrollbar/splitter pixels are legacy presentation metadata, without portable meaning. The misleading `testcasesIsShow` field is a legacy name for case selection and needs a documented mapping. Validate array alignment, recover available samples and report malformed/missing values instead of truncating unsaved content.
+`editorCursor`／`editorAnchor` 来自 `QTextCursor`：应将它们视为 UTF-16 位置，并依据导入文本转换为类型化源码锚点。Qt 滚动条／分隔条的像素值是旧版展示元数据，不具备可移植含义。容易误解的 `testcasesIsShow` 是测试用例选中状态的旧字段名，需要记录其映射。校验数组对应关系，恢复可用样例并报告无效／缺失值，不能截断未保存内容。
 
-[Settings key derivation](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Settings/SettingsInfo.hpp#L53) lowercases names, maps `c++` to `cpp`, and spaces to underscores. [SettingsUpdater](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Settings/SettingsUpdater.cpp#L47) also recognizes old aliases. The generator's `settings.json` is not the persisted INI file. Generic INI parsing alone does not guarantee correct Qt QVariant/font/shortcut conversion.
+[设置键生成规则](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Settings/SettingsInfo.hpp#L53) 将名称转为小写、将 `c++` 映射为 `cpp`，并将空格替换为下划线。[SettingsUpdater](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Settings/SettingsUpdater.cpp#L47) 还识别旧版别名。生成器的 `settings.json` 不是持久化的 INI 文件。仅使用通用 INI 解析，无法保证正确转换 Qt QVariant／字体／快捷键。
 
-Create fixtures from actual 7.0.2/current exports before implementing the decoder. An optional standalone Qt-linked exporter is acceptable for unsupported legacy values while the native runtime remains Qt-free. Import preserves original files and produces a versioned native session/config plus a report. MVP compatibility is import-only, without an export-to-Qt promise. [FileUtil](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Util/FileUtil.cpp#L74) already uses QSaveFile in safe mode; the new store must retain atomic-save semantics through native implementations.
+实现解码器前，应从真实的 7.0.2／当前版本导出文件建立测试夹具。对于尚不支持的旧版值，可采用可选、独立且链接 Qt 的导出工具，同时保持原生运行时不依赖 Qt。导入应保留原文件，生成带版本的原生会话／配置及报告。MVP 的兼容范围仅包括导入，不承诺导出回 Qt 格式。[FileUtil](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Util/FileUtil.cpp#L74) 已在安全模式使用 QSaveFile；新存储层必须通过原生实现保留原子保存语义。
 
-## CPH-NG and Companion references
+## CPH-NG 与 Companion 参考
 
-CPH-NG baseline: `15bc6465383be7b2133895894ebf785ed3840ad1`. Its [README](https://github.com/langningchen/cph-ng/blob/15bc6465383be7b2133895894ebf785ed3840ad1/README.md) says `main` contains TypeScript while Rust kernel work is on `refactor/rust-kernel`. These are different research baselines.
+CPH-NG 基线：`15bc6465383be7b2133895894ebf785ed3840ad1`。其 [README](https://github.com/langningchen/cph-ng/blob/15bc6465383be7b2133895894ebf785ed3840ad1/README.md) 说明 `main` 包含 TypeScript 实现，而 Rust 内核工作位于 `refactor/rust-kernel`。它们属于不同研究基线。
 
-Useful observed boundaries include the [testcase/result model](https://github.com/langningchen/cph-ng/blob/15bc6465383be7b2133895894ebf785ed3840ad1/packages/vscode-ext/src/domain/entities/testcase.ts), [execution strategy cancellation contract](https://github.com/langningchen/cph-ng/blob/15bc6465383be7b2133895894ebf785ed3840ad1/packages/vscode-ext/src/application/ports/problems/judge/runner/execution/strategies/IExecutionStrategy.ts), [interactive judge](https://github.com/langningchen/cph-ng/blob/15bc6465383be7b2133895894ebf785ed3840ad1/packages/vscode-ext/src/application/useCases/problems/judge/interactiveJudgeService.ts), and [stress use case](https://github.com/langningchen/cph-ng/blob/15bc6465383be7b2133895894ebf785ed3840ad1/packages/vscode-ext/src/application/useCases/webview/problem/stressTest/StartStressTest.ts). Borrow their responsibility separation and workflow ideas; TypeScript/VS Code service dependencies are outside the proposed runtime.
+已观察到且有参考价值的边界包括：[测试用例／结果模型](https://github.com/langningchen/cph-ng/blob/15bc6465383be7b2133895894ebf785ed3840ad1/packages/vscode-ext/src/domain/entities/testcase.ts)、[执行策略取消契约](https://github.com/langningchen/cph-ng/blob/15bc6465383be7b2133895894ebf785ed3840ad1/packages/vscode-ext/src/application/ports/problems/judge/runner/execution/strategies/IExecutionStrategy.ts)、[交互判题服务](https://github.com/langningchen/cph-ng/blob/15bc6465383be7b2133895894ebf785ed3840ad1/packages/vscode-ext/src/application/useCases/problems/judge/interactiveJudgeService.ts) 和 [压力测试流程](https://github.com/langningchen/cph-ng/blob/15bc6465383be7b2133895894ebf785ed3840ad1/packages/vscode-ext/src/application/useCases/webview/problem/stressTest/StartStressTest.ts)。借鉴其职责划分和工作流思路；TypeScript／VS Code 服务依赖不属于拟议运行时。
 
-The project [package manifest](https://github.com/langningchen/cph-ng/blob/15bc6465383be7b2133895894ebf785ed3840ad1/package.json) declares `AGPL-3.0-only`, while inspected source headers use GPL version 3 or later wording. Do not infer permission to copy from one label; resolve exact file/package provenance before any implementation reuse. This change uses it as a design reference only.
+项目的 [包清单](https://github.com/langningchen/cph-ng/blob/15bc6465383be7b2133895894ebf785ed3840ad1/package.json) 声明 `AGPL-3.0-only`，而已检查的源码头使用 GPL 第 3 版或更高版本的表述。不能仅凭一个标签推断复制权限；复用实现前需确认具体文件／包的来源和许可。本次变更仅将其作为设计参考。
 
-Competitive Companion protocol baseline: `df90fabb52e8f566ea3382405e22d246af5d6a69`. Its [custom-tool format](https://github.com/jmerle/competitive-companion/blob/df90fabb52e8f566ea3382405e22d246af5d6a69/README.md#custom-tools) specifies HTTP POST `/`, compatible ports, limits in ms/MB, tests and optional interactive/input/output/language/batch fields. Use this as the external contract, rather than assuming CP Editor's subset contains every supported field.
+Competitive Companion 协议基线：`df90fabb52e8f566ea3382405e22d246af5d6a69`。其 [自定义工具格式](https://github.com/jmerle/competitive-companion/blob/df90fabb52e8f566ea3382405e22d246af5d6a69/README.md#custom-tools) 规定 HTTP POST `/`、兼容端口、以 ms／MB 为单位的限额、测试用例，以及可选的交互／输入／输出／语言／批次字段。应以此作为外部契约，不能假定 CP Editor 使用的子集包含所有受支持字段。
 
-## Licensing and evidence limits
+## 许可与证据范围
 
-The CP Editor [LICENSE](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/LICENSE) is GPL v3; audited [source headers](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Core/Compiler.cpp#L1) permit version 3 or later. Plan a GPL-compatible derived implementation when porting code, retain notices and track exact copied files. Qt, testlib, editor and other transitive dependencies have separate notices. Do not label a derived Core MIT merely because a selected editor is permissive.
+CP Editor 的 [LICENSE](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/LICENSE) 是 GPL v3；已审计的 [源码头](https://github.com/cpeditor/cpeditor/blob/77e563b4719fcc9d2bde5b2f651ceb25c4a48e2c/src/Core/Compiler.cpp#L1) 允许使用第 3 版或更高版本。移植代码时按 GPL 兼容的派生实现规划，保留许可声明并追踪具体复制文件。Qt、testlib、编辑器及其他传递依赖各有独立声明。不能仅因选用的编辑器采用宽松许可，就将派生 Core 标为 MIT。
 
-This audit reads code and manifests. No original or native application was compiled, no legacy export fixture was generated, and no process/input-performance claim was validated at runtime. The migration map is the implementation starting point, with required verification in [the plan](implementation-plan.md).
+本次审计阅读了源码与清单，未编译原版或原生应用，未生成旧版导出测试夹具，也未在运行时验证进程／输入性能结论。迁移映射是后续实现的起点，所需验证见 [实施计划](implementation-plan.md)。

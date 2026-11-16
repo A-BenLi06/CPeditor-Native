@@ -1,11 +1,11 @@
-# Repository instructions
+# 仓库协作要求
 
-- Primary target: Windows 10 22H2 Professional for Workstations. Use PowerShell 7 for Windows development scripts. macOS is the second native application target.
-- Check the actual execution host before running platform commands. Do not report Windows verification from a macOS host.
-- Default documentation and application language is English. Put user-visible strings in native localization resources.
-- Keep languages, toolchains, limits, filename patterns, and integration configuration data-driven. Define protocol fields once in versioned contracts rather than duplicating string keys throughout the application.
-- Keep project/development requirements in repository documentation, outside product content.
-- Implement correct behavior; do not hide defects with timing hacks or suppressed input.
-- After each completed change set, append its changes, reasoning, and validation to root `walkthrough.md` with a machine-generated ISO 8601 timestamp including the UTC offset, then make a Git commit.
-- Treat `references/cpeditor` as an upstream research submodule. Do not edit its implementation as part of the native application. Explicitly record a new source revision when updating it.
-- Research and architecture documents describe proposed behavior until implementation and validation provide evidence.
+- 主要目标平台：Windows 10 22H2 专业工作站版。Windows 开发脚本使用 PowerShell 7。macOS 是第二个原生应用目标平台。
+- 执行平台命令前，先确认实际执行主机。不得在 macOS 主机上将操作报告为 Windows 验证。
+- 项目文档使用中文；应用默认语言仍为英文。用户可见文本放入各平台的原生本地化资源。
+- 语言、工具链、限制、文件名模板和集成配置应由数据驱动。在带版本的契约中统一定义协议字段，不要在应用各处重复硬编码字符串键。
+- 项目及开发要求写在仓库文档中，不写入产品内容。
+- 使用正确的逻辑实现行为，不用延时技巧或屏蔽输入来掩盖缺陷。
+- 每个完整变更集完成后，在根目录 `walkthrough.md` 中记录改动、思路和验证结果，使用机器生成且包含 UTC 偏移的 ISO 8601 时间戳，然后创建 Git 提交。
+- `references/cpeditor` 是上游研究子模块。不要将修改该子模块的实现当作原生应用开发。更新参考源码时，必须明确记录新的源码版本。
+- 在实现和验证提供证据之前，研究与架构文档中的行为均属于拟议设计。
