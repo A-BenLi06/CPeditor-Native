@@ -309,3 +309,16 @@ Core 规则区分空输入、缺少预期输出与预期输出为空、checker �
 - 根独立普通 Core 14/14 CTest 通过；干净 out/core/inbox-review-sanitize 完整两侧 -Werror ASan／UBSan 14/14 通过。当前 Apple 运行时不支持 LSan，显式 detect_leaks=0，不声称泄漏检测通过。
 - 覆盖原字节／稳定身份、异常与容量、未知 schema／偏好、候选保存失败／确认失败、实际磁盘回执、回滚／分叉／同 revision、两实例及真实跨进程合作锁；独立审查与作者修复复核均通过。
 - 本提交不纳入 Windows 会话草稿；未实现 HTTP／C ABI 导入／原生界面，不计为完整 Companion 或目标 Windows／最低 macOS／产品发布验收。
+
+## 2026-11-17T02:10:47+08:00 — WinUI 元数据的 WebView2 WinRT 依赖
+
+### 改动与思路
+
+- Windows Server 2022 的 dbecc57 x64 Debug／Release 均实际通过完整 Core 14/14（含持久收件箱）和正式运行桥接。下一失败为 WinUI XAML WinMD 引用的 Microsoft.Web.WebView2.Core.CoreWebView2 无法生成投影。
+- 恢复固定 WinUIEdit 上游 WebView2 1.0.4022.49 package/import，并明确 WinUI3 WebView2UseWinRT；宿主以相同锁定版本声明package/target/property。原准备补丁误将元数据所需 SDK 当作未使用包移除，本次修复实际依赖，不隐藏缺失类型。
+- 更新 patch／工程产物SHA与中文来源／状态记录；没有改变输入状态机、Scintilla原生渲染或参考子模块。宿主只暂存3行WebView2 hunk，会话工程草稿继续留在工作区。
+
+### 验证与范围
+
+- 根独立执行 PowerShell7 prepare-winuiedit，导出新副本并应用补丁，所有before/after/overlay SHA均通过；证据 out/windows/research/root-webview2-review.log 与准备回执。包含CRLF的.patch按core.whitespace=cr-at-eol检查，保持原字节。
+- 两端原生构建结果等待本次提交触发CI；现有Core通过不等同WinUI运行、目标Windows 10、IME／UU／DPI或发布验收。

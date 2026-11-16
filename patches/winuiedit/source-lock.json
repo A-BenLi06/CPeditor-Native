@@ -2,7 +2,7 @@
   "schema_version": 1,
   "source_commit": "d9f60dbca65c2af54ced590d873d9438de32ce77",
   "patch": "committed-snapshot.patch",
-  "patch_sha256": "1c5d596b71af578dd07708a6a87bf0fb0c600da5ccb3fbb61e3838aa5319d32e",
+  "patch_sha256": "f9f37ebc99f2b242ad1c07faba6a7e0dab72f59d8292de0c8c079455ce25ca33",
   "files": [
     {
       "path": "WinUIEditor/CodeEditorControl.cpp",
@@ -32,12 +32,12 @@
     {
       "path": "WinUIEditor/WinUIEditor.vcxproj",
       "before_sha256": "e573bffda84b05a2ed5bc82414bc5f8a7cb5b9402b47a789054e8c6d5f345f2b",
-      "after_sha256": "9c40e673cc4f859d39e992c1886423ca7b1ccbb1c008dde5730361a11c429171"
+      "after_sha256": "985c37259f67d6f10cde9b1c562742d00f3e6ab7d780db7dc76809b529a6c486"
     },
     {
       "path": "WinUIEditor/packages.config",
       "before_sha256": "b6ded74ca2c3317340f6cb18b3e8fdbbdf240eac18aef42edb59ed0b93013461",
-      "after_sha256": "0e9b6ca9ae5e0afff938ef68a3fd251e87f3f329d35d9800970d5ef1d183b5ee"
+      "after_sha256": "0e7c1f7f64b6a54fbb566d0608f5ec1136be7ae1b87c1d8bf501b59d29f5685c"
     },
     {
       "path": "scintilla/winui/ScintillaWin.cxx",
