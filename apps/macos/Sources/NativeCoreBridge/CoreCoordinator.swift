@@ -1,5 +1,6 @@
 import Foundation
 import CPNativeCore
+import NativeEditorModel
 
 public struct CoreFailure: Error, LocalizedError, Sendable {
     public let status: UInt32
@@ -162,6 +163,54 @@ public actor CoreCoordinator {
             let input = cpn_bytes(data: bytes.bindMemory(to: UInt8.self).baseAddress, size: bytes.count)
             return saving ? cpn_engine_session_save_json(engine, input, &buffer, &error)
                 : cpn_engine_session_load(engine, input, &buffer, &error)
+        }
+        try check(status, &error)
+        return copyBuffer(buffer)
+    }
+
+    public func companionPage(_ context: CompanionContext, after: UInt64 = 0, maxItems: UInt64, maxPageBytes: UInt64) throws -> CompanionPage {
+        let response: CompanionPage = try companion(context, operation: .page(after, maxItems, maxPageBytes))
+        guard response.schemaVersion == 1, response.workspaceID == context.workspaceID else { throw WireError.unsupportedSchema }
+        return response
+    }
+
+    public func companionAccept(_ context: CompanionContext, originalJSON: String, lockTimeoutMS: UInt64) throws -> CompanionWriteResponse {
+        let response: CompanionWriteResponse = try companion(context, operation: .accept(originalJSON, lockTimeoutMS))
+        guard response.schemaVersion == 1 else { throw WireError.unsupportedSchema }
+        return response
+    }
+
+    public func companionPrepare(_ context: CompanionContext, importID: RawIdentifier, session: WorkspaceSessionRecord,
+                                 defaults: CompanionDefaults) throws -> CompanionPreparation {
+        let response: CompanionPreparation = try companion(context, operation: .prepare(importID, session, defaults))
+        guard response.schemaVersion == 1 else { throw WireError.unsupportedSchema }
+        return response
+    }
+
+    public func companionMarkApplied(_ context: CompanionContext, importID: RawIdentifier, sessionPaths: SessionPaths,
+                                     lockTimeoutMS: UInt64) throws -> CompanionWriteResponse {
+        let response: CompanionWriteResponse = try companion(context, operation: .mark(importID, sessionPaths, lockTimeoutMS))
+        guard response.schemaVersion == 1 else { throw WireError.unsupportedSchema }
+        return response
+    }
+
+    private func companion<Response: Decodable>(_ context: CompanionContext, operation: CompanionRequest.Operation) throws -> Response {
+        try ensureEngine()
+        let data = try JSONEncoder().encode(CompanionRequest(context: context, operation: operation))
+        let bytes = try Self.companionBytes(engine: engine, data: data, operation: operation)
+        return try JSONDecoder().decode(Response.self, from: bytes)
+    }
+
+    nonisolated private static func companionBytes(engine: UInt64, data: Data, operation: CompanionRequest.Operation) throws -> Data {
+        var buffer = cpn_buffer(); var error = errorStorage()
+        let status = data.withUnsafeBytes { bytes in
+            let input = cpn_bytes(data: bytes.bindMemory(to: UInt8.self).baseAddress, size: bytes.count)
+            switch operation {
+            case .page: return cpn_engine_companion_page_json(engine, input, &buffer, &error)
+            case .accept: return cpn_engine_companion_accept_json(engine, input, &buffer, &error)
+            case .prepare: return cpn_engine_companion_prepare_json(engine, input, &buffer, &error)
+            case .mark: return cpn_engine_companion_mark_applied_json(engine, input, &buffer, &error)
+            }
         }
         try check(status, &error)
         return copyBuffer(buffer)

@@ -94,7 +94,7 @@ import NativeCoreBridge
         second.sessions.forEach { $0.dispose() }
     }
 
-    @Test func failedNativeCandidateAndMaxRevisionLeaveWholeWorkspaceUntouched() throws {
+    @Test func failedNativeCandidateIsAtomicAndExhaustedDocumentRestoresReadOnly() throws {
         _ = NSApplication.shared
         let workspace = Workspace()
         let before = try #require(workspace.activeSession)
@@ -116,8 +116,10 @@ import NativeCoreBridge
         let exhausted = try record("exhausted", text: "// original", revision: .max)
         let invalid = WorkspaceSessionRecord(workspaceID: RawIdentifier("new"), revision: 1,
             selectedDocumentID: exhausted.documentID, documents: [exhausted], editorPreferences: [])
-        #expect(throws: Error.self) { try workspace.applyRecoveryCandidate(invalid, configuration: .load()) }
-        #expect(workspace.activeSession === before)
+        try workspace.applyRecoveryCandidate(invalid, configuration: .load())
+        #expect(workspace.activeSession?.document.id == exhausted.documentID)
+        #expect(workspace.activeSession?.canMutatePersistence == false)
+        #expect(workspace.activeSession?.document.text == exhausted.sourceText)
         workspace.sessions.forEach { $0.dispose() }
     }
 

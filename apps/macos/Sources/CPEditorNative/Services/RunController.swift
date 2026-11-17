@@ -31,10 +31,28 @@ struct RunConfiguration: Decodable, Sendable {
 }
 
 @MainActor @Observable final class RunController {
-    var profiles: [ToolchainProfile] = []
-    var selectedProfileID = RawIdentifier("")
-    var comparison: ComparisonPolicy = .trailing
-    var externalCheckerEnabled = false
+    @ObservationIgnored private let persistence: PersistenceGate
+    var persistentChangesAllowed: Bool { persistence.canMutate }
+    private var storedProfiles: [ToolchainProfile] = []
+    private var storedProfileID = RawIdentifier("")
+    private var storedComparison: ComparisonPolicy = .trailing
+    private var storedCheckerEnabled = false
+    var profiles: [ToolchainProfile] {
+        get { storedProfiles }
+        set { guard persistence.canMutate else { errorMessage = L10n.string("workspace_revision_frozen"); return }; storedProfiles = newValue }
+    }
+    var selectedProfileID: RawIdentifier {
+        get { storedProfileID }
+        set { guard persistence.canMutate else { errorMessage = L10n.string("workspace_revision_frozen"); return }; storedProfileID = newValue }
+    }
+    var comparison: ComparisonPolicy {
+        get { storedComparison }
+        set { guard persistence.canMutate else { errorMessage = L10n.string("workspace_revision_frozen"); return }; storedComparison = newValue }
+    }
+    var externalCheckerEnabled: Bool {
+        get { storedCheckerEnabled }
+        set { guard persistence.canMutate else { errorMessage = L10n.string("workspace_revision_frozen"); return }; storedCheckerEnabled = newValue }
+    }
     private(set) var externalChecker: CheckerConfiguration?
     var checkerPreferencesAreOpaque = false
     var checkerPreferenceStorageAvailable = true
@@ -46,13 +64,28 @@ struct RunConfiguration: Decodable, Sendable {
     private(set) var result: BatchResult?
     private(set) var submitted: SourceSnapshot?
     var errorMessage: String?
+    fileprivate final class RunIdentity: Sendable {}
+    @MainActor @Observable fileprivate final class DocumentRun {
+        let identity: RunIdentity
+        var state: JobState
+        var result: BatchResult?
+        init(identity: RunIdentity, state: JobState) {
+            self.identity = identity
+            self.state = state
+        }
+    }
+    private var documentRuns: [RawIdentifier: DocumentRun] = [:]
     @ObservationIgnored private var configuration: RunConfiguration?
     @ObservationIgnored private var coordinator: CoreCoordinator?
     @ObservationIgnored private var task: Task<Void, Never>?
 
     var selectedProfile: ToolchainProfile? { profiles.first { $0.id == selectedProfileID } }
+    var retainedDocumentRunCount: Int { documentRuns.count }
+    func result(for documentID: RawIdentifier) -> BatchResult? { documentRuns[documentID]?.result }
+    func state(for documentID: RawIdentifier) -> JobState? { documentRuns[documentID]?.state }
 
-    init() {
+    init(persistence: PersistenceGate? = nil) {
+        self.persistence = persistence ?? PersistenceGate()
         do {
             let config = try RunConfiguration.load()
             configuration = config
@@ -70,6 +103,11 @@ struct RunConfiguration: Decodable, Sendable {
 
     func runAll(_ session: NativeEditorSession) {
         guard !isRunning, !isClosed, let coordinator, let profile = selectedProfile else { return }
+        do {
+            guard try CompanionProvenance.ordinaryStdioAllowed(documentID: session.document.id, preferences: session.preservedPreferences) else {
+                errorMessage = L10n.string("companion_run_incompatible"); return
+            }
+        } catch { errorMessage = L10n.string("companion_run_opaque"); return }
         session.capture()
         guard !session.isComposing else { errorMessage = L10n.string("finish_composition"); return }
         if let failure = session.captureFailure { errorMessage = L10n.describe(failure); return }
@@ -77,29 +115,43 @@ struct RunConfiguration: Decodable, Sendable {
         guard session.testCases.contains(where: \.enabled) else { errorMessage = L10n.string("enable_testcase"); return }
         guard !externalCheckerEnabled || externalChecker != nil else { errorMessage = L10n.string("checker_configuration_required"); return }
         let snapshot = session.document.snapshot()
-        session.toolchainProfileID = profile.id
+        if persistence.canMutate && session.canMutatePersistence { session.toolchainProfileID = profile.id }
         let request = BatchRequest(snapshot: snapshot, originalPath: session.document.url?.path,
                                    toolchain: profile, tests: session.testCases, comparison: comparison,
                                    externalChecker: externalCheckerEnabled ? externalChecker : nil)
         submitted = snapshot
         result = nil
         state = .queued
+        let identity = RunIdentity()
+        documentRuns[snapshot.documentID] = DocumentRun(identity: identity, state: .queued)
         isRunning = true
         task = Task { @MainActor [weak self] in
             do {
                 let value = try await coordinator.run(request) { [weak self] event in
-                    await self?.receive(event)
+                    await self?.receive(event, documentID: snapshot.documentID, identity: identity)
                 }
-                self?.result = value
+                guard value.documentID == snapshot.documentID, value.revision == snapshot.revision else { throw WireError.malformedTerminal }
+                if let self, let run = self.documentRuns[snapshot.documentID], run.identity === identity {
+                    self.result = value
+                    run.result = value
+                }
             } catch {
-                if self?.isClosed == false { self?.errorMessage = L10n.describe(error) }
+                self?.state = .failed
+                if let self, let run = self.documentRuns[snapshot.documentID], run.identity === identity {
+                    run.state = .failed
+                    if !self.isClosed { self.errorMessage = L10n.describe(error) }
+                }
             }
             self?.isRunning = false
             self?.task = nil
         }
     }
 
-    private func receive(_ event: CoreEvent) { state = event.state }
+    private func receive(_ event: CoreEvent, documentID: RawIdentifier, identity: RunIdentity) {
+        state = event.state
+        guard let run = documentRuns[documentID], run.identity === identity else { return }
+        run.state = event.state
+    }
 
     func cancel() {
         guard isRunning, let coordinator else { return }
@@ -111,16 +163,28 @@ struct RunConfiguration: Decodable, Sendable {
 
     func cancel(documentID: RawIdentifier) { if submitted?.documentID == documentID { cancel() } }
 
+    /// 仅在文档真正销毁时释放结果；运行中的晚事件必须仍匹配当前记录身份才可写回。
+    func forget(documentID: RawIdentifier) {
+        cancel(documentID: documentID)
+        documentRuns.removeValue(forKey: documentID)
+        if result?.documentID == documentID { result = nil }
+    }
+
     func shutdown() async {
         guard !isClosed else { if let task { await task.value }; return }
         isClosed = true
         await coordinator?.shutdown()
         if let task { await task.value }
+        documentRuns.removeAll()
+        result = nil
+        submitted = nil
+        state = nil
     }
 
     func waitForCurrentRun() async { if let task { await task.value } }
 
     func applyChecker(_ jsonText: String, enabled: Bool = true) throws {
+        guard persistence.canMutate else { throw DocumentError.revisionExhausted }
         guard !checkerPreferencesAreOpaque else { throw WireError.unsupportedSchema }
         guard checkerPreferenceStorageAvailable else { throw CheckerConfigurationError("checker_error_preference_capacity") }
         let candidate = try validateChecker(jsonText)
@@ -139,6 +203,7 @@ struct RunConfiguration: Decodable, Sendable {
     }
 
     func restoreChecker(_ configuration: CheckerConfiguration?, enabled: Bool, opaque: Bool) {
+        guard persistence.canMutate else { errorMessage = L10n.string("workspace_revision_frozen"); return }
         externalChecker = configuration; externalCheckerEnabled = enabled; checkerPreferencesAreOpaque = opaque
     }
 
@@ -149,6 +214,7 @@ struct RunConfiguration: Decodable, Sendable {
     }
 
     func applyProfile(_ jsonText: String) throws {
+        guard persistence.canMutate else { throw DocumentError.revisionExhausted }
         let profile = try JSONDecoder().decode(ToolchainProfile.self, from: Data(jsonText.utf8))
         if let index = profiles.firstIndex(where: { $0.id == profile.id }) { profiles[index] = profile }
         else { profiles.append(profile) }
@@ -157,12 +223,13 @@ struct RunConfiguration: Decodable, Sendable {
 
     func loadProfile() {
         guard !isClosed, pendingImportCount == 0, let config = configuration else { return }
+        guard let operation = try? persistence.beginOperation() else { return }
         let panel = NSOpenPanel(); panel.allowsMultipleSelection = false
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard panel.runModal() == .OK, let url = panel.url else { persistence.endOperation(operation); return }
         pendingImportCount += 1
         Task { @MainActor [weak self] in
             guard let self else { return }
-            defer { self.pendingImportCount -= 1 }
+            defer { self.pendingImportCount -= 1; self.persistence.endOperation(operation) }
             do {
                 let text = try await Task.detached {
                     let data = try Self.boundedRead(url, limit: config.maxImportBytes)
@@ -177,12 +244,13 @@ struct RunConfiguration: Decodable, Sendable {
 
     func importTests(into session: NativeEditorSession) {
         guard !isClosed, pendingImportCount == 0, let config = configuration else { return }
+        guard let operation = try? persistence.beginOperation() else { return }
         let panel = NSOpenPanel(); panel.allowsMultipleSelection = false
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard panel.runModal() == .OK, let url = panel.url else { persistence.endOperation(operation); return }
         pendingImportCount += 1
         Task { @MainActor [weak self, weak session] in
             guard let self else { return }
-            defer { self.pendingImportCount -= 1 }
+            defer { self.pendingImportCount -= 1; self.persistence.endOperation(operation) }
             do {
                 let samples = try await Task.detached {
                     let data = try Self.boundedRead(url, limit: config.maxImportBytes)

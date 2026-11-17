@@ -1,8 +1,8 @@
 # macOS 原生编辑器原型
 
-验证记录时间：2026-11-17T01:46:38+08:00。
+验证记录时间：2026-11-17T12:37:34+08:00（Companion 文件收件箱、revision 边界、跨标签结果及前台导入／重启验收）。
 
-本目录实现 SwiftUI 窗口、菜单和文档侧栏，以及两个真实 AppKit 编辑器适配器。当前已完成 M0 双编辑器原型、共享 Core 的样例运行、会话恢复及外部 checker 接入，组件集成不代表已选择生产编辑器，也不代表后续完整里程碑已验收。主项目仍以 Windows 10 22H2 为第一目标。
+本目录实现 SwiftUI 窗口、菜单和文档侧栏，以及两个真实 AppKit 编辑器适配器。当前已完成 M0 双编辑器原型、共享 Core 的样例运行、会话恢复、外部 checker 和 Companion 文件收件箱接入，组件集成不代表已选择生产编辑器，也不代表后续完整里程碑已验收。主项目仍以 Windows 10 22H2 为第一目标。
 
 ## 构建和启动
 
@@ -65,7 +65,7 @@ flowchart TD
 
 ## 自动验证证据
 
-当前 `swift test --package-path apps/macos` 通过 41 项测试（7 项模型测试、21 项原生编辑器／面板／恢复／checker 测试、13 项 C ABI 桥接测试）；双编辑器恢复和满额偏好恢复分别执行两个参数化实例，配置呈现执行 checker／toolchain × 默认／已配置的四个实例。原生测试创建真实 `NSWindow` 和编辑器视图，不用空白占位控件替代组件。
+当前 `CPN_CORE_LIBRARY_DIR="$PWD/out/core/listener-root-dev" swift test --package-path apps/macos` 通过 70 项测试（8 项模型测试、47 项原生编辑器／面板／恢复／checker／Companion／revision／结果归属测试、15 项 C ABI 桥接测试）；双编辑器恢复、满额偏好恢复和最后文档关闭回滚分别执行两个参数化实例，配置呈现执行 checker／toolchain × 默认／已配置的四个实例。原生测试创建真实 `NSWindow` 和编辑器视图，不用空白占位控件替代组件。
 
 | 检查 | 当前证据 |
 | --- | --- |
@@ -116,7 +116,7 @@ CPN_CORE_PREBUILT=1 ./script/build_and_run.sh --verify \
 
 原生变更通过 Observation 在当前输入事务完成后合并到后台保存；没有用计时延迟掩盖输入问题。保存使用 Core 的磁盘摘要 token 和持久锁路径，只有 `recovery_replaced` 为真才推进 token。`DurabilityUnknown` 明确报告已经替换但无法确认持久性；取消锁等待会关闭该恢复引擎，先于引擎创建的取消也会保留请求并阻止写入；重试创建新引擎。源码运行使用另一引擎，因此不会被恢复 I/O 的等待阻塞。
 
-源文件操作在后台使用 `NSFileCoordinator`。写入先在协调区域验证原磁盘摘要，再原子写入精确 UTF-8 字节；冲突保留编辑内容，并要求选择另一位置另存。BOM 保留为原始 U+FEFF 正文，CRLF 和 NUL 也不做转换。保存旧快照时的新编辑保持 dirty。关闭单个文档期间冻结该文档的编辑和原生 Undo／Redo；保存完成再次检查新版本，不能据旧快照成功删除新编辑。恢复保存成功后才移除关闭文档；失败时保留原容器和撤销历史。打开、测试导入和恢复导出／备份加载均跟踪生命周期，进行中拒绝关闭；`flush` 和 shutdown 等待已有恢复任务。
+源文件操作在后台使用 `NSFileCoordinator`。写入先在协调区域验证原磁盘摘要，再原子写入精确 UTF-8 字节；冲突保留编辑内容，并要求选择另一位置另存。BOM 保留为原始 U+FEFF 正文，CRLF 和 NUL 也不做转换。保存旧快照时的新编辑保持 dirty。关闭单个文档期间冻结该文档的编辑和原生 Undo／Redo；保存完成再次检查新版本，不能据旧快照成功删除新编辑。关闭目标先从逻辑文档列表移除，其原生容器继续隐藏挂载；恢复保存成功后才销毁容器，替换前失败则把同一文档插回原位置并恢复选中项和撤销历史。打开、测试导入和恢复导出／备份加载均跟踪生命周期，进行中拒绝关闭；`flush` 和 shutdown 等待已有恢复任务。
 
 `NSFileCoordinator` 及 Core 锁仅协调遵守协议的 writer，摘要检测属于乐观校验，不能宣称阻止绕过协调的外部程序在最终替换时竞争。这轮已验证源文件冲突、受控协调 writer 阻塞期间的新编辑、恢复导出持锁时关闭拒绝和 flush 等待，以及真实 I/O 失败返回；尚未做断电／磁盘设备故障验证。两个原生组件的恢复均验证 BOM、CRLF、NUL、CJK、emoji 和选区精确往返；真实系统输入法与最低系统仍需目标机矩阵。
 
@@ -141,6 +141,78 @@ checker 偏好使用独立命名空间 `org.cpeditor.native.macos.checker`、版
 
 新增配置呈现回归在后台测试窗口中实际创建附属 sheet，读取原生 `NSTextView` 的首次内容，输入未应用草稿并通过 Escape 取消、再次呈现后验证内容恢复；同时通过 Return 触发真实 Apply，验证无效版本保持配置和草稿、有效替换才启用 checker 并关闭。宿主提供标准 SwiftUI item 呈现环境，验证独立编辑器 sheet 的原生生命周期；RunPanelView 的实际配置按钮入口、修复后的前台首次正文和重启后运行也已由根 agent 复验通过。
 
+## Companion 文件收件箱
+
+本轮自动验证时间：2026-11-17T02:56:56+08:00，实际执行主机为 macOS arm64。工具栏和 **Companion Inbox** 菜单提供独立收件箱 sheet；**Import JSON…** 使用 `NSOpenPanel` 选择原始 Competitive Companion JSON 文件。当前原生链路为文件导入，不在本应用中启动 HTTP listener；浏览器 POST、Windows、最低 macOS 和真实系统 IME 尚未由这一轮验证。
+
+`CompanionController` 管理读取、分页和显式应用，`NativeCoreBridge/CompanionModels.swift` 集中定义 C ABI v1 的字段、请求和响应；`CoreCoordinator` 在后台 actor 调用四个真实 C ABI，并在返回后释放 Core buffer。文件通过既有 `CoordinatedSourceFile` 有界循环读取，UTF-8 校验后按原始字节构造文本，不能用 Foundation BOM 清除或 JSON DOM 重序列化改变原件。来源 URL、filename、Java 类名和限制均只作为来源元数据；导入使用本机已选工具链和本地模板，不自动打开 URL／源路径、不自动编译。
+
+`Resources/companion.json` 定义收件箱路径模板、存储 owner、锁超时、原件大小、分页和预览预算、初始源码模板及状态文案映射。默认每页最多 8 条／64 MiB，实际页预算由 Core 计算；从 0 刷新能读到不增加 sequence 的 Applied 变化。继续翻页时检查 Inbox 身份、revision 和摘要，历史变化则重新读取第一页，不能将两个版本混在一份列表里。样例预览有界，含 NUL／非文本控制字节时显示 hex，完整 Input／Expected 原件仍在收件箱及应用后的样例中；空输出保留为存在的空 Expected。
+
+```mermaid
+sequenceDiagram
+    participant UI as 原生收件箱
+    participant Core as 后台 CoreCoordinator
+    participant WS as Workspace
+    participant Recovery as RecoveryController
+    UI->>Core: accept 原始 JSON 字符串
+    Core-->>UI: Pending 持久记录
+    UI->>Core: prepare 已提交 workspace 快照
+    Core-->>UI: 新文档＋workspace 回执候选
+    UI->>WS: 合并新增文档和受验证的回执 delta
+    Note over WS: 既有 editor、源码、样例和撤销历史继续沿用
+    UI->>Recovery: flush 原子恢复保存
+    Recovery-->>UI: Saved 并实际替换恢复文件
+    UI->>Core: mark_applied 检查实际磁盘回执
+    Core-->>UI: Applied／保持 Pending 的明确状态
+```
+
+Core 的完整候选以原先的 committed 快照为基础。`Workspace.appendCompanionCandidate` 验证既有文档前缀和非回执偏好没有变化，只创建新增文档的真实编辑器，再替换回执 owner；不会用旧候选重建既有 editor。当前源码、样例、选区和 UndoManager 在 prepare／保存期间继续沿用。`RecoveryController.flush` 串行保存包含新文档和回执的实际恢复记录，保存期间的新编辑由后续快照写入；只有保存成功后才调用 `mark_applied`。保存失败保留内存内容、回执和 Pending，用户可先另存恢复文件，再次 Apply 通过已有回执确认；`DurabilityUnknown` 重新读取状态，不盲重发载荷。
+
+第一次实际接纳前，将 Inbox 绝对路径和 workspace 身份保存到独立 owner `org.cpeditor.native.macos.companion.storage` v1，先完成恢复保存再 accept。普通启动不为未使用的 Inbox 强占偏好槽位。恢复 **Save As** 沿用已绑定 Inbox 位置，重启后仍可看到旧 Pending／Applied 与去重历史；备份若引入、改变或省略当前 binding，操作拒绝替换工作区并保留原件。已有 binding 时还要求候选 workspace、候选 binding、当前 workspace 和当前 binding 身份一致，且存储路径与实际运行时 Inbox 一致，拒绝 workspace Y 携带旧 binding X 的合法 Core 记录。两端均无 binding 时仍可从损坏恢复文件加载旧备份。恢复、Inbox、备份、锁及已打开源文件路径通过标准化／符号链接／inode 别名检查保护，恢复另存不能覆盖源码，源码保存不能覆盖任何已知 workspace 存储文件。
+
+`CompanionProvenance` 复用桥接层的严格有界 JSON 解析器读取 `cpeditor.native.companion.document` 和 `cpeditor.native.companion.receipts` v1，拒绝未知／重复字段、无效身份、非 boolean 能力与未来自身版本（包括 v1＋future 共存）。新文档携带 Core 的普通 stdio 能力，Run All 的 UI 和协调器均在实际提交前检查；不兼容来源和不可验证的未来来源在重启恢复后仍禁用普通运行。缺少 provenance 的手建文档按既有 stdio 规则运行。所有不透明偏好原文保留，满容量时拒绝新 binding／导入，不删除已有 owner 腾空间。
+
+更新载荷创建独立文档和样例，保留旧导入文档的源码与用户新增样例；相同载荷重复接纳不创建副本。workspace 回执在文档被删除后仍保存，重启再 Apply 不重建已删除文档。
+
+本轮完整 70 项 Swift 测试通过，其中 Companion 测试覆盖真实四 ABI／buffer 配额往返、原文大整数与 NUL／CRLF／空 Expected、尚未保存回执不能确认 Applied、过期 prepare 候选后的新编辑合并、恢复锁阻塞期间新源码／样例与 Undo 保留、实际保存失败仍 Pending 后另存恢复确认、重复与更新、完整分页、稳定 Inbox 另存／重启、删除防重放、源码／Inbox 别名拒绝、满额与未来存储 owner 原件保存，以及来源能力未来版本的重启门禁。原生测试构造真实 AppKit 编辑器和窗口；根 agent 已补齐前台文件导入、Applied 回执、来源门禁与重启验收，证据见本文末尾。HTTP／浏览器扩展端到端仍未验收。
+
+可复现的独立前台检查入口（创建自己的恢复目录后执行）：
+
+```sh
+./script/build_and_run.sh --verify --editor sttextview --recovery-file "$PWD/out/macos/companion-verification/workspace.json"
+```
+
+在 **Companion Inbox → Import JSON…** 中选择 `contracts/fixtures/companion/basic.json`，检查 Pending、样例和来源元数据，再点击 **Apply to Workspace**。以 `unsupported.json` 检查来源说明与 Run All 禁用。前台操作及重启证据应由验收者另行记录，不修改参考 fixture 或用户默认恢复文件。
+
+## revision 耗尽与最后一次持久提交
+
+修复验证时间：2026-11-17T03:34:27+08:00。独立审查发现旧的 MAX-1 工作区可保存最后修改为 MAX，但重启被恢复校验拒绝，随后创建空文档。当前允许 MAX 工作区和 MAX 文档恢复：MAX 工作区保留完整 `WorkspaceSessionRecord` 原件和实际磁盘摘要；MAX 文档保留完整 `SessionDocumentRecord` 原件。来源正文、ID、revision、保存点、测试字节、工具链身份和不透明偏好都不通过重新生成默认值替换。没有文档的 MAX 记录也不自动创建新文档。
+
+`PersistenceGate` 是 MainActor 上的持久化能力门禁。打开、源保存、关闭、测试／工具链导入、恢复副本／备份及 Companion 文档应用在异步边界持有唯一 operation token；token 使用单调身份，不饱和、不复用。最后提交要求没有其他持久操作。恢复控制器在同一个 MainActor 段捕获真实 native buffer、检查未结束的组合输入并冻结 source／tests／metadata 和原生 Undo 命令，再创建不可变候选；捕获和冻结之间没有 await。不强制提交 marked text，也不靠延时规避并发。
+
+写入前失败且恢复文件没有替换时解除临时冻结，用户仍能编辑并保存 C；一旦 MAX 记录实际替换，保持只读，即使响应是未知持久性也不能接受无法再保存的新修改。最后快照会等待已经在写入的源文件操作完成：源文件可保存旧快照 B，恢复记录则保存随后提交的 C 和 B 的保存点。直接从外部改变 committed 模型而让 native buffer 保留旧正文时，最后捕获明确拒绝不一致状态，保留两边，不能用旧 buffer 静默覆盖新 committed 数据。
+
+只读状态同时由 `SourceDocument`、`NativeEditorSession`、Workspace 和 RunController 的能力门禁及原生控件状态约束；源码、样例、工具链／checker 配置、工作区设置和保存点不能在预算耗尽后继续变化。用户仍可查看和选择文本，查看位置只作为临时 UI 状态，不重写冻结记录中的选区／选中文档。MAX 文档的 source 和完整文档记录保持只读，其他仍有 workspace 预算的文档可以正常使用。
+
+未改变的 MAX 工作区通过 Core 重新读取实际恢复文件，比较完整记录和 `disk_digest` token 后允许关闭；不递增、不再次替换文件。外部改过记录或 token 时保留外部文件并拒绝确认。恢复另存若内容改变必须申请 next revision；未改变的副本沿用相同 revision。MAX-1 的 changed copy 仅能把自己独占的 operation 原子升级为最后提交，不能用旧 workspace revision 保存新 C 来绕过预算。
+
+Companion 的同步 delta 合并完成后显式结束持久 operation，再在 `isOperating` 仍保护的串行链路中执行最后 flush 和 mark。MAX 已保存而 Inbox 仍 Pending 时，只允许 `prepare` 返回 AlreadyApplied 的实际回执确认重试，不能追加新文档。首次 Inbox binding 如果仅剩一次 workspace revision，在安装 binding 或 accept 写盘前明确拒绝；绑定保存和文档应用需要足够预算。
+
+首轮新增 9 项自动回归覆盖两组件的 MAX 工作区精确恢复和无额外 revision 关闭、MAX 文档完整原件与 source／tests／metadata／Undo 门禁、最后替换前失败解冻后 C 的另存恢复、真实 `NSFileCoordinator` 源写入 B 期间提交 C、组合输入未结束时拒绝最后提交、MAX 实际文件／token 外部冲突、备份引入不同 Inbox binding 的拒绝与 Pending 原件保留，以及真实 Core 的 MAX-1 导入→MAX→Applied 和只读已保存回执确认。
+
+关闭事务补充验证时间：2026-11-17T03:57:35+08:00。MAX-1 关闭最后一个干净文档时，先同步移除逻辑模型并释放关闭操作的 token，再在关闭状态仍保护的链路中完成最后 flush；原容器通过 `editorDeckSessions` 保持隐藏挂载，避免 SwiftUI 卸载时重建内部文本视图。替换前失败只回滚关闭目标，保留同一 native buffer、Redo 历史、原位置与选中项；已经替换为 MAX 时沿用精确的空记录并销毁目标，不插回无法再持久化的幽灵标签。关闭尚未完成时，目标源文件仍参与恢复路径别名保护。
+
+补充 3 项注册测试覆盖两组件的最后空文档关闭→MAX 空记录→重启无幽灵、真实 `NSHostingView`／`NSWindow` 挂载下的原生插入→Undo→恢复锁冲突失败→同一 buffer／Redo 回滚，以及候选 workspace 身份与已有 Inbox owner 不匹配时保留 live editor、Inbox 原始文件和 Pending。此轮历史测试日志为本机 `/tmp/cpn-macos-close-rootcore-test.log`；后续跨标签结果与源写入完成回执回归纳入当前 70 项，最终证据位于 `out/macos/session-resume-verification`。Windows CI 和前台 CUA 分别取证，不混用平台结论。
+
+## 运行结果归属与源写入完成回执
+
+RunController 按原始字节 document ID 保存独立结果、状态与不可复用的运行对象身份。切换标签只查询当前文档记录；异步事件仅能写回仍持有同一运行身份的记录。关闭失败保留已有结果，实际移除／恢复替换后释放记录并取消旧任务，晚到终态不能重建已删除结果；同 ID 的新会话也不能继承旧会话结果。结果保留在内存，不作为恢复会话持久内容。
+
+源文件写入在仍有文档预算时为当前 exact 快照领取唯一 `SourceSaveLease`。写入 B 期间最后原生编辑 C 达到文档 MAX，已开始的写入仍可按同一凭证单次确认 B 的实际保存点及另存路径；C 保持未保存并恢复为完整 MAX 文档。失败撤销凭证，不更新保存点；跨文档、重复或已取消凭证均拒绝。新的保存命令在原生捕获后再次检查预算，CodeEditor 的延后捕获若推进到 MAX，不会开始新 I/O。workspace 最后提交仍等待已有持久操作结束。
+
+新增回归覆盖两文档分别运行／取消、关闭后的晚事件、同 ID 恢复替换、关闭失败结果保留，以及真实 `NSFileCoordinator` 阻塞下的 B／C 文档 MAX 竞态（同路径及 Save As）、失败重试、CodeEditor 最后捕获和凭证单次消费。独立原失败探针修复复验保留于 `out/macos/session-resume-review/verification.json`；跨标签独立真实 Core 探针位于 `out/macos/run-results-review/verification.json`。
+
 ## 固定依赖和许可
 
 直接依赖固定到不可变提交，传递依赖记录在 `Package.resolved`。本原型沿用主仓库 GPLv3 路径使用 STTextView，不使用其商业许可路径；后续发布必须保留适用许可和对应源码。
@@ -160,3 +232,6 @@ checker 偏好使用独立命名空间 `org.cpeditor.native.macos.checker`、版
 根 agent 在 2026-11-17T00:44:44+08:00 完成独立恢复文件的真实 CUA 验收：原生缓冲区追加中文／emoji／组合字符，设置7+8样例并判为AC；正常退出后重启，未保存正文、选区和样例恢复。随后注入外部源文件修改，Save明确拒绝覆盖，Save As将缓冲区保存到新文件，原文件保留外部修改。磁盘核对恢复正文／摘要／保存点、文档ID／revision、样例原始字节以及另存结果完全一致；恢复后的原生Run All再次AC。该验收使用out/macos/verification的独立测试数据，不修改参考fixture或用户默认恢复文件。
 
 根 agent 在 2026-11-17T01:46:38+08:00 完成独立 checker 夹具的真实 CUA 验收：verify 模式判为 AC，checker stdout 25 字节、stderr 12 字节（含 NUL／0xFF）与解答 8 字节均显示对应 hex；compare 模式判为 WA、exit 7 为独立 CheckerError 并保留 0.5 输出，无答案为 Unchecked。非法浮点版本显示校验错误。退出重启后开关关闭且 JSON 原件完整恢复；修复后的首次 checker 和首次 toolchain 配置窗口均显示当前正文，Escape 取消保留配置，重新启用后再次运行得到相同 checker 错误语义。磁盘核对配置原始 JSON、单一文档 ID／revision、源码 SHA-256 和 raw 样例全部一致，41 项 Swift 测试、脚本打包启动及严格 codesign 验证通过。精简证据在本机 `out/macos/checker-verification/20261117T012243+0800/verification.json`；未把此局部能力当作最低系统、系统 IME 或完整产品验收。
+
+
+根 agent 在 2026-11-17T12:37:34+08:00 完成独立目录 `out/macos/session-resume-verification` 的收件箱前台 CUA：通过系统文件选择器接纳 basic.json，先显示 Pending，Apply 在恢复回执保存后显示 Applied；原生粘贴未保存解答，导入的 `7 8\n`／`15\n` 得到 AC。unsupported.json 的交互、未知测试及非 stdio 模式完整显示为来源说明，应用后 Run All 禁用。退出重启恢复源码、样例、选区与两个 Applied 项，再次 Apply 明确 AlreadyApplied，磁盘仍为原三个文档且无新增副本。原始载荷逐字节等于固定 fixture，workspace 含两份对应回执；截图、AX 与磁盘核对汇总在 `verification.json`。随后源写入 lease 修复通过最终 70 项测试、重新打包启动和严格 codesign 检查；未重复前台收件箱流程，也未声称浏览器 HTTP、最低系统或系统 IME 验收。

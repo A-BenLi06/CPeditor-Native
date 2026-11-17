@@ -42,12 +42,12 @@ struct WorkspaceView: View {
                         Text(notice).textSelection(.enabled)
                         Spacer()
                         Button(L10n.string("save_recovery_as")) { Task { await recovery.saveElsewhere() } }
-                        Button(L10n.string("load_recovery_backup")) { Task { await recovery.loadBackup() } }
+                        Button(L10n.string("load_recovery_backup")) { Task { await recovery.loadBackup() } }.disabled(!workspace.persistentChangesAllowed)
                         Button(L10n.string("retry_recovery")) { Task { await recovery.retry() } }
                     }.font(.caption).padding(10).background(.quaternary).disabled(workspace.isBusy)
                 }
                 ZStack {
-                    NativeEditorDeck(sessions: workspace.sessions, selectedID: workspace.selection,
+                    NativeEditorDeck(sessions: workspace.editorDeckSessions, selectedID: workspace.selection,
                                      wrapText: workspace.wrapText, showMinimap: workspace.showMinimap)
                     if workspace.activeSession == nil {
                         ContentUnavailableView(L10n.string("no_document"), systemImage: "doc.text",
@@ -71,18 +71,22 @@ struct WorkspaceView: View {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button { Task { await workspace.openPanel() } } label: {
                     Label(L10n.string("open_document"), systemImage: "folder")
-                }.disabled(workspace.isBusy)
+                }.disabled(workspace.isBusy || !workspace.persistentChangesAllowed)
                 Button { Task { await workspace.save() } } label: {
                     Label(L10n.string("save"), systemImage: "square.and.arrow.down")
-                }.disabled(workspace.activeSession == nil || workspace.isBusy)
+                }.disabled(workspace.activeSession?.canMutatePersistence != true || workspace.isBusy || !workspace.persistentChangesAllowed)
+                Button { workspace.companion.isPresented = true } label: {
+                    Label(L10n.string("companion_title"), systemImage: "tray.and.arrow.down")
+                }.disabled(workspace.isLoading || workspace.isClosing)
                 Toggle(isOn: $workspace.wrapText) {
                     Label(L10n.string("wrap_lines"), systemImage: "text.alignleft")
-                }.disabled(workspace.isLoading || workspace.isClosing)
+                }.disabled(workspace.isLoading || workspace.isClosing || !workspace.persistentChangesAllowed)
                 Toggle(isOn: $workspace.showMinimap) {
                     Label(L10n.string("show_minimap"), systemImage: "sidebar.right")
-                }.disabled(workspace.activeSession?.document.editorKind != .codeEditorView || workspace.isLoading || workspace.isClosing)
+                }.disabled(workspace.activeSession?.document.editorKind != .codeEditorView || workspace.isLoading || workspace.isClosing || !workspace.persistentChangesAllowed)
             }
         }
+        .sheet(isPresented: Binding(get: { workspace.companion.isPresented }, set: { workspace.companion.isPresented = $0 })) { CompanionInboxView(controller: workspace.companion) }
         .focusedSceneValue(\.editorWorkspace, workspace)
         .task { await workspace.bootstrap() }
         .background(WindowCloseGuard(workspace: workspace).frame(width: 0, height: 0))

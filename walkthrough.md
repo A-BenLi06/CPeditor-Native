@@ -459,3 +459,20 @@ Core 规则区分空输入、缺少预期输出与预期输出为空、checker �
 - a4d08e3真实Server2022 x64 Debug／Release已通过Core17/17、Runner／Session／Companion六组与WinUIEdit；新增MainWindow.Companion.cpp宿主编译失败，全部首发C2653是UiStrings未导入，后续format／text类型错误为同一未解析类型的表达式失败。原完整日志与阶段报告保留out/windows/ci/43947075390，root-summary.json明确宿主未通过。
 - 新编译单位与既有MainWindow.xaml.cpp采用相同的using cpn::windows::UiStrings，保持UiStrings.h的正式命名空间、资源格式化及原生头依赖；不复制格式化函数或屏蔽编译错误。根核对正式声明和头引用，whitespace检查通过。
 - 本机仍为macOS ARM64，未做MSVC；完整宿主由本次提交的CI复验，目标Windows10／IME／UU／DPI和原生扩展继续由脚本实测。macOS收件箱和跨标签结果修复未纳入本提交。
+
+
+## 2026-11-17T12:41:43+08:00 — macOS Companion 收件箱、最终版本事务与文档结果归属
+
+### 改动与思路
+
+- 完成上一会话遗留的 macOS 原生文件收件箱：四个 C ABI 的 Swift actor 桥接、版本化模型／严格来源与回执校验、原生英文资源、独立收件箱 sheet 和有界预览。首次接纳前持久绑定稳定 Inbox 路径，恢复另存与重启沿用同一 owner；Apply 合并最新用户编辑，恢复文件实际保存文档和回执后才 mark Applied。重复／更新／删除防重放、来源普通运行能力和存储别名保护均接入。macOS 此次不含原生 HTTP 启停。
+- PersistenceGate 在异步持久操作期间持有唯一 token，最终 workspace 提交排他捕获真实 native buffer 并冻结完整记录；MAX 文档／工作区精确恢复只读，未改 MAX 重新核对实际文件后可关闭。最后文档移除先完成候选模型，失败原位保留同一编辑器／Redo，已替换 MAX 时保留精确空记录，不产生幽灵标签。
+- RunController 按字节文档身份及独立运行对象保留状态／结果；切换标签不串台，移除或恢复替换释放记录并取消，晚事件不能重建旧结果。失败关闭保留结果，同 ID 新会话不继承旧任务。
+- 本轮独立审查真实复现源写入 B 期间最后编辑 C 达文档 MAX 后，已完成 I/O 的保存点被只读门禁拒绝。SourceSaveLease 仅在可变时为 exact 快照发放，成功按同一 live 凭证单次登记 B 的保存点／另存路径，失败撤销；native capture 后再次检查新写入资格，避免 deferred capture 达 MAX 后仍开始 I/O。已有 workspace operation 覆盖完成确认，最终恢复捕获等待真实保存点。
+
+### 验证与范围
+
+- 实际主机 macOS27.0.1 arm64／Xcode27.2。最终完整 Swift 测试70项（模型8＋原生47＋桥接15）通过；真实NSFileCoordinator的B／C到文档MAX同路径及Save As、失败重试、deferred capture和凭证隔离回归通过。独立原失败probe修复复验退出0，磁盘B、模型C/MAX、恢复保存点B准确；独立跨标签／晚事件／同ID／只读运行与凭证静态复核通过。
+- 独立目录的前台CUA通过系统选择器接纳basic与unsupported，Pending→实际恢复回执→Applied；原生未保存解答运行7+8样例AC，不兼容模式禁用Run All；退出重启保留源码／样例／两个Applied，再Apply不新增文档。逐字节核对fixture、两个回执、稳定ID与原三文档通过。前台收件箱流程在最后源写入lease修复前执行，随后最终70项与原探针验证修复，重新打包／LaunchServices进程验证及严格codesign通过；最初因测试sheet未关而退出75的脚本记录保留，正常退出后重跑成功。
+- 精简证据：out/macos/session-resume-verification/verification.json、session-resume-review/verification.json、run-results-review/verification.json；前轮final-audit的MAX／关闭／备份冲突证据保留。源码／资源不修改研究子模块。中文README／状态／claims更新。
+- 独立核验57f4fe7的Windows CI https://github.com/A-BenLi06/CPeditor-Native/actions/runs/44009461078 ：实际Server2022／PowerShell7.6.10，两配置各21阶段、Core17/17、Runner／Session／Companion和完整宿主通过。out/windows/ci/44009461078/ci-readonly-audit保留报告与SHA；20个人工场景均not_run／passed:null。未声称Windows10、最低macOS／Intel、系统IME／UU／DPI／虚拟桌面、浏览器扩展端到端或性能预算通过；启动／内存／编辑性能测量继续作为后续工作。

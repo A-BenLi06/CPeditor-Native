@@ -150,28 +150,57 @@ private struct RecoveryLocationPreference: Codable {
             while self.pending, !self.isBlocked {
                 self.pending = false
                 guard let workspace = self.workspace else { break }
+                var finalLease = false
+                var recoveryReplaced = false
                 do {
-                    let contents = try self.content(of: workspace)
+                    if self.revision == UInt64.max {
+                        _ = await self.confirmFrozenSession()
+                        continue
+                    }
+                    var contents = try self.content(of: workspace)
                     if !self.forceSave, contents == self.lastContent, self.expectedDiskDigest != nil { continue }
-                    guard self.revision < UInt64.max else { throw DocumentError.revisionExhausted }
+                    if self.revision == UInt64.max - 1 {
+                        guard workspace.persistence.operationCount == 0 else { self.pending = true; break }
+                        // 捕获、检查组合输入和冻结属于同一个 MainActor 段，中间没有 await。
+                        guard workspace.captureForRecoveryReplacement() else {
+                            self.notice = workspace.errorMessage; self.pending = true; break
+                        }
+                        contents = try self.content(of: workspace)
+                        if !self.forceSave, contents == self.lastContent, self.expectedDiskDigest != nil { continue }
+                        guard workspace.persistence.tryBeginFinal() else { self.pending = true; break }
+                        finalLease = true
+                    }
                     let record = try workspace.sessionRecord(revision: self.revision + 1, configuration: self.configuration)
+                    if finalLease { try workspace.captureFrozenSession(record, configuration: self.configuration) }
                     self.cancellationRequested = false
                     self.isSaving = true
+                    try await Self.validateSourcePaths(record, paths: self.paths, additionalSourcePaths: workspace.retainedCloseSession?.document.url.map { [$0.path] } ?? [])
                     let response = try await self.coordinator.saveSession(record, paths: self.paths,
                         expectedDiskDigest: self.expectedDiskDigest, lockTimeoutMS: self.configuration.lockTimeoutMS)
-                    if response.recoveryReplaced {
+                    recoveryReplaced = response.recoveryReplaced
+                    if finalLease {
+                        if !recoveryReplaced { workspace.releaseFailedFinalSession() }
+                        workspace.persistence.finishFinal(replaced: recoveryReplaced)
+                        finalLease = false
+                    }
+                    if recoveryReplaced {
                         self.expectedDiskDigest = response.diskDigest
                         self.revision = record.revision
-                        self.lastContent = contents
+                        self.lastContent = self.revision == UInt64.max ? try self.content(of: workspace) : contents
                     }
-                    if response.status != .saved {
+                    if response.status != .saved || !response.recoveryReplaced {
                         self.isBlocked = true
                         self.forceSave = true
                         self.notice = L10n.sessionSaveStatus(response.status) + " " + response.detail
                     } else {
                         self.forceSave = false
+                        if self.revision == UInt64.max { self.notice = L10n.string("workspace_revision_frozen") }
                     }
                 } catch {
+                    if finalLease {
+                        if !recoveryReplaced { workspace.releaseFailedFinalSession() }
+                        workspace.persistence.finishFinal(replaced: recoveryReplaced)
+                    }
                     self.isBlocked = true
                     self.notice = self.cancellationRequested ? L10n.sessionSaveStatus(.cancelled) : L10n.describe(error)
                 }
@@ -181,18 +210,54 @@ private struct RecoveryLocationPreference: Codable {
         }
     }
 
+    private func confirmFrozenSession() async -> Bool {
+        guard revision == UInt64.max, let workspace else { return false }
+        do {
+            guard workspace.captureForRecoveryReplacement() else { notice = workspace.errorMessage; isBlocked = true; return false }
+            let record = try workspace.sessionRecord(revision: revision, configuration: configuration)
+            let loaded = try await coordinator.loadSession(at: paths.recoveryFile)
+            guard loaded.status == .loaded, let actual = loaded.session, let digest = loaded.diskDigest else { throw DocumentError.diskConflict }
+            let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+            guard try encoder.encode(actual) == encoder.encode(record), expectedDiskDigest == nil || digest == expectedDiskDigest else { throw DocumentError.diskConflict }
+            expectedDiskDigest = digest
+            lastContent = try content(of: workspace)
+            isBlocked = false; forceSave = false; pending = false
+            notice = L10n.string("workspace_revision_frozen")
+            return true
+        } catch { isBlocked = true; notice = L10n.describe(error); return false }
+    }
+
     func flush() async -> Bool {
         guard !isLoading, !stopping else { return false }
         if let copyTask { _ = await copyTask.value }
         if let restoreTask { await restoreTask.value }
         requestSave()
         if let saveTask { await saveTask.value }
+        if revision == UInt64.max { return await confirmFrozenSession() }
         // 同一 actor 上检查快照，覆盖保存期间发生但观察回调尚未排队的变更。
         if !isBlocked, let workspace, (try? content(of: workspace)) != lastContent {
             requestSave()
             if let saveTask { await saveTask.value }
         }
-        return !isBlocked
+        return !isBlocked && !pending
+    }
+
+    nonisolated private static func validateSourcePaths(_ record: WorkspaceSessionRecord, paths: SessionPaths, additionalSourcePaths: [String] = []) async throws {
+        try await Task.detached {
+            for source in record.documents.compactMap(\.originalPath) + additionalSourcePaths {
+                for reserved in [paths.recoveryFile, paths.backupFile, paths.lockFile] {
+                    if try CoordinatedSourceFile.aliases(URL(fileURLWithPath: source), URL(fileURLWithPath: reserved)) {
+                        throw DocumentError.reservedRecoveryPath
+                    }
+                }
+            }
+        }.value
+    }
+
+    func snapshotForCompanion() throws -> WorkspaceSessionRecord {
+        guard !isLoading, !isBlocked, !isChangingLocation, !isRestoring, !stopping, let workspace else { throw WireError.busy }
+        guard revision < UInt64.max else { throw DocumentError.revisionExhausted }
+        return try workspace.sessionRecord(revision: revision, configuration: configuration)
     }
 
     func cancelSave() {
@@ -212,34 +277,41 @@ private struct RecoveryLocationPreference: Codable {
 
     func saveElsewhere() async -> Bool {
         guard workspace != nil, !isChangingLocation, !isRestoring else { return false }
+        guard let workspace, let operation = try? workspace.persistence.beginOperation(readOnlyExport: true) else { return false }
+        defer { workspace.persistence.endOperation(operation) }
         isChangingLocation = true
         let panel = NSSavePanel()
         panel.nameFieldStringValue = configuration.recoveryFilename
         let result = panel.runModal()
         isChangingLocation = false
         guard result == .OK, let file = panel.url else { return false }
+        workspace.persistence.endOperation(operation)
         return await saveCopy(to: file)
     }
 
     @discardableResult func saveCopy(to file: URL) async -> Bool {
-        guard copyTask == nil, !isChangingLocation, !isRestoring, !isLoading, workspace != nil else { return false }
+        guard copyTask == nil, !isChangingLocation, !isRestoring, !isLoading, workspace != nil, workspace?.companion.isOperating != true else { return false }
+        guard let workspace, let operation = try? workspace.persistence.beginOperation(readOnlyExport: true) else { return false }
+        defer { workspace.persistence.endOperation(operation) }
         isChangingLocation = true
-        let task = Task { @MainActor in await self.performSaveCopy(to: file) }
+        let task = Task { @MainActor in await self.performSaveCopy(to: file, operation: operation) }
         copyTask = task
         let saved = await task.value
         copyTask = nil
         return saved
     }
 
-    private func performSaveCopy(to file: URL) async -> Bool {
+    private func performSaveCopy(to file: URL, operation: UInt64) async -> Bool {
         guard let workspace else { isChangingLocation = false; return false }
         defer { isChangingLocation = false; isSaving = false; exportCoordinator = nil; requestSave() }
         if let saveTask { await saveTask.value }
         let newPaths = configuration.paths(for: file)
         do {
             let oldPaths = paths
+            let inboxPaths = workspace.companion.paths?.all ?? []
+            let sourcePaths = workspace.editorDeckSessions.compactMap { $0.document.url?.path }
             let distinct = try await Task.detached {
-                for old in [oldPaths.recoveryFile, oldPaths.backupFile, oldPaths.lockFile] {
+                for old in [oldPaths.recoveryFile, oldPaths.backupFile, oldPaths.lockFile] + inboxPaths + sourcePaths {
                     for new in [newPaths.recoveryFile, newPaths.backupFile, newPaths.lockFile] {
                         if try CoordinatedSourceFile.aliases(URL(fileURLWithPath: new), URL(fileURLWithPath: old)) { return false }
                     }
@@ -247,31 +319,65 @@ private struct RecoveryLocationPreference: Codable {
                 return true
             }.value
             guard distinct else { notice = L10n.string("choose_distinct_recovery"); return false }
-            let record = try workspace.sessionRecord(revision: revision, configuration: configuration)
-            let contents = try content(of: workspace)
-            let fresh = CoreCoordinator()
-            cancellationRequested = false
-            exportCoordinator = fresh; isSaving = true
-            let response = try await fresh.saveSession(record, paths: newPaths, expectedDiskDigest: nil,
-                                                      lockTimeoutMS: configuration.lockTimeoutMS)
-            await fresh.shutdown()
-            guard response.status == .saved else { notice = L10n.sessionSaveStatus(response.status) + " " + response.detail; return false }
-            await coordinator.shutdown(); coordinator = CoreCoordinator()
-            paths = newPaths; expectedDiskDigest = response.diskDigest
-            lastContent = contents
-            isBlocked = false; notice = nil
-            forceSave = false
-            if persistsLocation {
-                let preference = RecoveryLocationPreference(schemaVersion: 1, path: newPaths.recoveryFile)
-                UserDefaults.standard.set(try JSONEncoder().encode(preference), forKey: configuration.locationPreferenceKey)
+            var contents = try content(of: workspace)
+            var changed = contents != lastContent
+            var finalLease = false
+            var replaced = false
+            do {
+                if changed, revision == UInt64.max - 1 {
+                    guard workspace.captureForRecoveryReplacement() else { notice = workspace.errorMessage; return false }
+                    contents = try content(of: workspace); changed = contents != lastContent
+                    if changed {
+                        guard workspace.persistence.tryBeginFinal(replacing: operation) else { notice = L10n.string("wait_for_file_operation"); return false }
+                        finalLease = true
+                    }
+                }
+                guard !changed || revision < UInt64.max else { throw DocumentError.revisionExhausted }
+                let targetRevision = changed ? revision + 1 : revision
+                let record = try workspace.sessionRecord(revision: targetRevision, configuration: configuration)
+                if finalLease { try workspace.captureFrozenSession(record, configuration: configuration) }
+                let fresh = CoreCoordinator()
+                cancellationRequested = false
+                exportCoordinator = fresh; isSaving = true
+                let response = try await fresh.saveSession(record, paths: newPaths, expectedDiskDigest: nil,
+                                                          lockTimeoutMS: configuration.lockTimeoutMS)
+                await fresh.shutdown()
+                replaced = response.recoveryReplaced
+                if finalLease {
+                    if !replaced { workspace.releaseFailedFinalSession() }
+                    workspace.persistence.finishFinal(replaced: replaced); finalLease = false
+                }
+                if replaced {
+                    await coordinator.shutdown(); coordinator = CoreCoordinator()
+                    paths = newPaths; expectedDiskDigest = response.diskDigest; revision = record.revision
+                    lastContent = revision == UInt64.max ? try content(of: workspace) : contents
+                    if persistsLocation {
+                        let preference = RecoveryLocationPreference(schemaVersion: 1, path: newPaths.recoveryFile)
+                        UserDefaults.standard.set(try JSONEncoder().encode(preference), forKey: configuration.locationPreferenceKey)
+                    }
+                }
+                guard response.status == .saved, replaced else {
+                    if replaced { isBlocked = true; forceSave = true }
+                    notice = L10n.sessionSaveStatus(response.status) + " " + response.detail; return false
+                }
+                isBlocked = false; notice = revision == UInt64.max ? L10n.string("workspace_revision_frozen") : nil
+                forceSave = false
+                requestSave()
+            } catch {
+                if finalLease {
+                    if !replaced { workspace.releaseFailedFinalSession() }
+                    workspace.persistence.finishFinal(replaced: replaced)
+                }
+                throw error
             }
-            requestSave()
             return true
         } catch { notice = cancellationRequested ? L10n.sessionSaveStatus(.cancelled) : L10n.describe(error); return false }
     }
 
     func loadBackup() async {
-        guard !isLoading, !isSaving, !isChangingLocation, !isRestoring, workspace != nil else { return }
+        guard !isLoading, !isSaving, !isChangingLocation, !isRestoring, workspace != nil, workspace?.companion.isOperating != true else { return }
+        guard let workspace, let operation = try? workspace.persistence.beginOperation() else { return }
+        defer { workspace.persistence.endOperation(operation) }
         isRestoring = true
         let task = Task { @MainActor in await self.performLoadBackup() }
         restoreTask = task
@@ -295,6 +401,7 @@ private struct RecoveryLocationPreference: Codable {
             }
             guard workspace.captureForRecoveryReplacement() else { notice = workspace.errorMessage; return }
             guard try content(of: workspace) == before else { notice = L10n.string("save_before_restore"); return }
+            guard workspace.companionBindingMatches(candidate) else { notice = L10n.string("companion_backup_binding"); return }
             try workspace.applyRecoveryCandidate(candidate, configuration: configuration)
             revision = candidate.revision
             lastContent = try content(of: workspace)

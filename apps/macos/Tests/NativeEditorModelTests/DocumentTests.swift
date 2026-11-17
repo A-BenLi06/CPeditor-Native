@@ -36,6 +36,32 @@ import Testing
         }
     }
 
+    @Test func sourceSaveCompletionRequiresItsLiveLeaseAndConsumesItOnce() throws {
+        let document = SourceDocument(text: "B", languageID: "cpp", revision: .max - 1)
+        let other = SourceDocument(text: "B", languageID: "cpp")
+        let snapshot = document.snapshot()
+        let lease = try document.beginSourceSave(snapshot: snapshot)
+        let destination = URL(fileURLWithPath: "/tmp/lease-answer.cpp")
+        #expect(throws: DocumentError.staleRevision) { try document.beginSourceSave(snapshot: snapshot) }
+        #expect(throws: DocumentError.staleRevision) { try other.completeSourceSave(lease, at: destination, diskDigest: snapshot.sourceDigest) }
+        try document.commit("C")
+        document.setPersistenceReadOnly(true)
+        try document.completeSourceSave(lease, at: destination, diskDigest: snapshot.sourceDigest)
+        #expect(document.text == "C"); #expect(document.isDirty)
+        #expect(document.savePoint?.revision == UInt64.max - 1)
+        #expect(document.savePoint?.sourceDigest == snapshot.sourceDigest)
+        #expect(document.url == destination)
+        #expect(throws: DocumentError.staleRevision) { try document.completeSourceSave(lease, at: destination, diskDigest: snapshot.sourceDigest) }
+        #expect(throws: DocumentError.revisionExhausted) { try document.beginSourceSave(snapshot: document.snapshot()) }
+
+        let cancelled = try other.beginSourceSave(snapshot: other.snapshot())
+        other.cancelSourceSave(cancelled)
+        #expect(throws: DocumentError.staleRevision) { try other.completeSourceSave(cancelled, at: destination, diskDigest: snapshot.sourceDigest) }
+        let retry = try other.beginSourceSave(snapshot: other.snapshot())
+        other.cancelSourceSave(retry)
+        #expect(other.url == nil); #expect(other.savePoint == nil)
+    }
+
     @Test func scalarUTF16ToUTF8Mapping() throws {
         let index = try TextCoordinateIndex("中🙂e\u{301}\t\r\n")
         #expect(try index.utf8Range(for: NSRange(location: 1, length: 2)) == 3..<7)

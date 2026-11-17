@@ -14,19 +14,75 @@ import NativeCoreBridge
     private(set) var selection = NSRange(location: 0, length: 0)
     private(set) var committedSelection = NSRange(location: 0, length: 0)
     private(set) var interactionEnabled = true
-    var testCases = [TestCaseInput()]
-    var toolchainProfileID: RawIdentifier?
-    var preservedPreferences: [NativePreferences] = []
+    private var storedTests = [TestCaseInput()]
+    private var storedProfileID: RawIdentifier?
+    private var storedPreferences: [NativePreferences] = []
+    @ObservationIgnored private var frozenRecord: SessionDocumentRecord?
+    @ObservationIgnored private var frozenPreferences: [NativePreferences]?
+    @ObservationIgnored private var persistence: PersistenceGate?
+    var canMutatePersistence: Bool { (persistence?.canMutate ?? true) && document.revision < UInt64.max }
+    private(set) var persistenceNotice: String?
+    var testCases: [TestCaseInput] {
+        get { storedTests }
+        set {
+            guard newValue != storedTests else { return }
+            guard canMutatePersistence else { persistenceNotice = L10n.string("workspace_revision_frozen"); return }
+            storedTests = newValue
+        }
+    }
+    var toolchainProfileID: RawIdentifier? {
+        get { storedProfileID }
+        set {
+            guard newValue != storedProfileID else { return }
+            guard canMutatePersistence else { persistenceNotice = L10n.string("workspace_revision_frozen"); return }
+            storedProfileID = newValue
+        }
+    }
+    var preservedPreferences: [NativePreferences] {
+        get { storedPreferences }
+        set {
+            guard newValue != storedPreferences else { return }
+            guard canMutatePersistence else { persistenceNotice = L10n.string("workspace_revision_frozen"); return }
+            storedPreferences = newValue
+        }
+    }
+    func initializePersistentFields(tests: [TestCaseInput], profileID: RawIdentifier?, preferences: [NativePreferences],
+                                    immutableRecord: SessionDocumentRecord? = nil) throws {
+        guard persistence == nil else { throw DocumentError.staleRevision }
+        storedTests = tests; storedProfileID = profileID; storedPreferences = preferences
+        frozenRecord = immutableRecord; frozenPreferences = immutableRecord == nil ? nil : preferences
+    }
+    func immutableRecordForPersistence() throws -> SessionDocumentRecord? {
+        guard let frozenRecord else { return nil }
+        let snapshot = document.snapshot()
+        guard snapshot.documentID == frozenRecord.documentID, snapshot.revision == frozenRecord.revision,
+              snapshot.text.utf8.elementsEqual(frozenRecord.sourceText.utf8),
+              try currentNativeText().utf8.elementsEqual(frozenRecord.sourceText.utf8),
+              document.savePoint == frozenRecord.savePoint, storedTests == frozenRecord.tests,
+              storedProfileID == frozenRecord.toolchainProfileID, storedPreferences == frozenPreferences,
+              document.url.map({ RawIdentifier($0.path) }) == frozenRecord.originalPath.map({ RawIdentifier($0) }) else { throw DocumentError.revisionExhausted }
+        return frozenRecord
+    }
+    func attachPersistence(_ gate: PersistenceGate) { persistence = gate }
+
+    var companionRunNotice: String? {
+        do {
+            return try CompanionProvenance.ordinaryStdioAllowed(documentID: document.id, preferences: preservedPreferences)
+                ? nil : L10n.string("companion_run_incompatible")
+        } catch { return L10n.string("companion_run_opaque") }
+    }
     @ObservationIgnored private var codeState: CodeEditorState?
     @ObservationIgnored private var codeHost: NSHostingView<CodeEditorSurface>?
     @ObservationIgnored private weak var codeView: NSTextView?
     @ObservationIgnored private(set) var stView: STTextView?
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
+    @ObservationIgnored private var lastCapturedRevision: UInt64 = 0
     @ObservationIgnored private var pendingCapture: Task<Void, Never>?
     @ObservationIgnored private let highlighter: LexicalHighlighter
 
     init(document: SourceDocument, profile: LanguageProfile) throws {
         self.document = document
+        lastCapturedRevision = document.revision
         highlighter = try LexicalHighlighter(profile: profile)
         super.init()
 
@@ -86,20 +142,21 @@ import NativeCoreBridge
             isComposing = view.hasMarkedText()
             selection = view.selectedRange()
             guard !isComposing else { return false }
-            committedSelection = selection
+            if canMutatePersistence { committedSelection = selection }
             return commit(view.text ?? "")
         }
         if let view = codeView {
             isComposing = view.hasMarkedText()
             selection = view.selectedRange()
             guard !isComposing else { return false }
-            committedSelection = selection
+            if canMutatePersistence { committedSelection = selection }
             return commit(view.string)
         }
         return false
     }
 
     func restoreSelection(_ range: NSRange) throws {
+        guard persistence == nil || canMutatePersistence || range == committedSelection else { throw DocumentError.revisionExhausted }
         _ = try TextCoordinateIndex(document.text).utf8Range(for: range)
         selection = range
         committedSelection = range
@@ -109,13 +166,13 @@ import NativeCoreBridge
     }
 
     func setInteractionEnabled(_ enabled: Bool) {
-        interactionEnabled = enabled
-        container.allowsEditingCommands = enabled
-        let editable = enabled && document.revision < UInt64.max
+        let editable = enabled && canMutatePersistence
+        interactionEnabled = editable
+        container.allowsEditingCommands = editable
         stView?.isEditable = editable
         if codeView == nil {
             func find(_ view: NSView) -> NSTextView? {
-                if let text = view as? NSTextView, text.isEditable { return text }
+                if let text = view as? NSTextView { return text }
                 return view.subviews.lazy.compactMap(find).first
             }
             codeView = find(container)
@@ -145,7 +202,7 @@ import NativeCoreBridge
         container.layoutSubtreeIfNeeded()
         if document.editorKind == .codeEditorView {
             func find(_ view: NSView) -> NSTextView? {
-                if let text = view as? NSTextView, text.isEditable { return text }
+                if let text = view as? NSTextView { return text }
                 return view.subviews.lazy.compactMap(find).first
             }
             guard let view = find(container), view.string.utf8.elementsEqual(document.text.utf8) else {
@@ -159,9 +216,11 @@ import NativeCoreBridge
 
     private func commit(_ text: String) -> Bool {
         do {
+            guard document.revision == lastCapturedRevision || text.utf8.elementsEqual(document.text.utf8) else { throw DocumentError.staleRevision }
             let changed = try document.commit(text)
+            lastCapturedRevision = document.revision
             captureFailure = nil
-            if document.revision == UInt64.max { stView?.isEditable = false; codeView?.isEditable = false }
+            if document.revision == UInt64.max { document.setPersistenceReadOnly(true); setInteractionEnabled(false) }
             return changed
         } catch { captureFailure = error as? DocumentError; return false }
     }

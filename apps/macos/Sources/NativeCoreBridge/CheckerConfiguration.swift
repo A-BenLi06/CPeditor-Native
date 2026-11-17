@@ -97,7 +97,7 @@ public struct CheckerConfiguration: Encodable, Sendable, Equatable {
     }
 }
 
-private indirect enum CheckerJSON: Encodable, Sendable {
+indirect enum CheckerJSON: Encodable, Sendable {
     case object([RawIdentifier: CheckerJSON]), array([CheckerJSON]), string(String), integer(UInt64), invalidNumber, bool(Bool), null
     func object(allowed: [String]) throws -> [String: CheckerJSON] {
         guard case .object(let fields) = self else { throw CheckerConfigurationError("checker_error_object") }
@@ -132,7 +132,7 @@ private extension Dictionary where Key == String, Value == CheckerJSON {
 }
 
 /// 保留整数词法类型并拒绝重复键；Foundation JSONDecoder 对 1.0 和重复键的宽松行为不能用于契约校验。
-private struct CheckerJSONParser {
+struct CheckerJSONParser {
     let bytes: [UInt8]
     var cursor = 0
     mutating func parse() throws -> CheckerJSON {

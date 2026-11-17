@@ -36,6 +36,12 @@ public struct SourceSavePoint: Codable, Sendable, Equatable {
     enum CodingKeys: String, CodingKey { case revision, sourceDigest = "source_digest", diskDigest = "disk_digest" }
 }
 
+/// 仅由文档为当前快照发放；已开始的写入可在最后一次编辑后登记真实保存点。
+@MainActor public final class SourceSaveLease {
+    fileprivate let snapshot: SourceSnapshot
+    fileprivate init(snapshot: SourceSnapshot) { self.snapshot = snapshot }
+}
+
 public enum DocumentError: Error, Equatable {
     case staleRevision
     case invalidRange
@@ -56,6 +62,8 @@ public final class SourceDocument: Identifiable {
     public private(set) var revision: UInt64
     public private(set) var savePoint: SourceSavePoint?
     public private(set) var sourceDigest: String
+    public private(set) var persistenceIsReadOnly = false
+    @ObservationIgnored private var activeSourceSave: SourceSaveLease?
     private var savedDigest: String
     public var isDirty: Bool { sourceDigest != savedDigest }
 
@@ -75,19 +83,46 @@ public final class SourceDocument: Identifiable {
 
     @discardableResult public func commit(_ committedText: String) throws -> Bool {
         guard !committedText.utf8.elementsEqual(text.utf8) else { return false }
-        guard revision < UInt64.max else { throw DocumentError.revisionExhausted }
+        guard !persistenceIsReadOnly, revision < UInt64.max else { throw DocumentError.revisionExhausted }
         text = committedText
         sourceDigest = SourceDigest.sha256(Data(committedText.utf8))
         revision += 1
         return true
     }
 
+    public func setPersistenceReadOnly(_ readOnly: Bool) { persistenceIsReadOnly = readOnly }
+
     public func snapshot() -> SourceSnapshot {
         SourceSnapshot(documentID: id, revision: revision, text: text)
     }
 
     public func markSaved(at url: URL, snapshot: SourceSnapshot, diskDigest: String? = nil) throws {
+        guard !persistenceIsReadOnly, revision < UInt64.max else { throw DocumentError.revisionExhausted }
+        guard activeSourceSave == nil else { throw DocumentError.staleRevision }
         guard snapshot.documentID == id, snapshot.revision <= revision else { throw DocumentError.staleRevision }
+        applySavePoint(at: url, snapshot: snapshot, diskDigest: diskDigest)
+    }
+
+    public func beginSourceSave(snapshot: SourceSnapshot) throws -> SourceSaveLease {
+        guard !persistenceIsReadOnly, revision < UInt64.max else { throw DocumentError.revisionExhausted }
+        guard activeSourceSave == nil, snapshot == self.snapshot() else { throw DocumentError.staleRevision }
+        let lease = SourceSaveLease(snapshot: snapshot)
+        activeSourceSave = lease
+        return lease
+    }
+
+    public func completeSourceSave(_ lease: SourceSaveLease, at url: URL, diskDigest: String) throws {
+        guard activeSourceSave === lease, lease.snapshot.documentID == id,
+              lease.snapshot.revision <= revision else { throw DocumentError.staleRevision }
+        applySavePoint(at: url, snapshot: lease.snapshot, diskDigest: diskDigest)
+        activeSourceSave = nil
+    }
+
+    public func cancelSourceSave(_ lease: SourceSaveLease) {
+        if activeSourceSave === lease { activeSourceSave = nil }
+    }
+
+    private func applySavePoint(at url: URL, snapshot: SourceSnapshot, diskDigest: String?) {
         self.url = url
         // 写盘期间的新编辑不得被误标为已保存。
         savedDigest = snapshot.sourceDigest
@@ -97,6 +132,7 @@ public final class SourceDocument: Identifiable {
 
     public func replacing(_ range: NSRange, with replacement: String,
                           expectedRevision: UInt64) throws -> String {
+        guard !persistenceIsReadOnly, revision < UInt64.max else { throw DocumentError.revisionExhausted }
         guard revision == expectedRevision else { throw DocumentError.staleRevision }
         let index = try TextCoordinateIndex(text)
         let swiftRange = try index.characterRange(range)

@@ -8,25 +8,27 @@ struct RunPanelView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            if let notice = session.persistenceNotice { Text(notice).font(.caption).foregroundStyle(.secondary) }
+            if let notice = session.companionRunNotice { Text(notice).font(.caption).foregroundStyle(.secondary) }
             HStack {
                 Text(L10n.string("tests_title")).font(.headline)
                 Picker(L10n.string("toolchain"), selection: $runner.selectedProfileID) {
                     ForEach(runner.profiles) { profile in Text(profile.id.rawValue).tag(profile.id) }
-                }.frame(maxWidth: 290).disabled(runner.isRunning)
+                }.frame(maxWidth: 290).disabled(runner.isRunning || !runner.persistentChangesAllowed)
                 Menu {
                     Button(L10n.string("load_toolchain")) { runner.loadProfile() }
                     Button(L10n.string("edit_toolchain"), action: beginProfileEdit)
                 } label: { Image(systemName: "gearshape") }
-                    .help(L10n.string("toolchain")).disabled(runner.isRunning)
+                    .help(L10n.string("toolchain")).disabled(runner.isRunning || !runner.persistentChangesAllowed)
                 Spacer()
-                Text(L10n.jobState(runner.state)).foregroundStyle(.secondary)
+                Text(L10n.jobState(runner.state(for: session.document.id))).foregroundStyle(.secondary)
                 if runner.isRunning {
                     ProgressView().controlSize(.small)
                     Button(L10n.string("cancel_run")) { runner.cancel() }
                 } else {
                     Button { runner.runAll(session) } label: {
                         Label(L10n.string("run_all"), systemImage: "play.fill")
-                    }.disabled(runner.selectedProfile == nil || runner.isClosed)
+                    }.disabled(runner.selectedProfile == nil || runner.isClosed || session.companionRunNotice != nil)
                 }
             }
             HStack {
@@ -36,9 +38,9 @@ struct RunPanelView: View {
                         if enabled, runner.externalChecker == nil { beginCheckerEdit() }
                         else { runner.externalCheckerEnabled = enabled }
                     }))
-                    .disabled(runner.checkerPreferencesAreOpaque || !runner.checkerPreferenceStorageAvailable || runner.isRunning)
+                    .disabled(runner.checkerPreferencesAreOpaque || !runner.checkerPreferenceStorageAvailable || runner.isRunning || !runner.persistentChangesAllowed)
                 Button(L10n.string("edit_checker")) { beginCheckerEdit() }
-                    .disabled(runner.checkerPreferencesAreOpaque || !runner.checkerPreferenceStorageAvailable || runner.isRunning)
+                    .disabled(runner.checkerPreferencesAreOpaque || !runner.checkerPreferenceStorageAvailable || runner.isRunning || !runner.persistentChangesAllowed)
                 if let checker = runner.externalChecker { Text(checker.executable).font(.caption).lineLimit(1).textSelection(.enabled) }
                 Spacer()
                 if runner.externalCheckerEnabled { Text(L10n.string("checker_expected_required")).font(.caption).foregroundStyle(.secondary) }
@@ -53,8 +55,8 @@ struct RunPanelView: View {
                             Text(L10n.string("comparison_trailing")).tag(ComparisonPolicy.trailing)
                             Text(L10n.string("comparison_strict")).tag(ComparisonPolicy.strict)
                             Text(L10n.string("comparison_byte")).tag(ComparisonPolicy.byte)
-                        }.labelsHidden().frame(maxWidth: 170).disabled(runner.externalCheckerEnabled)
-                    }.disabled(runner.isRunning)
+                        }.labelsHidden().frame(maxWidth: 170).disabled(runner.externalCheckerEnabled || !runner.persistentChangesAllowed)
+                    }.disabled(runner.isRunning || !session.canMutatePersistence)
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 10) {
                             ForEach($session.testCases) { $test in
@@ -63,7 +65,7 @@ struct RunPanelView: View {
                                     remove: { session.testCases.removeAll { $0.id == test.id } })
                             }
                         }
-                    }.disabled(runner.isRunning)
+                    }.disabled(runner.isRunning || !session.canMutatePersistence)
                 }.frame(minWidth: 280, idealWidth: 480)
                 RunResultsView(runner: runner, session: session).frame(minWidth: 220, idealWidth: 360)
             }
@@ -137,7 +139,7 @@ struct RunResultsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 8) {
                 Text(L10n.string("last_run")).font(.headline)
-                if let result = runner.result {
+                if let result = runner.result(for: session.document.id) {
                     Text(result.matches(session.document.snapshot()) ? L10n.string("source_current") : L10n.string("source_older"))
                         .font(.caption).foregroundStyle(result.matches(session.document.snapshot()) ? Color.secondary : Color.orange)
                     Text(String(format: L10n.string("run_revision"), result.revision)).font(.caption)
@@ -161,7 +163,7 @@ struct RunResultsView: View {
                             if let checker = test.checker { CheckerDiagnosticsView(report: checker, binaryPreviewBytes: runner.binaryPreviewBytes) }
                         }.padding(6).overlay(RoundedRectangle(cornerRadius: 4).stroke(.separator))
                     }
-                } else { Text(L10n.jobState(runner.state)).foregroundStyle(.secondary) }
+                } else { Text(L10n.jobState(runner.state(for: session.document.id))).foregroundStyle(.secondary) }
             }.frame(maxWidth: .infinity, alignment: .leading)
         }.padding(.leading, 8)
     }
