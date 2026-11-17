@@ -476,3 +476,29 @@ Core 规则区分空输入、缺少预期输出与预期输出为空、checker �
 - 独立目录的前台CUA通过系统选择器接纳basic与unsupported，Pending→实际恢复回执→Applied；原生未保存解答运行7+8样例AC，不兼容模式禁用Run All；退出重启保留源码／样例／两个Applied，再Apply不新增文档。逐字节核对fixture、两个回执、稳定ID与原三文档通过。前台收件箱流程在最后源写入lease修复前执行，随后最终70项与原探针验证修复，重新打包／LaunchServices进程验证及严格codesign通过；最初因测试sheet未关而退出75的脚本记录保留，正常退出后重跑成功。
 - 精简证据：out/macos/session-resume-verification/verification.json、session-resume-review/verification.json、run-results-review/verification.json；前轮final-audit的MAX／关闭／备份冲突证据保留。源码／资源不修改研究子模块。中文README／状态／claims更新。
 - 独立核验57f4fe7的Windows CI https://github.com/A-BenLi06/CPeditor-Native/actions/runs/44009461078 ：实际Server2022／PowerShell7.6.10，两配置各21阶段、Core17/17、Runner／Session／Companion和完整宿主通过。out/windows/ci/44009461078/ci-readonly-audit保留报告与SHA；20个人工场景均not_run／passed:null。未声称Windows10、最低macOS／Intel、系统IME／UU／DPI／虚拟桌面、浏览器扩展端到端或性能预算通过；启动／内存／编辑性能测量继续作为后续工作。
+
+
+
+## 2026-11-18T02:42:25+08:00 — 接手整合 macOS 26 工具链／状态栏索引并完成 SwiftUI 工作区 UI/UX 重构
+
+### 改动与思路
+
+- 整合上一会话在途的 Xcode 27／macOS 26.0 工具链与构建核验：`Package.swift` 和 `script/macos_toolchain.sh` 统一读取 `AppMetadata.plist` 的最低系统版本 `26.0`，固定 `XcodeDefault` 工具链与 SwiftPM `native` 构建系统；当默认 `out/core/dev` 缓存的编译器／SDK／部署目标变化时自动清理缓存重建，并在 `test_macos.sh` 中补建 `cpn_checker_helper`。`script/verify_macos_build.py` 在退出旧实例前核对 Core 归档全部对象与最终应用二进制的 `LC_BUILD_VERSION`（`minos 26.0`、当前 SDK）。
+- 整合状态栏 `TextLineIndex` 稀疏 64 单元 UTF-16 位集行列索引：`SourceDocument` 按已提交 `revision` 缓存单份稀疏块数组，避免每次光标变化对整份文本执行两次 UTF-16 前缀与逆序扫描；提供 `tools/macos/cursor_position_benchmark.sh` 独立 `-O` 局部基准入口。
+- 重构 SwiftUI 工作区、导航、菜单与快捷键体验：
+  - `CompanionController` 按 `importID` 与 `documentID` 缓存已解码 `CompanionPreview`，消除列表重绘时的重复 JSON 解析；`Workspace` 在不修改会话契约、不占用每所有者 16 条持久化偏好槽位的前提下，为未保存导入文档自动呈现题目标题、比赛分组与时限／内存副标题，并对多个空白未命名文档自动编号。
+  - 侧栏补充每文档运行进度／判题汇总胶囊（选中态自动切换高对比前景色）、悬停关闭非活动／活动标签、完整右键菜单（Save／Save As／Reveal in Finder／Open Copy in Other Editor／Close）与底部新建／打开工具条。
+  - 工具栏与菜单栏新增 `New Document`、`Run` 菜单及完整快捷键（`⌘R` Run All、`⌘.` Cancel Run、`⌘⇧T` Add Test、`⌘⇧Y` 折叠／展开底部测试面板、`⌘⇧I` Companion Inbox、`⌘⌥L` Wrap Lines、`⌘⇧M` Show Minimap）与悬停提示；底部面板显隐保持 `VSplitView` 内 `NativeEditorDeck` 结构身份不变，不卸载原生编辑器或清空 `UndoManager` 历史，且在隐藏面板时触发 `⌘R` 自动展开并运行。
+- 重构 `RunPanelView`、`CompanionInboxView`、`ConfigurationJSONSheet` 并修复 `STTextView` 深色模式：
+  - 修复原工具链齿轮 `Menu` 未固定尺寸横向拉伸占满半屏、空样例时底部面板垂直居中产生大面积留白、子工具栏按钮挤压换行等真实布局缺陷；收紧侧栏与左右分栏最小宽度预算以适配 `720pt` 最小窗口宽度。
+  - 样例编辑采用 `ViewThatFits` 自适应双栏并排 `Input`／`Expected Output` 代码卡片，支持字节统计、一键复制、复制样例及未启用答案比较时的引导占位；结果区提供语义化 `VerdictBadge`（`AC`／`WA`／`TLE`／`OLE`／`RE`／`CE`／`CheckerError`／`Unchecked`／`Cancelled`）、判题汇总横幅、编译失败默认展开的编译输出卡片与带复制按钮的等宽输出块。
+  - Companion 收件箱新增 `All`／`Pending`／`Applied` 分段筛选，将题目标题、状态、来源元数据和主操作 `Apply to Workspace` 固定在右侧详情顶部，下方样例改为双栏等宽代码块预览；JSON 配置窗口统一头部说明与内联错误横幅，保留单一 `NSTextView` 与原生 `Escape`／`Return` 快捷键语义。
+  - 视觉快照核验发现深色模式（`.darkAqua`）下 `STTextView` 标识符文本发黑不可见且滚动画布底部发白：在 `EditorContainer.viewDidChangeEffectiveAppearance` 中接入外观回调，通过 `effectiveAppearance.performAsCurrentDrawingAppearance` 动态同步 `textBackgroundColor`、`textColor`、`insertionPointColor` 与词法渲染属性，未引入任何延时技巧。
+
+### 验证与范围
+
+- 实际执行主机：macOS 27.0.1（26A434）arm64、Xcode 27.2（27B52）、Swift 6.4.2、Apple Clang 21、macOS SDK 27.2。本轮所有验证均为 macOS 主机验证，不包含也不代表 Windows 目标机验证。
+- 共享 Core：在 `macos_toolchain.sh` 工具链环境下构建并执行 `ctest --test-dir out/core/dev --output-on-failure`，17/17 项测试全部通过（含真实 C++ 编译的 `batch` 测试）。
+- Swift 测试套件：执行 `./script/test_macos.sh`，15 个套件共 80 项测试全部通过（新增 `TextPositionTests`、`CursorPositionTests` 与覆盖智能标题／面板折叠保留原生编辑器身份与撤销栈／后台标签关闭／判题汇总优先级／真实离屏快照渲染的 `WorkspaceUXTests`）。
+- 性能局部基准与构建产物核验：`./tools/macos/cursor_position_benchmark.sh` 生成 `out/macos/cursor-position-perf/benchmark.json`（约 16 MiB 多行文本近文件尾查询由旧路径双次扫描 p50 约 105–238 ms 降至同版本缓存查询 p50 约 68 ns，无 LF 单长行逻辑索引载荷为 0 字节）；`script/verify_macos_build.py` 核对 15 个 Core 对象与最终可执行文件均为 `minos 26.0`、`sdk 27.2`，回执写入 `out/macos/build-verification.json`。
+- 真实应用打包、签名与界面快照核验：使用独立恢复文件 `out/macos/ux-verification/workspace.json` 执行 `./script/build_and_run.sh --verify`、严格 `codesign --verify --strict` 与正常 `AppLifecycle quit` 全部退出 0；真实 AppKit／SwiftUI 渲染快照保存在 `out/macos/layout-audit/`（覆盖浅色／深色工作区、非 stdio 空样例门禁、Companion 收件箱与配置弹窗）。上游研究子模块 `references/cpeditor` 保持干净未修改；macOS 26 实机、Intel、系统中文输入法候选窗口、原生 HTTP 监听界面及性能预算仍待后续目标矩阵验收。

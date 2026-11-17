@@ -63,6 +63,7 @@ struct RunConfiguration: Decodable, Sendable {
     private(set) var state: JobState?
     private(set) var result: BatchResult?
     private(set) var submitted: SourceSnapshot?
+    var configurationDraft: ConfigurationJSONDraft?
     var errorMessage: String?
     fileprivate final class RunIdentity: Sendable {}
     @MainActor @Observable fileprivate final class DocumentRun {
@@ -83,6 +84,23 @@ struct RunConfiguration: Decodable, Sendable {
     var retainedDocumentRunCount: Int { documentRuns.count }
     func result(for documentID: RawIdentifier) -> BatchResult? { documentRuns[documentID]?.result }
     func state(for documentID: RawIdentifier) -> JobState? { documentRuns[documentID]?.state }
+
+    func canRun(_ session: NativeEditorSession?) -> Bool {
+        guard let session else { return false }
+        return !isRunning && !isClosed && selectedProfile != nil && session.companionRunNotice == nil
+    }
+
+    func beginCheckerEdit() {
+        do { configurationDraft = ConfigurationJSONDraft(kind: .checker, jsonText: try checkerDraft()) }
+        catch { errorMessage = L10n.describe(error) }
+    }
+
+    func beginProfileEdit() {
+        do {
+            guard let profile = selectedProfile else { throw WireError.invalidProfile }
+            configurationDraft = ConfigurationJSONDraft(kind: .toolchain, jsonText: try profile.jsonText())
+        } catch { errorMessage = L10n.describe(error) }
+    }
 
     init(persistence: PersistenceGate? = nil) {
         self.persistence = persistence ?? PersistenceGate()

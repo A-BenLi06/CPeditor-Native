@@ -32,6 +32,14 @@ struct CompanionPreview: Decodable {
     struct Output: Decodable { let type: String; let fileName: String? }
     let name: String; let group: String; let url: String; let memoryLimit: UInt64; let timeLimit: UInt64
     let tests: [Sample]; let interactive: Bool?; let testType: String?; let input: Input?; let output: Output?
+
+    var requiresSpecialIOMode: Bool {
+        if interactive == true { return true }
+        if let testType, testType != "single" && testType != "multiNumber" { return true }
+        if let input, input.type != "stdin" { return true }
+        if let output, output.type != "stdout" { return true }
+        return false
+    }
 }
 
 @MainActor @Observable final class CompanionController {
@@ -43,6 +51,8 @@ struct CompanionPreview: Decodable {
     private(set) var notice: String?
     private(set) var paths: CompanionPaths?
     private(set) var configuration: CompanionConfiguration?
+    private var previewsByImportID: [RawIdentifier: CompanionPreview] = [:]
+    private var previewsByDocumentID: [RawIdentifier: CompanionPreview] = [:]
     @ObservationIgnored private weak var workspace: Workspace?
     @ObservationIgnored private let coordinator = CoreCoordinator()
     @ObservationIgnored private var inboxID: RawIdentifier?
@@ -53,6 +63,16 @@ struct CompanionPreview: Decodable {
 
     init() { do { configuration = try .load() } catch { notice = L10n.describe(error) } }
     var selectedItem: CompanionItem? { items.first { $0.id == selection } }
+    var pendingCount: Int { items.reduce(0) { $0 + ($1.state == .pending ? 1 : 0) } }
+    var appliedCount: Int { items.reduce(0) { $0 + ($1.state == .applied ? 1 : 0) } }
+
+    func preview(for item: CompanionItem) -> CompanionPreview? {
+        previewsByImportID[item.importID]
+    }
+
+    func preview(forDocumentID documentID: RawIdentifier) -> CompanionPreview? {
+        previewsByDocumentID[documentID]
+    }
 
     func bootstrap(_ workspace: Workspace) async {
         self.workspace = workspace
@@ -97,7 +117,22 @@ struct CompanionPreview: Decodable {
         }
         guard !page.hasMore || (!page.items.isEmpty && page.nextAfterSequence > cursor),
               page.items.enumerated().allSatisfy({ index, item in item.sequence > (index == 0 ? cursor : page.items[index - 1].sequence) }) else { throw WireError.malformedTerminal }
-        items = reset ? page.items : items + page.items
+        let mergedItems = reset ? page.items : items + page.items
+        var importPreviews = reset ? [RawIdentifier: CompanionPreview]() : previewsByImportID
+        var documentPreviews = reset ? [RawIdentifier: CompanionPreview]() : previewsByDocumentID
+        let decoder = JSONDecoder()
+        for item in page.items {
+            if let existing = previewsByImportID[item.importID] {
+                importPreviews[item.importID] = existing
+                documentPreviews[item.documentID] = existing
+            } else if let decoded = try? decoder.decode(CompanionPreview.self, from: Data(item.originalJSON.utf8)) {
+                importPreviews[item.importID] = decoded
+                documentPreviews[item.documentID] = decoded
+            }
+        }
+        previewsByImportID = importPreviews
+        previewsByDocumentID = documentPreviews
+        items = mergedItems
         inboxID = page.inboxID; inboxRevision = page.revision; diskDigest = page.diskDigest
         after = page.nextAfterSequence; hasMore = page.hasMore
         if selection == nil || !items.contains(where: { $0.id == selection }) { selection = items.first?.id }

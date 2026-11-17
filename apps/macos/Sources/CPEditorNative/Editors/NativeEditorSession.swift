@@ -115,6 +115,11 @@ import NativeCoreBridge
             let scroll = STTextView.scrollableTextView()
             guard let view = scroll.documentView as? STTextView else { throw CocoaError(.coderInvalidValue) }
             stView = view
+            scroll.drawsBackground = true
+            scroll.backgroundColor = .textBackgroundColor
+            view.backgroundColor = .textBackgroundColor
+            view.textColor = .textColor
+            view.insertionPointColor = .textColor
             view.font = NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
             view.showsLineNumbers = true
             view.highlightSelectedLine = true
@@ -122,6 +127,7 @@ import NativeCoreBridge
             view.allowsUndo = true
             view.text = document.text
             view.textDelegate = self
+            container.onAppearanceChange = { [weak self] in self?.highlight() }
             container.install(scroll)
             highlight()
         }
@@ -131,6 +137,7 @@ import NativeCoreBridge
     func dispose() {
         pendingCapture?.cancel()
         pendingCapture = nil
+        container.onAppearanceChange = nil
         observers.forEach(NotificationCenter.default.removeObserver)
         observers.removeAll()
         stView?.textDelegate = nil
@@ -251,17 +258,24 @@ import NativeCoreBridge
         guard let view = stView, !view.hasMarkedText() else { return }
         let text = view.text ?? ""
         let range = NSRange(location: 0, length: text.utf16.count)
-        view.addRenderingAttributes([.foregroundColor: NSColor.textColor], range: range)
-        for token in highlighter.tokens(in: text) {
-            let color: NSColor
-            switch token.kind {
-            case .keyword: color = .systemPurple
-            case .string: color = .systemRed
-            case .number: color = .systemBlue
-            case .comment: color = .secondaryLabelColor
-            case .directive: color = .systemOrange
+        let tokens = highlighter.tokens(in: text)
+        view.effectiveAppearance.performAsCurrentDrawingAppearance {
+            view.backgroundColor = .textBackgroundColor
+            view.textColor = .textColor
+            view.insertionPointColor = .textColor
+            view.enclosingScrollView?.backgroundColor = .textBackgroundColor
+            view.addRenderingAttributes([.foregroundColor: NSColor.textColor], range: range)
+            for token in tokens {
+                let color: NSColor
+                switch token.kind {
+                case .keyword: color = .systemPurple
+                case .string: color = .systemRed
+                case .number: color = .systemBlue
+                case .comment: color = .secondaryLabelColor
+                case .directive: color = .systemOrange
+                }
+                view.addRenderingAttributes([.foregroundColor: color], range: token.range)
             }
-            view.addRenderingAttributes([.foregroundColor: color], range: token.range)
         }
     }
 }

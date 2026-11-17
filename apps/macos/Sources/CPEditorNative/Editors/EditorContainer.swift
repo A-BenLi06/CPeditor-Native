@@ -3,7 +3,13 @@ import AppKit
 @MainActor final class EditorContainer: NSView, NSMenuItemValidation {
     let history = UndoManager()
     var allowsEditingCommands = true
+    var onAppearanceChange: (() -> Void)?
     override var undoManager: UndoManager? { history }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        onAppearanceChange?()
+    }
 
     // NSTextView 注册撤销，但默认 undo:/redo: 的命令接收者通常由文档／窗口
     // 提供。每文档容器拥有历史，也作为原生 responder 链中的命令接收者。

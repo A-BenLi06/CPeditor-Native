@@ -1,20 +1,17 @@
 # macOS 原生编辑器原型
 
-验证记录时间：2026-11-17T12:37:34+08:00（Companion 文件收件箱、revision 边界、跨标签结果及前台导入／重启验收）。
+验证记录时间：2026-11-18T02:39:54+08:00（Xcode 27／macOS 26.0 构建核验、状态栏稀疏位集索引与 SwiftUI 工作区 UI/UX 重构）。
 
-本目录实现 SwiftUI 窗口、菜单和文档侧栏，以及两个真实 AppKit 编辑器适配器。当前已完成 M0 双编辑器原型、共享 Core 的样例运行、会话恢复、外部 checker 和 Companion 文件收件箱接入，组件集成不代表已选择生产编辑器，也不代表后续完整里程碑已验收。主项目仍以 Windows 10 22H2 为第一目标。
+本目录实现 SwiftUI 窗口、菜单和文档侧栏，以及两个真实 AppKit 编辑器适配器。当前已完成 M0 双编辑器原型、共享 Core 的样例运行、会话恢复、外部 checker、Companion 文件收件箱接入及竞赛工作流 UI/UX 优化，组件集成不代表已选择生产编辑器，也不代表后续完整里程碑已验收。主项目仍以 Windows 10 22H2 为第一目标。
 
 ## 构建和启动
 
-已验证主机：macOS 27.0.1（26A434）、Apple Silicon arm64、Xcode 27.2、Swift 6.4.2。`Package.swift` 和应用元数据声明 macOS 14.0 为部署下限；尚未在 macOS 14 实机运行，不能把当前主机的通过结果视为最低系统验证。
+已验证主机：macOS 27.0.1（26A434）、Apple Silicon arm64、Xcode 27.2、Swift 6.4.2。`Package.swift` 和 `AppMetadata.plist` 统一声明 macOS 26.0 为部署下限；`script/macos_toolchain.sh` 固定使用 Xcode 27 默认工具链与 SwiftPM `native` 构建后端，`script/verify_macos_build.py` 在构建和测试前后核对共享 Core 归档与最终可执行文件的 Mach-O `LC_BUILD_VERSION`（`minos 26.0`、当前 SDK `27.2`）。尚未在 macOS 26 实机或 Intel 机器运行，不能把当前主机的通过结果视为最低系统验证。
 
 从仓库根目录执行：
 
 ```sh
-cmake --preset dev
-cmake --build --preset dev --target cpn_core
-swift package resolve --package-path apps/macos
-swift test --package-path apps/macos
+./script/test_macos.sh
 ./script/build_and_run.sh --verify --editor codeeditorview "$PWD/tests/fixtures/editor/unicode.cpp"
 ```
 
@@ -49,8 +46,8 @@ flowchart TD
     ABI --> Panel[原生测试面板 / 版本结果]
 ```
 
-- `NativeEditorModel`：按 UTF-8 字节比较的不透明身份、单调 revision、不可变快照、保存点、严格 UTF-8 文件往返、UTF-16 到 UTF-8 的标量边界转换，以及拒绝拆分字素簇的编辑范围校验。`replacing` 只计算经过版本检查的替换结果，不直接重设原生文本。
-- `NativeEditorSession`：独占原生容器、编辑器和 UndoManager。文档通过 NativeEditorDeck 持续挂载在同一窗口中，切换只修改原生 isHidden；不会根据 SwiftUI 刷新全量覆盖字符存储。文档关闭时取消待处理捕获并释放代理／通知注册。
+- `NativeEditorModel`：按 UTF-8 字节比较的不透明身份、单调 revision、不可变快照、保存点、严格 UTF-8 文件往返、UTF-16 到 UTF-8 的标量边界转换、拒绝拆分字素簇的编辑范围校验，以及按已提交版本缓存的 `TextLineIndex` 稀疏 64 单元位集行列索引（状态栏查询不再逐次全量扫描文本；局部基准入口见 `tools/macos/cursor_position_benchmark.sh`）。`replacing` 只计算经过版本检查的替换结果，不直接重设原生文本。
+- `NativeEditorSession`：独占原生容器、编辑器和 UndoManager。文档通过 NativeEditorDeck 持续挂载在同一窗口中，切换标签或折叠底部测试面板只调整布局而不卸载原生视图；不会根据 SwiftUI 刷新全量覆盖字符存储。`EditorContainer` 监听有效外观变化并在当前绘制外观下刷新 `STTextView` 的语义背景色、文本色和词法高亮，保证浅色／深色模式切换清晰可读。文档关闭时取消待处理捕获并释放代理／通知注册。
 - `CodeEditorState`：供组件显示的原始 Binding，与共享模型中的已提交文本区分。AppKit 在 `setMarkedText` 的内部替换步骤可能先发送通知、后建立 marked range；通知因此安排当前原生调用结束后的主线程任务捕获。此处没有定时器、输入屏蔽或强制 `unmarkText`。保存、复制等命令同步捕获当前原生状态，组合输入未结束时拒绝捕获为可保存快照。
 - STTextView 的代理同步检查 `hasMarkedText()`；高亮使用非持久的 rendering attributes，不改字符内容、不加入撤销历史。两个组件使用相同的 C++ 配置数据；STTextView 目前为全文件词法高亮，尚无增量性能结论。
 - `Workspace`：协调打开、另存为、保存和关闭文档；每个源文件保存点记录已保存逻辑文本和磁盘字节的独立 SHA-256。窗口代理转发已有 SwiftUI 代理。本轮使用单一 `Window` 场景，避免多个工作区竞争默认恢复文件；尚未实现多窗口。最后窗口关闭后应用退出。
@@ -65,7 +62,7 @@ flowchart TD
 
 ## 自动验证证据
 
-当前 `CPN_CORE_LIBRARY_DIR="$PWD/out/core/listener-root-dev" swift test --package-path apps/macos` 通过 70 项测试（8 项模型测试、47 项原生编辑器／面板／恢复／checker／Companion／revision／结果归属测试、15 项 C ABI 桥接测试）；双编辑器恢复、满额偏好恢复和最后文档关闭回滚分别执行两个参数化实例，配置呈现执行 checker／toolchain × 默认／已配置的四个实例。原生测试创建真实 `NSWindow` 和编辑器视图，不用空白占位控件替代组件。
+当前 `./script/test_macos.sh` 通过 80 项测试（12 项模型与稀疏行列索引测试、53 项原生编辑器／面板／恢复／checker／Companion／revision／结果归属／光标位置／工作区 UI/UX 测试、15 项 C ABI 桥接测试）；双编辑器恢复、满额偏好恢复、原生光标／组合输入位置和最后文档关闭回滚分别执行两个参数化实例，配置呈现执行 checker／toolchain × 默认／已配置的四个实例。原生测试创建真实 `NSWindow` 和编辑器视图，不用空白占位控件替代组件。
 
 | 检查 | 当前证据 |
 | --- | --- |
@@ -235,3 +232,9 @@ RunController 按原始字节 document ID 保存独立结果、状态与不可�
 
 
 根 agent 在 2026-11-17T12:37:34+08:00 完成独立目录 `out/macos/session-resume-verification` 的收件箱前台 CUA：通过系统文件选择器接纳 basic.json，先显示 Pending，Apply 在恢复回执保存后显示 Applied；原生粘贴未保存解答，导入的 `7 8\n`／`15\n` 得到 AC。unsupported.json 的交互、未知测试及非 stdio 模式完整显示为来源说明，应用后 Run All 禁用。退出重启恢复源码、样例、选区与两个 Applied 项，再次 Apply 明确 AlreadyApplied，磁盘仍为原三个文档且无新增副本。原始载荷逐字节等于固定 fixture，workspace 含两份对应回执；截图、AX 与磁盘核对汇总在 `verification.json`。随后源写入 lease 修复通过最终 70 项测试、重新打包启动和严格 codesign 检查；未重复前台收件箱流程，也未声称浏览器 HTTP、最低系统或系统 IME 验收。
+
+2026-11-18T02:39:54+08:00 完成 Xcode 27／macOS 26.0 构建核验、状态栏 `TextLineIndex` 稀疏位集索引与 SwiftUI 工作区 UI/UX 优化：
+- 侧栏与标题栏从已加载 Companion 收件箱缓存中按文档身份解析题目标题与比赛分组（不消耗额外持久化偏好槽位），对多个空白未命名文档自动编号，补充每文档判题汇总胶囊、悬停关闭、右键菜单与底部新建／打开操作栏。
+- 工具栏与菜单栏补齐 `Run` 菜单及快捷键（`⌘R` 运行、`⌘.` 取消、`⌘⇧T` 添加样例、`⌘⇧Y` 折叠／展开底部测试面板、`⌘⇧I` 打开收件箱、`⌘⌥L` 自动换行、`⌘⇧M` Minimap），折叠测试面板时保持 `NativeEditorDeck` 内部 `NSTextView` 与撤销栈不变。
+- 测试与运行面板消除工具链齿轮菜单横向拉伸及空样例顶部留白，采用自适应双栏 `Input`／`Expected Output` 编辑器卡片（字节计数、一键复制、复制样例）与语义化判题徽章、汇总横幅；Companion 收件箱支持状态筛选并将 `Apply to Workspace` 固定在题目信息头部；`STTextView` 补齐浅色／深色外观动态重绘。
+- 验证：工具链环境 17/17 Core CTest、80 项 Swift 测试、状态栏局部基准 `out/macos/cursor-position-perf/benchmark.json`、真实渲染快照 `out/macos/layout-audit/`、`build_and_run.sh --verify`、Mach-O 回执 `out/macos/build-verification.json`、严格 `codesign` 与正常退出全部通过。

@@ -1,17 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ "$(uname -s)" != Darwin ]]; then
-    echo "此脚本必须在 macOS 主机执行。Windows 请使用 tools/windows 下的 PowerShell 7 脚本。" >&2
-    exit 1
-fi
-
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PACKAGE_DIR="$ROOT_DIR/apps/macos"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/macos_toolchain.sh"
+cpn_macos_toolchain
 OUTPUT_DIR="$ROOT_DIR/out/macos"
-CPN_CORE_LIBRARY_DIR="${CPN_CORE_LIBRARY_DIR:-$ROOT_DIR/out/core/dev}"
-export CPN_CORE_LIBRARY_DIR
-METADATA="$PACKAGE_DIR/AppMetadata.plist"
 APP_EXECUTABLE="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$METADATA")"
 BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$METADATA")"
 APP_BUNDLE="$OUTPUT_DIR/$APP_EXECUTABLE.app"
@@ -25,20 +17,15 @@ if [[ $# -gt 0 ]]; then
 fi
 
 mkdir -p "$OUTPUT_DIR"
-if [[ ! -x "$LIFECYCLE" || "$ROOT_DIR/script/AppLifecycle.swift" -nt "$LIFECYCLE" ]]; then
-    swiftc "$ROOT_DIR/script/AppLifecycle.swift" -o "$LIFECYCLE"
-fi
+# 小型生命周期工具也使用本轮明确选择的编译器和 SDK。
+"$CPN_SWIFTC" -sdk "$SDKROOT" -target "$(uname -m)-apple-macosx$MACOSX_DEPLOYMENT_TARGET" "$ROOT_DIR/script/AppLifecycle.swift" -o "$LIFECYCLE"
 
-if [[ "${CPN_CORE_PREBUILT:-0}" != 1 ]]; then
-    cmake -S "$ROOT_DIR" -B "$CPN_CORE_LIBRARY_DIR" -G Ninja -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON
-    cmake --build "$CPN_CORE_LIBRARY_DIR" --target cpn_core
-fi
-if [[ ! -f "$CPN_CORE_LIBRARY_DIR/libcpn_core.a" ]]; then
-    echo "没有找到共享 Core 静态库：$CPN_CORE_LIBRARY_DIR/libcpn_core.a" >&2
-    exit 1
-fi
-swift build --package-path "$PACKAGE_DIR"
-BIN_DIR="$(swift build --package-path "$PACKAGE_DIR" --show-bin-path)"
+cpn_prepare_core
+cpn_swiftpm build
+BIN_DIR="$(cpn_swiftpm build --show-bin-path)"
+# 在退出旧应用前拒绝与清单、SDK 不一致的实际产物。
+"$CPN_PYTHON" "$ROOT_DIR/script/verify_macos_build.py" --core-directory "$CPN_CORE_LIBRARY_DIR" --reuse-core \
+    --binary "$BIN_DIR/$APP_EXECUTABLE" --receipt "$OUTPUT_DIR/build-verification.json"
 "$LIFECYCLE" quit "$APP_BUNDLE"
 rm -rf "$STAGING_BUNDLE"
 mkdir -p "$STAGING_BUNDLE/Contents/MacOS" "$STAGING_BUNDLE/Contents/Resources"
@@ -59,7 +46,7 @@ mv "$STAGING_BUNDLE" "$APP_BUNDLE"
 
 case "$MODE" in
     --build-only) echo "已构建：$APP_BUNDLE" ;;
-    --debug) lldb -- "$APP_BUNDLE/Contents/MacOS/$APP_EXECUTABLE" "$@" ;;
+    --debug) /usr/bin/xcrun --toolchain XcodeDefault lldb -- "$APP_BUNDLE/Contents/MacOS/$APP_EXECUTABLE" "$@" ;;
     run) /usr/bin/open -n "$APP_BUNDLE" --args "$@" ;;
     --verify)
         /usr/bin/open -n "$APP_BUNDLE" --args "$@"

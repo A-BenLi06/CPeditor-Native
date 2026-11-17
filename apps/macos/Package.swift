@@ -5,11 +5,15 @@ import Foundation
 let repositoryRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
 let coreLibraryDirectory = ProcessInfo.processInfo.environment["CPN_CORE_LIBRARY_DIR"]
     ?? repositoryRoot.appendingPathComponent("out/core/dev").path
+// 清单与打包读取同一最低系统版本，避免二进制与 bundle 的支持范围漂移。
+let metadataURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("AppMetadata.plist")
+let metadata = try PropertyListSerialization.propertyList(from: Data(contentsOf: metadataURL), format: nil) as! [String: Any]
+let minimumSystemVersion = metadata["LSMinimumSystemVersion"] as! String
 
 let package = Package(
     name: "CPEditorNativeMacOS",
     defaultLocalization: "en",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(minimumSystemVersion)],
     products: [
         .executable(name: "CPEditorNative", targets: ["CPEditorNative"]),
         .library(name: "NativeEditorModel", targets: ["NativeEditorModel"])

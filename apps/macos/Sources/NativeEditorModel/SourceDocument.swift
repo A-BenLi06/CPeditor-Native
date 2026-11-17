@@ -64,6 +64,7 @@ public final class SourceDocument: Identifiable {
     public private(set) var sourceDigest: String
     public private(set) var persistenceIsReadOnly = false
     @ObservationIgnored private var activeSourceSave: SourceSaveLease?
+    @ObservationIgnored private var cachedLineIndex: (revision: UInt64, index: TextLineIndex)?
     private var savedDigest: String
     public var isDirty: Bool { sourceDigest != savedDigest }
 
@@ -86,6 +87,7 @@ public final class SourceDocument: Identifiable {
         guard !persistenceIsReadOnly, revision < UInt64.max else { throw DocumentError.revisionExhausted }
         text = committedText
         sourceDigest = SourceDigest.sha256(Data(committedText.utf8))
+        cachedLineIndex = nil
         revision += 1
         return true
     }
@@ -94,6 +96,15 @@ public final class SourceDocument: Identifiable {
 
     public func snapshot() -> SourceSnapshot {
         SourceSnapshot(documentID: id, revision: revision, text: text)
+    }
+
+    public func position(atUTF16Offset offset: Int) -> TextPosition {
+        // revision 的读取保留 Observation 依赖；选择变化只查询同版本索引。
+        let currentRevision = revision
+        if cachedLineIndex?.revision != currentRevision {
+            cachedLineIndex = (currentRevision, TextLineIndex(text))
+        }
+        return cachedLineIndex!.index.position(atUTF16Offset: offset)
     }
 
     public func markSaved(at url: URL, snapshot: SourceSnapshot, diskDigest: String? = nil) throws {

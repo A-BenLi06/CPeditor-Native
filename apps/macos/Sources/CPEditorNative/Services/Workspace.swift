@@ -53,6 +53,7 @@ struct WorkspaceConfiguration: Decodable {
         get { storedShowMinimap }
         set { guard persistence.canMutate else { errorMessage = L10n.string("workspace_revision_frozen"); return }; storedShowMinimap = newValue }
     }
+    var isRunPanelVisible = true
     var errorMessage: String?
     private(set) var preferenceNotice: String?
     private(set) var isLoading = false
@@ -140,7 +141,77 @@ struct WorkspaceConfiguration: Decodable {
         if sessions.isEmpty { createDocument() }
     }
 
-    func title(for session: NativeEditorSession) -> String { session.document.url?.lastPathComponent ?? L10n.string("untitled") }
+    func companionProblemTitle(for session: NativeEditorSession) -> String? {
+        guard let name = companion.preview(forDocumentID: session.document.id)?.name.trimmingCharacters(in: .whitespacesAndNewlines),
+              !name.isEmpty else { return nil }
+        return name
+    }
+
+    func languageDisplayName(for session: NativeEditorSession) -> String {
+        profiles[RawIdentifier(session.document.languageID)]?.displayName ?? session.document.languageID.uppercased()
+    }
+
+    func title(for session: NativeEditorSession) -> String {
+        if let url = session.document.url { return url.lastPathComponent }
+        if let problemTitle = companionProblemTitle(for: session) { return problemTitle }
+        let untitledSessions = sessions.filter { $0.document.url == nil && companionProblemTitle(for: $0) == nil }
+        if untitledSessions.count > 1, let index = untitledSessions.firstIndex(where: { $0 === session }), index > 0 {
+            return String(format: L10n.string("untitled_numbered"), index + 1)
+        }
+        return L10n.string("untitled")
+    }
+
+    func sidebarSubtitle(for session: NativeEditorSession) -> String {
+        let editor = L10n.editorName(session.document.editorKind)
+        if let preview = companion.preview(forDocumentID: session.document.id) {
+            let group = preview.group.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !group.isEmpty { return "\(group) · \(editor)" }
+        }
+        if let url = session.document.url {
+            let parent = url.deletingLastPathComponent().lastPathComponent
+            if !parent.isEmpty && parent != "/" { return "\(parent) · \(editor)" }
+        }
+        return "\(languageDisplayName(for: session)) · \(editor)"
+    }
+
+    func windowSubtitle(for session: NativeEditorSession) -> String {
+        if let url = session.document.url {
+            let path = (url.path as NSString).abbreviatingWithTildeInPath
+            if let problemTitle = companionProblemTitle(for: session) { return "\(path) · \(problemTitle)" }
+            return path
+        }
+        if let preview = companion.preview(forDocumentID: session.document.id) {
+            let group = preview.group.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !group.isEmpty {
+                return String(format: L10n.string("companion_subtitle_group_limits"), group, preview.timeLimit, preview.memoryLimit)
+            }
+            return String(format: L10n.string("companion_source_limits"), preview.timeLimit, preview.memoryLimit)
+        }
+        return "\(languageDisplayName(for: session)) · \(L10n.editorName(session.document.editorKind))"
+    }
+
+    func runActiveDocument() {
+        guard let session = activeSession else { return }
+        if !isRunPanelVisible { isRunPanelVisible = true }
+        runner.runAll(session)
+    }
+
+    func addTestToActiveDocument() {
+        guard let session = activeSession, session.canMutatePersistence, !runner.isRunning else { return }
+        if !isRunPanelVisible { isRunPanelVisible = true }
+        session.testCases.append(TestCaseInput())
+    }
+
+    func importTestsIntoActiveDocument() {
+        guard let session = activeSession, session.canMutatePersistence, !runner.isRunning else { return }
+        if !isRunPanelVisible { isRunPanelVisible = true }
+        runner.importTests(into: session)
+    }
+
+    func revealInFinder(_ session: NativeEditorSession? = nil) {
+        guard let url = (session ?? activeSession)?.document.url else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
 
     @discardableResult func createDocument(text: String = "", editor: EditorKind? = nil, languageID: String? = nil) -> NativeEditorSession? {
         guard persistence.canMutate, !isLoading, !isClosing, let config = configuration,
@@ -293,6 +364,12 @@ struct WorkspaceConfiguration: Decodable {
     func closeActiveDocument() async {
         guard !isBusy else { errorMessage = L10n.string("wait_for_file_operation"); return }
         guard let session = activeSession else { return }
+        await closeDocument(session)
+    }
+
+    func closeDocument(_ session: NativeEditorSession) async {
+        guard !isBusy else { errorMessage = L10n.string("wait_for_file_operation"); return }
+        guard sessions.contains(where: { $0 === session }) else { return }
         guard let operation = try? persistence.beginOperation() else { errorMessage = L10n.string("workspace_revision_frozen"); return }
         decidingCloseID = session.document.id
         session.setInteractionEnabled(false)
