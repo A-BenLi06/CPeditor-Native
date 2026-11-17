@@ -452,3 +452,10 @@ Core 规则区分空输入、缺少预期输出与预期输出为空、checker �
 - 根实际严格普通／完整Core两侧ASan+UBSan六组编译与执行通过，证据 out/windows/research/root-companion；作者完整TSan六组通过，companion-boundary-tsan-validation.json。独立原两P2的普通／ASan探针复验通过，覆盖实际Loaded内容不写、真实normalization写MAX、未持久owner无副作用拒绝和已持久owner最后Apply／回执／mark／重放，证据companion-review/fixed-verification.json。
 - 独立Windows脚本11项检查通过，包括4文件PowerShell7 parser、隔离macOS真实拒绝、成功／三字段失败／跨架构／阶段失败fixture和AST架构门禁；源码SHA一致，证据script-companion-audit/verification.json。fixture只替换隔离build输出，不代表MSVC或UI。
 - 上一真实6fc3606 CI的WindowsServer2022 x64 Debug／Release已通过Core17/17、Runner／Session、WinUIEdit与完整宿主，报告归档out/windows/ci/43945292954。本提交新增WinUI面板尚待本次CI；目标Windows10、真实扩展、IME／UU／DPI／虚拟桌面仍须脚本实测，不把macOS便携检查当作Windows验收。
+
+
+## 2026-11-17T11:20:03+08:00 — 修复 Windows Companion 编译单位的类型作用域
+
+- a4d08e3真实Server2022 x64 Debug／Release已通过Core17/17、Runner／Session／Companion六组与WinUIEdit；新增MainWindow.Companion.cpp宿主编译失败，全部首发C2653是UiStrings未导入，后续format／text类型错误为同一未解析类型的表达式失败。原完整日志与阶段报告保留out/windows/ci/43947075390，root-summary.json明确宿主未通过。
+- 新编译单位与既有MainWindow.xaml.cpp采用相同的using cpn::windows::UiStrings，保持UiStrings.h的正式命名空间、资源格式化及原生头依赖；不复制格式化函数或屏蔽编译错误。根核对正式声明和头引用，whitespace检查通过。
+- 本机仍为macOS ARM64，未做MSVC；完整宿主由本次提交的CI复验，目标Windows10／IME／UU／DPI和原生扩展继续由脚本实测。macOS收件箱和跨标签结果修复未纳入本提交。

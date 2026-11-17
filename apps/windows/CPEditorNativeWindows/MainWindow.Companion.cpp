@@ -12,6 +12,7 @@ using namespace Microsoft::UI::Xaml;
 using namespace Microsoft::UI::Xaml::Controls;
 using cpn::windows::CompanionModel;
 using cpn::windows::CompanionWorker;
+using cpn::windows::UiStrings;
 namespace winrt::CPEditorNativeWindows::implementation {
 void MainWindow::InitializeCompanionStorage() {
     try {
