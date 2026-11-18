@@ -1,0 +1,64 @@
+name: macOS 原生验证
+
+"on":
+  push:
+    paths: &source_paths
+      - .github/workflows/macos.yml
+      - .gitmodules
+      - .gitattributes
+      - CMakeLists.txt
+      - CMakePresets.json
+      - cmake/**
+      - contracts/**
+      - core/**
+      - apps/macos/**
+      - script/**
+      - tests/**
+      - resources/**
+      - third_party/**
+  pull_request:
+    paths: *source_paths
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: xcode-27
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: 获取固定源码及 JSON 子模块
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: 准备 Core 源码和构建工具
+        run: |
+          git submodule update --init third_party/json
+          ninja --version
+          sw_vers
+          xcodebuild -version
+          mkdir -p out/macos
+      - name: 运行 Swift／原生集成测试
+        run: ./script/test_macos.sh 2>&1 | tee out/macos/swift-tests.log
+      - name: 运行 Core 测试
+        if: '!cancelled()'
+        run: |
+          cmake --build --preset dev --parallel 4 2>&1 | tee out/macos/core-build.log
+          ctest --preset dev 2>&1 | tee out/macos/core-tests.log
+      - name: 构建并检查应用包
+        run: |
+          CPN_CORE_PREBUILT=1 ./script/build_and_run.sh --build-only 2>&1 | tee out/macos/app-build.log
+          codesign --verify --strict out/macos/CPEditorNative.app
+      - name: 保留日志与构建记录
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: macos-arm64-${{ github.sha }}
+          path: |
+            out/macos/*.log
+            out/macos/build-verification.json
+            out/core/dev/Testing/Temporary/*.log

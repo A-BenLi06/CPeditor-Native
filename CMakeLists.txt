@@ -142,4 +142,17 @@ if(BUILD_TESTING)
     target_link_libraries(cpn_batch_tests PRIVATE cpn_services)
     add_test(NAME batch COMMAND cpn_batch_tests $<TARGET_FILE:cpn_process_helper> "${CMAKE_CURRENT_SOURCE_DIR}/resources/profiles" "${CMAKE_CXX_COMPILER}")
     set_tests_properties(batch PROPERTIES TIMEOUT 45)
+    if(APPLE)
+        # Batch invokes the configured compiler directly. CMake's -isysroot flags
+        # do not reach that child process, so pass the same SDK in its environment.
+        set(cpn_batch_sdk "${CMAKE_OSX_SYSROOT}")
+        if(NOT IS_ABSOLUTE "${cpn_batch_sdk}")
+            if(NOT cpn_batch_sdk)
+                set(cpn_batch_sdk macosx)
+            endif()
+            execute_process(COMMAND /usr/bin/xcrun --sdk "${cpn_batch_sdk}" --show-sdk-path
+                OUTPUT_VARIABLE cpn_batch_sdk OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
+        endif()
+        set_tests_properties(batch PROPERTIES ENVIRONMENT "SDKROOT=${cpn_batch_sdk}")
+    endif()
 endif()

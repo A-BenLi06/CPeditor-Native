@@ -533,3 +533,9 @@ Core 规则区分空输入、缺少预期输出与预期输出为空、checker �
 - 工具栏、Run 菜单与 checker 入口复用 Settings 中的 Visual／JSON 表单。选择工具链立即绑定当前可编辑文档，不必先运行；配置 checker 与启用 checker 分开处理，取消首次配置保持关闭。运行错误由工作区显示，不再依赖右侧测试面板是否可见。
 - 自动验证：macOS 27.0.1 arm64、Xcode 27.2、部署下限 macOS 26.0。完整 Swift 复跑 84/84，单独复跑 RunResultsTests 4/4；Swift 首轮有一个 RunResultsTests 失败，未保留断言，未确认原因。Core 在仓库指定工具链环境下 17/17；未加载工具链环境直接执行 CTest 时，真实编译测试失败。日志在 `out/macos/settings-audit/`。
 - 真实应用：打包、严格签名核验及启动通过。使用独立恢复文件验证 `⌘,`、齿轮、Run 菜单直达、三页显示、深浅色即时联动及重启恢复、换行恢复、首次 checker 配置取消及显式启用。未修改 Windows 或上游参考子模块；Windows 10 22H2 和 macOS 26 实机未验证。
+
+## 2026-11-18T22:06:02+08:00 — macOS Core 验证入口与持续集成
+
+- Core 的 `batch` 测试会直接调起已配置的 C++ 编译器。macOS 下由 CTest 将配置时选定的 SDK 路径传给该测试，默认 SDK 通过 `xcrun` 解析。开发者直接按根 README 运行 CTest 即可执行真实编译用例。
+- 新增 `xcode-27` ARM64 工作流，用项目已有入口运行 Swift 测试、Core CTest、应用包构建和临时签名核验。保留通过或失败日志及 Mach-O 构建回执，触发路径包含共享契约样例。
+- 在 macOS 27.0.1 arm64、Xcode 27.2 上，从未载入仓库工具链环境的终端配置、构建并运行 CTest，17 项全部通过。工作流 YAML 已解析并核对提交和 PR 触发路径。GitHub runner 的实测结果在本次提交推送后查验。
