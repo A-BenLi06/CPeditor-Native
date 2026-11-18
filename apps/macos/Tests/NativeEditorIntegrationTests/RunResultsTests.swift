@@ -23,6 +23,13 @@ import NativeCoreBridge
         return session
     }
 
+    private func allowTimeForCancellation(_ runner: RunController) throws {
+        let profile = try #require(runner.selectedProfile)
+        let updated = try profile.updating(buildExecutable: profile.buildExecutable, buildArguments: profile.buildArguments,
+                                           buildWallTimeoutMS: 30_000, runWallTimeoutMS: 30_000)
+        try runner.applyProfile(updated) { _, _ in }
+    }
+
     /// 等待实际 Core Running 事件，不用固定延时猜测编译或启动是否完成。
     private func reachedRunning(_ runner: RunController, documentID: RawIdentifier) async -> Bool {
         let clock = ContinuousClock()
@@ -31,6 +38,93 @@ import NativeCoreBridge
             await Task.yield()
         }
         return runner.isRunning && runner.state(for: documentID) == .running
+    }
+
+    @Test func runResultTracksInputsAndOnlyAppliesCurrentOutput() async throws {
+        _ = NSApplication.shared
+        let session = try session(id: "current-result", source: source, testcaseID: "sample")
+        let runner = RunController()
+        defer { session.dispose() }
+        let test = TestCaseInput(id: "sample", expected: "different\n")
+        session.testCases = [test]
+        runner.runAll(session)
+        await runner.waitForCurrentRun()
+        let result = try #require(runner.result(for: session.document.id))
+        let output = try #require(result.tests.first?.process.completeTextOutput)
+        #expect(result.tests.first?.verdict == "WA")
+        #expect(runner.resultIsCurrent(for: session))
+
+        session.testCases[0].input = WireBytes("changed input\n")
+        #expect(!runner.resultIsCurrent(for: session))
+        runner.useOutputAsExpected(output, for: session, testcaseID: test.id)
+        #expect(session.testCases[0].expected == test.expected)
+        session.testCases = [test]
+
+        session.testCases[0].expected = nil
+        #expect(!runner.resultIsCurrent(for: session))
+        session.testCases = [test]
+        session.testCases[0].enabled = false
+        #expect(!runner.resultIsCurrent(for: session))
+        session.testCases = [test, TestCaseInput()]
+        #expect(!runner.resultIsCurrent(for: session))
+        session.testCases = [test]
+
+        let comparison = runner.comparison
+        runner.comparison = .byte
+        #expect(!runner.resultIsCurrent(for: session))
+        runner.comparison = comparison
+
+        let checker = """
+        {"schema_version":1,"command":{"executable":"/usr/bin/true","arguments":[]}}
+        """
+        try runner.applyChecker(checker, enabled: false)
+        #expect(runner.resultIsCurrent(for: session))
+        runner.externalCheckerEnabled = true
+        #expect(!runner.resultIsCurrent(for: session))
+        runner.externalCheckerEnabled = false
+
+        let profile = try #require(runner.selectedProfile)
+        let alternative = try #require(runner.profiles.first { $0.id != profile.id })
+        runner.selectedProfileID = alternative.id
+        #expect(runner.resultIsCurrent(for: session))
+        session.toolchainProfileID = alternative.id
+        #expect(!runner.resultIsCurrent(for: session))
+        session.toolchainProfileID = profile.id
+        runner.selectedProfileID = profile.id
+        try allowTimeForCancellation(runner)
+        #expect(!runner.resultIsCurrent(for: session))
+        try runner.applyProfile(profile) { _, _ in }
+        #expect(runner.resultIsCurrent(for: session))
+
+        runner.useOutputAsExpected(WireBytes("an older run's output"), for: session, testcaseID: test.id)
+        #expect(session.testCases[0].expected == test.expected)
+        runner.useOutputAsExpected(output, for: session, testcaseID: test.id)
+        #expect(session.testCases[0].expected == output)
+        #expect(!runner.resultIsCurrent(for: session))
+
+        runner.runAll(session)
+        await runner.waitForCurrentRun()
+        #expect(runner.result(for: session.document.id)?.tests.first?.verdict == "AC")
+        #expect(runner.resultIsCurrent(for: session))
+        try session.document.markSaved(at: URL(fileURLWithPath: "/tmp/answer.cpp"), snapshot: session.document.snapshot())
+        #expect(!runner.resultIsCurrent(for: session))
+        await runner.shutdown()
+    }
+
+    @Test func immediateCancellationIsBoundToTheSubmittedRun() async throws {
+        _ = NSApplication.shared
+        let session = try session(id: "cancel-before-submit", source: source, testcaseID: "sample")
+        let runner = RunController()
+        defer { session.dispose() }
+        runner.runAll(session)
+        runner.cancel()
+        await runner.waitForCurrentRun()
+        #expect(runner.state(for: session.document.id) == .cancelled)
+        #expect(runner.result(for: session.document.id)?.tests.first?.verdict == "Cancelled")
+        runner.runAll(session)
+        await runner.waitForCurrentRun()
+        #expect(runner.result(for: session.document.id)?.tests.first?.verdict == "AC")
+        await runner.shutdown()
     }
 
     private func folder() throws -> URL {
@@ -44,6 +138,7 @@ import NativeCoreBridge
         let first = try session(id: "run-owner-A", source: source, testcaseID: "sample-A")
         let second = try session(id: "run-owner-B", source: waitingSource, testcaseID: "sample-B")
         let runner = RunController()
+        try allowTimeForCancellation(runner)
         defer {
             first.dispose(); second.dispose()
             Task { await runner.shutdown() }
@@ -76,6 +171,7 @@ import NativeCoreBridge
         let cancelled = try #require(runner.result(for: second.document.id))
         #expect(cancelled.documentID == second.document.id)
         #expect(cancelled.tests.first?.testcaseID == "sample-B")
+        #expect(cancelled.tests.first?.verdict == "Cancelled")
         #expect(runner.state(for: second.document.id) == .cancelled)
         #expect(runner.result(for: first.document.id) == original)
         #expect(!unrelatedUpdate.wasSignalled)

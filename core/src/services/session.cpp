@@ -56,7 +56,7 @@ std::string_view detail_view(std::string_view text) {
 }
 std::string detail(std::string_view text) {return std::string(detail_view(text));}
 Json parse_json(std::string_view text, std::size_t bytes, std::size_t depth) {
-    if (text.size() > bytes) throw std::invalid_argument("Session JSON exceeds byte limit");
+    if (text.size() > bytes) throw SessionCapacityError("Session JSON exceeds byte limit");
     std::vector<std::set<std::string>> keys;
     return Json::parse(text, [&](int current_depth, Json::parse_event_t event, Json& parsed) {
         if (static_cast<std::size_t>(current_depth) > depth) throw std::invalid_argument("Session JSON exceeds nesting limit");
@@ -85,12 +85,14 @@ std::string text(const Json& value) {
     return value.get<std::string>();
 }
 std::string bounded_text(const Json& value, std::size_t maximum) {
-    if (!value.is_string() || value.get_ref<const Json::string_t&>().size() > maximum)
-        throw std::invalid_argument("Session string exceeds its limit or type");
+    if (!value.is_string()) throw std::invalid_argument("Session field must be a string");
+    if (value.get_ref<const Json::string_t&>().size() > maximum)
+        throw SessionCapacityError("Session string exceeds its byte limit");
     return value.get<std::string>();
 }
 void utf8(std::string_view value, std::size_t maximum, bool nonempty = false, bool allow_nul = false) {
-    if (value.size() > maximum || (nonempty && value.empty()) ||
+    if (value.size() > maximum) throw SessionCapacityError("Session string exceeds its byte limit");
+    if ((nonempty && value.empty()) ||
         (!allow_nul && value.find('\0') != std::string_view::npos) || decode_utf8(value).error_offset)
         throw std::invalid_argument("Invalid session UTF-8 string or byte limit");
 }
@@ -103,7 +105,7 @@ void digest(std::string_view value) {
     if (!digest_valid(value)) throw std::invalid_argument("Invalid session SHA-256 digest");
 }
 void consume(std::size_t& total, std::size_t size, std::size_t maximum) {
-    if (size > maximum - total) throw std::invalid_argument("Session aggregate limit exceeded");
+    if (size > maximum - total) throw SessionCapacityError("Session aggregate limit exceeded");
     total += size;
 }
 std::optional<std::string> optional_text(const Json& object, const char* key) {
@@ -123,7 +125,7 @@ std::string raw(const Json& value, std::size_t maximum) {
     auto size = encoded.size() / 4 * 3;
     if (!encoded.empty() && encoded.back() == '=') --size;
     if (encoded.size() >= 2 && encoded[encoded.size() - 2] == '=' && size) --size;
-    if (size > maximum) throw std::invalid_argument("Test bytes exceed limit");
+    if (size > maximum) throw SessionCapacityError("Test bytes exceed limit");
     return decode_base64(encoded);
 }
 Json bytes(std::string_view value) {
@@ -133,8 +135,9 @@ std::vector<NativeEditorPreferences> parse_preferences(const Json& owner, const 
     std::vector<NativeEditorPreferences> result;
     const auto found = owner.find(field::editor_preferences);
     if (found == owner.end()) return result;
-    if (!found->is_array() || found->size() > bounds.max_preferences_per_owner)
-        throw std::invalid_argument("Invalid editor preferences array count/type");
+    if (!found->is_array()) throw std::invalid_argument("Editor preferences must be an array");
+    if (found->size() > bounds.max_preferences_per_owner)
+        throw SessionCapacityError("Too many native editor preferences");
     for (const auto& preference : *found) {
         fields(preference, {field::namespace_id, field::schema_version, field::object_json});
         auto object = bounded_text(preference.at(field::object_json), bounds.max_preferences_bytes);
@@ -154,7 +157,7 @@ void json_depth(const Json& value, std::size_t maximum, std::size_t current = 0)
     if (value.is_structured()) for (const auto& child : value) json_depth(child, maximum, current + 1);
 }
 void validate_preferences(const std::vector<NativeEditorPreferences>& values, const SessionBounds& bounds, std::size_t& aggregate) {
-    if (values.size() > bounds.max_preferences_per_owner) throw std::invalid_argument("Too many native editor preferences");
+    if (values.size() > bounds.max_preferences_per_owner) throw SessionCapacityError("Too many native editor preferences");
     std::set<std::pair<std::string, std::uint64_t>> namespaces;
     for (const auto& value : values) {
         utf8(value.namespace_id, bounds.max_id_bytes, true);
@@ -168,7 +171,7 @@ void validate_preferences(const std::vector<NativeEditorPreferences>& values, co
 void validate(const WorkspaceSession& value, const SessionBounds& bounds) {
     bounds_valid(bounds);
     utf8(value.workspace_id, bounds.max_id_bytes, true);
-    if (value.documents.size() > bounds.max_documents) throw std::invalid_argument("Too many session documents");
+    if (value.documents.size() > bounds.max_documents) throw SessionCapacityError("Too many session documents");
     std::size_t content = 0, test_count = 0, preference_bytes = 0;
     std::set<std::string> document_ids;
     for (const auto& document : value.documents) {
@@ -186,14 +189,14 @@ void validate(const WorkspaceSession& value, const SessionBounds& bounds) {
             if (point.revision == document.revision && point.source_digest != sha256(document.source_text))
                 throw std::invalid_argument("Save point conflicts with source revision");
         }
-        if (document.tests.size() > bounds.max_tests_per_document) throw std::invalid_argument("Too many document testcases");
+        if (document.tests.size() > bounds.max_tests_per_document) throw SessionCapacityError("Too many document testcases");
         consume(test_count, document.tests.size(), bounds.max_total_tests);
         std::set<std::string> ids;
         for (const auto& test : document.tests) {
             utf8(test.id, bounds.max_id_bytes, true);
             if (!ids.insert(test.id).second) throw std::invalid_argument("Duplicate document testcase ID");
             if (test.input.size() > bounds.max_test_bytes || (test.expected && test.expected->size() > bounds.max_test_bytes))
-                throw std::invalid_argument("Test bytes exceed limit");
+                throw SessionCapacityError("Test bytes exceed limit");
             consume(content, test.input.size(), bounds.max_total_content_bytes);
             if (test.expected) consume(content, test.expected->size(), bounds.max_total_content_bytes);
         }
@@ -257,7 +260,8 @@ WorkspaceSession parse_workspace_session(std::string_view bytes, SessionBounds b
     result.workspace_id = bounded_text(object.at(field::workspace_id), bounds.max_id_bytes); result.revision = integer(object.at(field::revision));
     result.selected_document_id = optional_text(object, field::selected_document_id);
     const auto& documents = object.at(field::documents);
-    if (!documents.is_array() || documents.size() > bounds.max_documents) throw std::invalid_argument("Invalid session documents array");
+    if (!documents.is_array()) throw std::invalid_argument("Session documents must be an array");
+    if (documents.size() > bounds.max_documents) throw SessionCapacityError("Too many session documents");
     std::size_t test_count = 0, content = 0, preference_bytes = 0;
     for (const auto& document : documents) {
         fields(document, {field::document_id, field::revision, field::source_text, field::source_digest, field::original_path,
@@ -276,7 +280,8 @@ WorkspaceSession parse_workspace_session(std::string_view bytes, SessionBounds b
             value.save_point = DocumentSavePoint{integer(point->at(field::revision)), text(point->at(field::source_digest)), optional_text(*point, field::disk_digest)};
         }
         const auto& tests = document.at(field::tests);
-        if (!tests.is_array() || tests.size() > bounds.max_tests_per_document) throw std::invalid_argument("Invalid document tests array");
+        if (!tests.is_array()) throw std::invalid_argument("Document testcases must be an array");
+        if (tests.size() > bounds.max_tests_per_document) throw SessionCapacityError("Too many document testcases");
         consume(test_count, tests.size(), bounds.max_total_tests);
         for (const auto& test : tests) {
             fields(test, {field::id, field::input, field::expected, field::enabled});
@@ -315,7 +320,7 @@ std::string serialize_workspace_session(const WorkspaceSession& value, SessionBo
     }
     json_depth(object, bounds.max_json_depth);
     auto result = object.dump(2, ' ', false, Json::error_handler_t::strict) + "\n";
-    if (result.size() > bounds.max_json_bytes) throw std::invalid_argument("Serialized session exceeds byte limit");
+    if (result.size() > bounds.max_json_bytes) throw SessionCapacityError("Serialized session exceeds byte limit");
     return result;
 }
 SessionService::SessionService(std::shared_ptr<FileStore> files, SessionBounds bounds) : files_(std::move(files)), bounds_(bounds) {
@@ -352,7 +357,8 @@ SessionSaveResult SessionService::save(const SessionPaths& paths, const Workspac
         storage_paths(paths, candidate, bounds_);
         if (expected_disk_digest) digest(*expected_disk_digest);
         if (lock_timeout.count() < 0) throw std::invalid_argument("Invalid session lock timeout");
-    } catch (const std::system_error& error) { result.detail = detail(error.what()); return result; }
+    } catch (const SessionCapacityError& error) { result.status = SessionSaveStatus::capacity_exceeded; result.detail = detail(error.what()); return result; }
+    catch (const std::system_error& error) { result.detail = detail(error.what()); return result; }
     catch (const std::exception& error) { result.status = SessionSaveStatus::invalid_session; result.detail = detail(error.what()); return result; }
     if (stop.stop_requested()) { result.status = SessionSaveStatus::cancelled; return result; }
     std::unique_ptr<FileLock> lock;
@@ -422,7 +428,7 @@ const char* session_load_status_name(SessionLoadStatus status) noexcept {
     const auto index = static_cast<unsigned>(status); return index < std::size(names) ? names[index] : "Unknown";
 }
 const char* session_save_status_name(SessionSaveStatus status) noexcept {
-    constexpr const char* names[]{"Saved", "Conflict", "InvalidSession", "InvalidExisting", "IOFailed", "DurabilityUnknown", "LockUnavailable", "Cancelled"};
+    constexpr const char* names[]{"Saved", "Conflict", "InvalidSession", "InvalidExisting", "IOFailed", "DurabilityUnknown", "LockUnavailable", "Cancelled", "CapacityExceeded"};
     const auto index = static_cast<unsigned>(status); return index < std::size(names) ? names[index] : "Unknown";
 }
 } // namespace cpn

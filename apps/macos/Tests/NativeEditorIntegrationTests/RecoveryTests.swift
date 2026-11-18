@@ -47,7 +47,8 @@ import NativeCoreBridge
         var fields = try #require(first.runner.selectedProfile).payload
         if case .object(var object) = fields { object[ToolchainProfile.Field.id.rawValue] = .string("toolchain/非UUID"); fields = .object(object) }
         let custom = try ToolchainProfile(payload: fields)
-        try first.runner.applyProfile(custom.jsonText())
+        let draft = ConfigurationJSONDraft(kind: .toolchain, jsonText: try custom.jsonText())
+        try first.applyRunnerConfiguration(draft, jsonText: draft.jsonText)
         session.toolchainProfileID = custom.id
         first.wrapText = true
         let native = try #require(session.stView)
@@ -92,6 +93,61 @@ import NativeCoreBridge
         #expect(await second.recovery?.flush() == true)
         await second.recovery?.shutdown(); await second.runner.shutdown()
         second.sessions.forEach { $0.dispose() }
+    }
+
+    @Test func recoverySavesWorkspaceAboveDefaultABIEnvelopeAndRejectsOpeningBeyondCoreLimits() async throws {
+        _ = NSApplication.shared
+        let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
+        let recoveryFile = directory.appendingPathComponent("workspace.json")
+        let workspace = Workspace(recoveryURL: recoveryFile)
+        await workspace.bootstrap()
+        let recovery = try #require(workspace.recovery)
+        let text = String(repeating: "x", count: SessionLimits.maximumSourceBytes * 9 / 16)
+        for index in 0..<3 {
+            let file = directory.appendingPathComponent("source-\(index).cpp")
+            let fixture = index == 2 ? String(repeating: "x", count: SessionLimits.maximumSourceBytes) : text
+            try Data(fixture.utf8).write(to: file)
+            await workspace.open(file)
+        }
+        #expect(workspace.sessions.filter { $0.document.url != nil }.count == 2)
+        #expect(workspace.errorMessage == L10n.string("recovery_open_capacity_exceeded"))
+        #expect(await recovery.flush())
+        let reader = CoreCoordinator()
+        let loaded = try await reader.loadSession(at: recoveryFile.path)
+        #expect(loaded.session?.documents.filter { $0.originalPath != nil }.map(\.sourceText) == [text, text])
+        #expect(await workspace.prepareToClose())
+        await reader.shutdown()
+        workspace.sessions.forEach { $0.dispose() }
+    }
+
+    @Test func capacityFailureAllowsMultipleCleanTabClosesAndPreservesLastSavedSnapshot() async throws {
+        _ = NSApplication.shared
+        let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
+        let recoveryFile = directory.appendingPathComponent("workspace.json")
+        let workspace = Workspace(recoveryURL: recoveryFile)
+        await workspace.bootstrap()
+        let recovery = try #require(workspace.recovery)
+        #expect(await recovery.flush())
+        let previous = try Data(contentsOf: recoveryFile)
+        // Simulate the live workspace growing beyond its budget after its tabs have been admitted.
+        let profile = try LanguageProfile.load(id: "cpp")
+        let cleanTabs = try (0...SessionLimits.maximumDocuments).map { _ in
+            try NativeEditorSession(document: SourceDocument(languageID: "cpp"), profile: profile)
+        }
+        workspace.sessions += cleanTabs
+        #expect(!(await recovery.flush()))
+        #expect(recovery.isCapacityBlocked)
+        #expect(try Data(contentsOf: recoveryFile) == previous)
+        await workspace.closeDocument(cleanTabs[0])
+        #expect(!workspace.sessions.contains { $0 === cleanTabs[0] })
+        #expect(recovery.isCapacityBlocked)
+        #expect(try Data(contentsOf: recoveryFile) == previous)
+        await workspace.closeDocument(cleanTabs[1])
+        #expect(!workspace.sessions.contains { $0 === cleanTabs[1] })
+        #expect(!recovery.isCapacityBlocked)
+        #expect(try Data(contentsOf: URL(fileURLWithPath: recovery.paths.backupFile)) == previous)
+        #expect(await workspace.prepareToClose())
+        workspace.sessions.forEach { $0.dispose() }
     }
 
     @Test func failedNativeCandidateIsAtomicAndExhaustedDocumentRestoresReadOnly() throws {
@@ -275,26 +331,36 @@ import NativeCoreBridge
     @Test func recoveryExportInProgressPreventsCloseAndFlushWaitsForExport() async throws {
         _ = NSApplication.shared
         let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
-        let workspace = Workspace(recoveryURL: directory.appendingPathComponent("workspace.json"))
+        var configuration = try RecoveryConfiguration.load()
+        configuration.lockTimeoutMS = 60_000
+        let workspace = Workspace(recoveryURL: directory.appendingPathComponent("workspace.json"), recoveryConfiguration: configuration)
         await workspace.bootstrap()
         let recovery = try #require(workspace.recovery)
         #expect(await recovery.flush())
         let copy = directory.appendingPathComponent("copy.json")
         let lockPath = recovery.configuration.paths(for: copy).lockFile
         let descriptor = Darwin.open(lockPath, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
-        #expect(descriptor >= 0)
+        try #require(descriptor >= 0)
         defer { _ = flock(descriptor, LOCK_UN); _ = Darwin.close(descriptor) }
-        #expect(flock(descriptor, LOCK_EX | LOCK_NB) == 0)
+        try #require(flock(descriptor, LOCK_EX | LOCK_NB) == 0)
         let export = Task { await recovery.saveCopy(to: copy) }
-        let deadline = ContinuousClock.now + .seconds(2)
-        while !recovery.isSaving, ContinuousClock.now < deadline { await Task.yield() }
-        #expect(recovery.isChangingLocation)
+        let deadline = ContinuousClock.now + .seconds(10)
+        while !recovery.isSaving, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        try #require(recovery.isSaving && recovery.isChangingLocation)
         #expect(workspace.isBusy)
         #expect(!(await workspace.prepareToClose()))
         #expect(!workspace.runner.isClosed)
         var flushFinished = false
-        let flush = Task { let success = await recovery.flush(); flushFinished = true; return success }
-        for _ in 0..<10 { await Task.yield() }
+        let (started, signal) = AsyncStream<Void>.makeStream()
+        let flush = Task { @MainActor in
+            signal.yield()
+            signal.finish()
+            let success = await recovery.flush()
+            flushFinished = true
+            return success
+        }
+        var start = started.makeAsyncIterator()
+        _ = await start.next()
         #expect(!flushFinished)
         _ = flock(descriptor, LOCK_UN)
         #expect(await export.value)

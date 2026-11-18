@@ -70,6 +70,8 @@ sequenceDiagram
 
 工具链文档最多 1 MiB，严格拒绝重复／未知字段和数字截断。可选 `build_limits`、`run_limits`、`inherit_environment`、`environment`、`variables` 见 `resources/profiles`。`${source}`、`${artifact}`、`${source_dir}`、`${job_dir}` 及显式变量逐参数展开，执行器直接接收 executable 和 argv，不隐式拼接 shell。
 
+`cpn_validate_toolchain_json` 使用同一解析器验证工具链文档。调用无需引擎句柄，也不启动进程。macOS 在应用或导入工具链配置前调用此接口。
+
 `JobEvent` 状态为 `Queued`、`Building`、`Running`、`Checking`、`Completed`、`Cancelled` 或 `Failed`。终态包含 `result`，其中保留 `document_id`、`revision`、`source_digest`、`profile_id`、编译状态和按稳定测试 ID 标记的结果。解答 AC／WA／CE 仍表示任务正常完成了处理；基础设施错误与取消具有独立分类。UI 必须按源码身份判断结果是否仍适用于当前文档。
 
 ## 外部 checker 与共享测试解析
@@ -83,6 +85,8 @@ sequenceDiagram
 保存前完成请求 DOM 清理，并同时预留 64 KiB 返回缓冲区配额和有限响应字符串存储；容量不足不会先写文件再隐藏结果。保存响应按有界字段直接编码，不在实际文件替换之后构造结果 DOM。调用成功的 `CPN_OK` 表示有可解码响应，是否保存成功须继续检查响应 `status` 和 `recovery_replaced`。`DurabilityUnknown` 表示原子替换已经发生但持久化未能确认，不能按普通“未保存”重试。
 
 恢复格式、限额、请求示例和合作锁／外部写入限制见 [会话恢复](session.md)。会话保存请求仍受引擎 `max_request_bytes` 约束。
+
+`cpn_session_default_limits` 返回 Core 的文档、样例、内容和标识符等限额，以及引擎允许的最大请求容量。恢复客户端可用返回的容量配置专用引擎。请求、解码后的会话或磁盘序列化超出容量时，保存接口返回 `CPN_SESSION_CAPACITY` 并保留上次有效记录。
 
 ## Companion 收件箱与导入接口
 

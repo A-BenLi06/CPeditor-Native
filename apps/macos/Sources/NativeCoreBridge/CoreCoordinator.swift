@@ -10,6 +10,15 @@ public struct CoreFailure: Error, LocalizedError, Sendable {
 
 /// 此 actor 的 C ABI 调用在后台执行。句柄／返回 buffer 不跨 actor 传递。
 public actor CoreCoordinator {
+    public final class RunCancellation: @unchecked Sendable {
+        private let lock = NSLock()
+        private var requested = false
+
+        public init() {}
+        public func request() { lock.withLock { requested = true } }
+        fileprivate var isRequested: Bool { lock.withLock { requested } }
+    }
+
     private final class CancellationHandle: @unchecked Sendable {
         private let lock = NSLock()
         private var value: UInt64 = 0
@@ -24,18 +33,21 @@ public actor CoreCoordinator {
     nonisolated private let cancellationHandle = CancellationHandle()
     private var engine: UInt64 = 0
     private var activeJob: UInt64?
+    private var activeCancellation: RunCancellation?
     private var closed = false
     private let pollingMilliseconds: UInt64
     private let drainEvents: UInt32
     private let maximumBuffers: UInt32
     private let maximumJobs: UInt32
+    private let maximumRequestBytes: UInt64
 
     public init(pollingMilliseconds: UInt64 = 30, drainEvents: UInt32 = 16,
-                maximumBuffers: UInt32 = 0, maximumJobs: UInt32 = 0) {
+                maximumBuffers: UInt32 = 0, maximumJobs: UInt32 = 0, maximumRequestBytes: UInt64 = 0) {
         self.pollingMilliseconds = pollingMilliseconds
         self.drainEvents = drainEvents
         self.maximumBuffers = maximumBuffers
         self.maximumJobs = maximumJobs
+        self.maximumRequestBytes = maximumRequestBytes
     }
 
     deinit {
@@ -44,13 +56,13 @@ public actor CoreCoordinator {
         if handle != 0 { Task.detached { _ = cpn_engine_destroy(handle, nil) } }
     }
 
-    nonisolated private static func errorStorage() -> cpn_error {
+    nonisolated static func errorStorage() -> cpn_error {
         var storage = cpn_error()
         storage.struct_size = UInt32(MemoryLayout<cpn_error>.size)
         return storage
     }
 
-    nonisolated private static func check(_ status: cpn_status, _ storage: inout cpn_error) throws {
+    nonisolated static func check(_ status: cpn_status, _ storage: inout cpn_error) throws {
         guard status != CPN_OK else { return }
         let message = withUnsafeBytes(of: &storage.message) { bytes in
             String(decoding: bytes.prefix { $0 != 0 }, as: UTF8.self)
@@ -68,6 +80,7 @@ public actor CoreCoordinator {
         options.abi_version = CPN_ABI_VERSION
         options.max_buffers = maximumBuffers
         options.max_jobs = maximumJobs
+        options.max_request_bytes = maximumRequestBytes
         if maximumJobs == 1 { options.max_workers = 1 }
         var error = Self.errorStorage()
         try Self.check(cpn_engine_create(&options, &engine, &error), &error)
@@ -87,7 +100,7 @@ public actor CoreCoordinator {
         return batch.events
     }
 
-    public func run(_ request: BatchRequest,
+    public func run(_ request: BatchRequest, cancellation: RunCancellation? = nil,
                     onEvent: @Sendable (CoreEvent) async -> Void = { _ in }) async throws -> BatchResult {
         guard activeJob == nil else { throw WireError.busy }
         try ensureEngine()
@@ -100,7 +113,11 @@ public actor CoreCoordinator {
         }
         try Self.check(status, &error)
         activeJob = job
+        activeCancellation = cancellation
+        defer { activeJob = nil; activeCancellation = nil }
         do {
+            // A request made while this task was still queued or encoding survives submission.
+            if cancellation?.isRequested == true { try cancel() }
             while true {
                 try Task.checkCancellation()
                 guard !closed, engine != 0 else { throw WireError.closed }
@@ -111,7 +128,6 @@ public actor CoreCoordinator {
                         guard let result = event.result, result.schemaVersion == 1 else { throw WireError.malformedTerminal }
                         var releaseError = Self.errorStorage()
                         try Self.check(cpn_engine_release_job(engine, job, &releaseError), &releaseError)
-                        activeJob = nil
                         return result
                     }
                 }
@@ -121,7 +137,6 @@ public actor CoreCoordinator {
         } catch {
             // 已确认事件可能消费失败时，销毁整个引擎保证任务和 native buffers 有界。
             if engine != 0 { _ = cpn_engine_destroy(engine, nil); engine = 0; cancellationHandle.set(0) }
-            activeJob = nil
             throw error
         }
     }
@@ -130,6 +145,11 @@ public actor CoreCoordinator {
         guard let job = activeJob, engine != 0 else { return }
         var error = Self.errorStorage()
         try Self.check(cpn_engine_cancel(engine, job, &error), &error)
+    }
+
+    public func cancel(_ cancellation: RunCancellation) throws {
+        guard activeCancellation === cancellation else { return }
+        try cancel()
     }
 
     nonisolated private static func copyBuffer(_ buffer: cpn_buffer) -> Data {
@@ -149,8 +169,10 @@ public actor CoreCoordinator {
     public func saveSession(_ session: WorkspaceSessionRecord, paths: SessionPaths,
                             expectedDiskDigest: String?, lockTimeoutMS: UInt64) throws -> SessionSaveResponse {
         try ensureEngine()
-        let bytes = try JSONEncoder().encode(SessionSaveRequest(paths: paths, session: session,
-                                                                 expectedDiskDigest: expectedDiskDigest, lockTimeoutMS: lockTimeoutMS))
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.withoutEscapingSlashes]
+        let bytes = try encoder.encode(SessionSaveRequest(paths: paths, session: session,
+                                                          expectedDiskDigest: expectedDiskDigest, lockTimeoutMS: lockTimeoutMS))
         let data = try Self.sessionBytes(engine: engine, data: bytes, saving: true)
         let response = try JSONDecoder().decode(SessionSaveResponse.self, from: data)
         guard response.schemaVersion == 1 else { throw WireError.unsupportedSchema }
@@ -164,6 +186,7 @@ public actor CoreCoordinator {
             return saving ? cpn_engine_session_save_json(engine, input, &buffer, &error)
                 : cpn_engine_session_load(engine, input, &buffer, &error)
         }
+        if status == CPN_SESSION_CAPACITY { throw SessionCapacityError.exceeded }
         try check(status, &error)
         return copyBuffer(buffer)
     }

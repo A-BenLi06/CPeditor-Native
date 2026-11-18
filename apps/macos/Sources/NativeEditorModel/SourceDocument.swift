@@ -13,8 +13,14 @@ public struct SourceSnapshot: Equatable, Sendable {
     public let documentID: RawIdentifier
     public let revision: UInt64
     public let text: String
+    public let sourceDigest: String
     public var utf8: Data { Data(text.utf8) }
-    public var sourceDigest: String { SourceDigest.sha256(utf8) }
+    fileprivate init(documentID: RawIdentifier, revision: UInt64, text: String, sourceDigest: String) {
+        self.documentID = documentID
+        self.revision = revision
+        self.text = text
+        self.sourceDigest = sourceDigest
+    }
     public static func == (left: Self, right: Self) -> Bool {
         left.documentID == right.documentID && left.revision == right.revision && left.text.utf8.elementsEqual(right.text.utf8)
     }
@@ -78,8 +84,9 @@ public final class SourceDocument: Identifiable {
         self.languageID = languageID
         self.revision = revision
         self.savePoint = savePoint
-        sourceDigest = SourceDigest.sha256(Data(text.utf8))
-        savedDigest = savePoint?.sourceDigest ?? SourceDigest.sha256(Data((saved ? text : "").utf8))
+        let digest = SourceDigest.sha256(Data(text.utf8))
+        sourceDigest = digest
+        savedDigest = savePoint?.sourceDigest ?? (saved ? digest : SourceDigest.sha256(Data()))
     }
 
     @discardableResult public func commit(_ committedText: String) throws -> Bool {
@@ -95,7 +102,7 @@ public final class SourceDocument: Identifiable {
     public func setPersistenceReadOnly(_ readOnly: Bool) { persistenceIsReadOnly = readOnly }
 
     public func snapshot() -> SourceSnapshot {
-        SourceSnapshot(documentID: id, revision: revision, text: text)
+        SourceSnapshot(documentID: id, revision: revision, text: text, sourceDigest: sourceDigest)
     }
 
     public func position(atUTF16Offset offset: Int) -> TextPosition {
@@ -137,8 +144,8 @@ public final class SourceDocument: Identifiable {
         self.url = url
         // 写盘期间的新编辑不得被误标为已保存。
         savedDigest = snapshot.sourceDigest
-        savePoint = SourceSavePoint(revision: snapshot.revision, sourceDigest: snapshot.sourceDigest,
-                                    diskDigest: diskDigest ?? snapshot.sourceDigest)
+        savePoint = SourceSavePoint(revision: snapshot.revision, sourceDigest: savedDigest,
+                                    diskDigest: diskDigest ?? savedDigest)
     }
 
     public func replacing(_ range: NSRange, with replacement: String,

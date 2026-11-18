@@ -1,5 +1,21 @@
 import Foundation
+import CPNativeCore
 import NativeEditorModel
+
+public enum SessionCapacityError: Error, Equatable { case exceeded }
+
+public enum SessionLimits {
+    private static let limits = cpn_session_default_limits()
+    public static let maximumRequestBytes = limits.max_request_bytes
+    public static let maximumDocuments = Int(limits.max_documents)
+    public static let maximumTestsPerDocument = Int(limits.max_tests_per_document)
+    public static let maximumTotalTests = Int(limits.max_total_tests)
+    public static let maximumSourceBytes = Int(limits.max_source_bytes)
+    public static let maximumTestBytes = Int(limits.max_test_bytes)
+    public static let maximumTotalContentBytes = Int(limits.max_total_content_bytes)
+    public static let maximumPreferenceBytes = Int(limits.max_preferences_bytes)
+    public static let maximumIdentifierBytes = Int(limits.max_id_bytes)
+}
 
 public struct NativePreferences: Codable, Equatable, Sendable {
     public let namespaceID: String
@@ -54,6 +70,20 @@ public struct WorkspaceSessionRecord: Codable, Sendable {
                 documents: [SessionDocumentRecord], editorPreferences: [NativePreferences]) {
         schemaVersion = 1; self.workspaceID = workspaceID; self.revision = revision
         self.selectedDocumentID = selectedDocumentID; self.documents = documents; self.editorPreferences = editorPreferences
+    }
+
+    // Core validates the digest against the UTF-8 bytes when loading, and local snapshots own their digest.
+    public func hasSameContent(as other: Self?) -> Bool {
+        guard let other, schemaVersion == other.schemaVersion, workspaceID == other.workspaceID,
+              selectedDocumentID == other.selectedDocumentID, editorPreferences == other.editorPreferences,
+              documents.count == other.documents.count else { return false }
+        return zip(documents, other.documents).allSatisfy { lhs, rhs in
+            lhs.documentID == rhs.documentID && lhs.revision == rhs.revision && lhs.sourceDigest == rhs.sourceDigest
+                && lhs.originalPath.map { RawIdentifier($0) } == rhs.originalPath.map { RawIdentifier($0) }
+                && lhs.languageID.map { RawIdentifier($0) } == rhs.languageID.map { RawIdentifier($0) }
+                && lhs.toolchainProfileID == rhs.toolchainProfileID && lhs.savePoint == rhs.savePoint
+                && lhs.tests == rhs.tests && lhs.editorPreferences == rhs.editorPreferences
+        }
     }
 }
 

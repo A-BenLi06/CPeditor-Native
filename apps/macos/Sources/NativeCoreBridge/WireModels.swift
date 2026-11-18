@@ -3,7 +3,7 @@ import NativeEditorModel
 
 /// 对未知工具链字段保留原始 JSON，由共享 Core 的配置校验决定是否接受。
 public enum JSONValue: Codable, Sendable, Equatable {
-    case object([String: JSONValue]), array([JSONValue]), string(String), number(Double), bool(Bool), null
+    case object([String: JSONValue]), array([JSONValue]), string(String), number(Double), largeInteger(Int64), bool(Bool), null
     public init(from decoder: Decoder) throws {
         let box = try decoder.singleValueContainer()
         if box.decodeNil() { self = .null }
@@ -11,6 +11,7 @@ public enum JSONValue: Codable, Sendable, Equatable {
         else if let value = try? box.decode(String.self) { self = .string(value) }
         else if let value = try? box.decode([String: Self].self) { self = .object(value) }
         else if let value = try? box.decode([Self].self) { self = .array(value) }
+        else if let value = try? box.decode(Int64.self), Double(exactly: value) == nil { self = .largeInteger(value) }
         else { self = .number(try box.decode(Double.self)) }
     }
     public func encode(to encoder: Encoder) throws {
@@ -20,6 +21,7 @@ public enum JSONValue: Codable, Sendable, Equatable {
         case .array(let value): try box.encode(value)
         case .string(let value): try box.encode(value)
         case .number(let value): try box.encode(value)
+        case .largeInteger(let value): try box.encode(value)
         case .bool(let value): try box.encode(value)
         case .null: try box.encodeNil()
         }
@@ -29,9 +31,24 @@ public enum JSONValue: Codable, Sendable, Equatable {
     public var array: [JSONValue]? { if case .array(let values) = self { return values }; return nil }
     public var string: String? { if case .string(let value) = self { return value }; return nil }
     public var integerValue: Int? {
-        guard case .number(let value) = self, value.isFinite, value.rounded() == value,
-              value >= Double(Int.min), value <= Double(Int.max) else { return nil }
-        return Int(value)
+        switch self {
+        case .number(let value): Int(exactly: value)
+        case .largeInteger(let value): Int(exactly: value)
+        default: nil
+        }
+    }
+
+    public static func == (left: Self, right: Self) -> Bool {
+        switch (left, right) {
+        case (.object(let left), .object(let right)): left == right
+        case (.array(let left), .array(let right)): left == right
+        case (.string(let left), .string(let right)): left.utf8.elementsEqual(right.utf8)
+        case (.number(let left), .number(let right)): left == right
+        case (.largeInteger(let left), .largeInteger(let right)): left == right
+        case (.bool(let left), .bool(let right)): left == right
+        case (.null, .null): true
+        default: false
+        }
     }
 }
 
@@ -220,6 +237,11 @@ public struct ProcessReport: Decodable, Sendable, Equatable {
     public let nativeError: Int
     public let stdoutTotalBytes: UInt64
     public let stderrTotalBytes: UInt64
+    public var completeTextOutput: WireBytes? {
+        guard termination == "Exited", exitCode == 0, signal == nil,
+              !stdoutTruncated, UInt64(stdout.data.count) == stdoutTotalBytes, stdout.canDisplayAsText else { return nil }
+        return stdout
+    }
     enum CodingKeys: String, CodingKey {
         case termination, stdout, stderr, detail, elapsedMS = "elapsed_ms", exitCode = "exit_code"
         case stdoutTruncated = "stdout_truncated", stderrTruncated = "stderr_truncated"

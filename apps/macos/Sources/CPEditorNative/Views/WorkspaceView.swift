@@ -103,7 +103,7 @@ struct WorkspaceView: View {
                         if workspace.runner.configurationDraft != nil { openSettings() }
                     }
                     Button(L10n.string("import_toolchain_profile")) {
-                        workspace.runner.loadProfile()
+                        workspace.importToolchain()
                     }
                 } label: {
                     HStack(spacing: 4) {
@@ -480,11 +480,13 @@ private struct DocumentTabItem: View {
                 ProgressView()
                     .controlSize(.mini)
             } else if let result = runResult {
+                let resultIsCurrent = workspace.runner.resultIsCurrent(for: session)
                 VerdictBadge(
                     descriptor: .summary(for: result),
                     compact: true,
-                    dimmed: !result.matches(session.document.snapshot())
+                    dimmed: !resultIsCurrent
                 )
+                .help(resultIsCurrent ? "" : L10n.string("run_result_outdated_help"))
             }
 
             ZStack {

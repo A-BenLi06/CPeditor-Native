@@ -20,6 +20,7 @@ enum L10n {
     }
 
     static func describe(_ error: Error) -> String {
+        if error is SessionCapacityError { return string("recovery_capacity_exceeded") }
         if let document = error as? DocumentError {
             switch document {
             case .staleRevision: return string("stale_document_revision")

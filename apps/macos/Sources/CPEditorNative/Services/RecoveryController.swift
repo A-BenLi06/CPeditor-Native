@@ -9,7 +9,7 @@ struct RecoveryConfiguration: Decodable, Sendable {
     let recoveryFilename: String
     let backupFilenameFormat: String
     let lockFilenameFormat: String
-    let lockTimeoutMS: UInt64
+    var lockTimeoutMS: UInt64
     let workspaceNamespace: String
     let documentNamespace: String
     let checkerNamespace: String
@@ -60,17 +60,19 @@ private struct RecoveryLocationPreference: Codable {
     private(set) var isLoading = false
     private(set) var isSaving = false
     private(set) var isBlocked = false
+    private(set) var isCapacityBlocked = false
     private(set) var isChangingLocation = false
     private(set) var isRestoring = false
     private(set) var notice: String?
     private(set) var paths: SessionPaths
     let configuration: RecoveryConfiguration
     @ObservationIgnored private weak var workspace: Workspace?
-    @ObservationIgnored private var coordinator = CoreCoordinator()
+    @ObservationIgnored private var coordinator = CoreCoordinator(maximumRequestBytes: SessionLimits.maximumRequestBytes)
     @ObservationIgnored private var exportCoordinator: CoreCoordinator?
     @ObservationIgnored private var expectedDiskDigest: String?
     @ObservationIgnored private var revision: UInt64 = 0
-    @ObservationIgnored private var lastContent: Data?
+    @ObservationIgnored private var lastContent: WorkspaceSessionRecord?
+    @ObservationIgnored private var rejectedContent: WorkspaceSessionRecord?
     @ObservationIgnored private var forceSave = false
     @ObservationIgnored private var cancellationRequested = false
     @ObservationIgnored private var pending = false
@@ -119,9 +121,39 @@ private struct RecoveryLocationPreference: Codable {
         if !isBlocked { requestSave() }
     }
 
-    private func content(of workspace: Workspace) throws -> Data {
-        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
-        return try encoder.encode(workspace.sessionRecord(revision: 0, configuration: configuration))
+    private func content(of workspace: Workspace) throws -> WorkspaceSessionRecord {
+        try workspace.sessionRecord(revision: 0, configuration: configuration)
+    }
+
+    private func needsSave(_ contents: WorkspaceSessionRecord) -> Bool {
+        if let rejectedContent, contents.hasSameContent(as: rejectedContent) { return false }
+        return forceSave || expectedDiskDigest == nil || !contents.hasSameContent(as: lastContent)
+    }
+
+    private func saved(_ contents: WorkspaceSessionRecord) {
+        lastContent = contents
+        rejectedContent = nil
+        if isCapacityBlocked { notice = nil }
+        isCapacityBlocked = false
+        isBlocked = false
+    }
+
+    private func blockForCapacity(_ contents: WorkspaceSessionRecord) {
+        isCapacityBlocked = true
+        isBlocked = true
+        forceSave = true
+        rejectedContent = contents
+        notice = L10n.string("recovery_capacity_exceeded")
+    }
+
+    func hasUnsavedTests(in session: NativeEditorSession) -> Bool {
+        if let recorded = lastContent?.documents.first(where: { $0.documentID == session.document.id }) {
+            return session.testCases != recorded.tests
+        }
+        // A new blank test is a UI placeholder. It does not represent user input.
+        guard !session.testCases.isEmpty else { return false }
+        guard session.testCases.count == 1, let test = session.testCases.first else { return true }
+        return !test.input.data.isEmpty || test.expected?.data.isEmpty != true || !test.enabled
     }
 
     private func observeNextChange() {
@@ -142,23 +174,24 @@ private struct RecoveryLocationPreference: Codable {
     }
 
     func requestSave() {
-        guard !isLoading, !isChangingLocation, !isBlocked, !stopping, workspace != nil else { return }
+        guard !isLoading, !isChangingLocation, !stopping, workspace != nil, !isBlocked || isCapacityBlocked else { return }
         pending = true
         guard saveTask == nil else { return }
         saveTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            while self.pending, !self.isBlocked {
+            while self.pending, !self.isBlocked || self.isCapacityBlocked {
                 self.pending = false
                 guard let workspace = self.workspace else { break }
                 var finalLease = false
                 var recoveryReplaced = false
+                var attemptedContent: WorkspaceSessionRecord?
                 do {
                     if self.revision == UInt64.max {
                         _ = await self.confirmFrozenSession()
                         continue
                     }
                     var contents = try self.content(of: workspace)
-                    if !self.forceSave, contents == self.lastContent, self.expectedDiskDigest != nil { continue }
+                    guard self.needsSave(contents) else { continue }
                     if self.revision == UInt64.max - 1 {
                         guard workspace.persistence.operationCount == 0 else { self.pending = true; break }
                         // 捕获、检查组合输入和冻结属于同一个 MainActor 段，中间没有 await。
@@ -166,11 +199,12 @@ private struct RecoveryLocationPreference: Codable {
                             self.notice = workspace.errorMessage; self.pending = true; break
                         }
                         contents = try self.content(of: workspace)
-                        if !self.forceSave, contents == self.lastContent, self.expectedDiskDigest != nil { continue }
+                        guard self.needsSave(contents) else { continue }
                         guard workspace.persistence.tryBeginFinal() else { self.pending = true; break }
                         finalLease = true
                     }
                     let record = try workspace.sessionRecord(revision: self.revision + 1, configuration: self.configuration)
+                    attemptedContent = contents
                     if finalLease { try workspace.captureFrozenSession(record, configuration: self.configuration) }
                     self.cancellationRequested = false
                     self.isSaving = true
@@ -186,9 +220,10 @@ private struct RecoveryLocationPreference: Codable {
                     if recoveryReplaced {
                         self.expectedDiskDigest = response.diskDigest
                         self.revision = record.revision
-                        self.lastContent = self.revision == UInt64.max ? try self.content(of: workspace) : contents
+                        self.saved(self.revision == UInt64.max ? try self.content(of: workspace) : contents)
                     }
                     if response.status != .saved || !response.recoveryReplaced {
+                        self.isCapacityBlocked = false
                         self.isBlocked = true
                         self.forceSave = true
                         self.notice = L10n.sessionSaveStatus(response.status) + " " + response.detail
@@ -201,8 +236,13 @@ private struct RecoveryLocationPreference: Codable {
                         if !recoveryReplaced { workspace.releaseFailedFinalSession() }
                         workspace.persistence.finishFinal(replaced: recoveryReplaced)
                     }
-                    self.isBlocked = true
-                    self.notice = self.cancellationRequested ? L10n.sessionSaveStatus(.cancelled) : L10n.describe(error)
+                    if error is SessionCapacityError, let attemptedContent {
+                        self.blockForCapacity(attemptedContent)
+                    } else {
+                        self.isCapacityBlocked = false
+                        self.isBlocked = true
+                        self.notice = self.cancellationRequested ? L10n.sessionSaveStatus(.cancelled) : L10n.describe(error)
+                    }
                 }
                 self.isSaving = false
             }
@@ -220,8 +260,8 @@ private struct RecoveryLocationPreference: Codable {
             let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
             guard try encoder.encode(actual) == encoder.encode(record), expectedDiskDigest == nil || digest == expectedDiskDigest else { throw DocumentError.diskConflict }
             expectedDiskDigest = digest
-            lastContent = try content(of: workspace)
-            isBlocked = false; forceSave = false; pending = false
+            saved(try content(of: workspace))
+            forceSave = false; pending = false
             notice = L10n.string("workspace_revision_frozen")
             return true
         } catch { isBlocked = true; notice = L10n.describe(error); return false }
@@ -235,7 +275,7 @@ private struct RecoveryLocationPreference: Codable {
         if let saveTask { await saveTask.value }
         if revision == UInt64.max { return await confirmFrozenSession() }
         // 同一 actor 上检查快照，覆盖保存期间发生但观察回调尚未排队的变更。
-        if !isBlocked, let workspace, (try? content(of: workspace)) != lastContent {
+        if (!isBlocked || isCapacityBlocked), let workspace, let contents = try? content(of: workspace), needsSave(contents) {
             requestSave()
             if let saveTask { await saveTask.value }
         }
@@ -270,7 +310,9 @@ private struct RecoveryLocationPreference: Codable {
         guard !isChangingLocation, !isRestoring else { return }
         if let saveTask { await saveTask.value }
         await coordinator.shutdown()
-        coordinator = CoreCoordinator()
+        coordinator = CoreCoordinator(maximumRequestBytes: SessionLimits.maximumRequestBytes)
+        rejectedContent = nil
+        isCapacityBlocked = false
         isBlocked = false; notice = nil
         requestSave()
     }
@@ -320,13 +362,14 @@ private struct RecoveryLocationPreference: Codable {
             }.value
             guard distinct else { notice = L10n.string("choose_distinct_recovery"); return false }
             var contents = try content(of: workspace)
-            var changed = contents != lastContent
+            var changed = lastContent.map { !contents.hasSameContent(as: $0) } ?? true
             var finalLease = false
             var replaced = false
             do {
                 if changed, revision == UInt64.max - 1 {
                     guard workspace.captureForRecoveryReplacement() else { notice = workspace.errorMessage; return false }
-                    contents = try content(of: workspace); changed = contents != lastContent
+                    contents = try content(of: workspace)
+                    changed = lastContent.map { !contents.hasSameContent(as: $0) } ?? true
                     if changed {
                         guard workspace.persistence.tryBeginFinal(replacing: operation) else { notice = L10n.string("wait_for_file_operation"); return false }
                         finalLease = true
@@ -336,7 +379,7 @@ private struct RecoveryLocationPreference: Codable {
                 let targetRevision = changed ? revision + 1 : revision
                 let record = try workspace.sessionRecord(revision: targetRevision, configuration: configuration)
                 if finalLease { try workspace.captureFrozenSession(record, configuration: configuration) }
-                let fresh = CoreCoordinator()
+                let fresh = CoreCoordinator(maximumRequestBytes: SessionLimits.maximumRequestBytes)
                 cancellationRequested = false
                 exportCoordinator = fresh; isSaving = true
                 let response = try await fresh.saveSession(record, paths: newPaths, expectedDiskDigest: nil,
@@ -348,9 +391,10 @@ private struct RecoveryLocationPreference: Codable {
                     workspace.persistence.finishFinal(replaced: replaced); finalLease = false
                 }
                 if replaced {
-                    await coordinator.shutdown(); coordinator = CoreCoordinator()
+                    await coordinator.shutdown()
+                    coordinator = CoreCoordinator(maximumRequestBytes: SessionLimits.maximumRequestBytes)
                     paths = newPaths; expectedDiskDigest = response.diskDigest; revision = record.revision
-                    lastContent = revision == UInt64.max ? try content(of: workspace) : contents
+                    saved(revision == UInt64.max ? try content(of: workspace) : contents)
                     if persistsLocation {
                         let preference = RecoveryLocationPreference(schemaVersion: 1, path: newPaths.recoveryFile)
                         UserDefaults.standard.set(try JSONEncoder().encode(preference), forKey: configuration.locationPreferenceKey)
@@ -390,7 +434,7 @@ private struct RecoveryLocationPreference: Codable {
         guard let workspace else { return }
         guard workspace.captureForRecoveryReplacement() else { notice = workspace.errorMessage; return }
         // 对已有内存修改先保存副本；不能用损坏原件覆盖工作区。
-        if let lastContent, (try? content(of: workspace)) != lastContent {
+        if let lastContent, (try? content(of: workspace).hasSameContent(as: lastContent)) != true {
             notice = L10n.string("save_before_restore"); return
         }
         do {
@@ -400,11 +444,13 @@ private struct RecoveryLocationPreference: Codable {
                 notice = L10n.string("backup_unavailable") + " " + response.detail; return
             }
             guard workspace.captureForRecoveryReplacement() else { notice = workspace.errorMessage; return }
-            guard try content(of: workspace) == before else { notice = L10n.string("save_before_restore"); return }
+            guard try content(of: workspace).hasSameContent(as: before) else { notice = L10n.string("save_before_restore"); return }
             guard workspace.companionBindingMatches(candidate) else { notice = L10n.string("companion_backup_binding"); return }
             try workspace.applyRecoveryCandidate(candidate, configuration: configuration)
             revision = candidate.revision
             lastContent = try content(of: workspace)
+            isCapacityBlocked = false
+            rejectedContent = nil
             isBlocked = true
             notice = L10n.string("backup_restored_choose_file")
             observeNextChange()

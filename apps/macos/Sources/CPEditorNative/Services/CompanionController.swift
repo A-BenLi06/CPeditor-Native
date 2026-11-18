@@ -54,7 +54,7 @@ struct CompanionPreview: Decodable {
     private var previewsByImportID: [RawIdentifier: CompanionPreview] = [:]
     private var previewsByDocumentID: [RawIdentifier: CompanionPreview] = [:]
     @ObservationIgnored private weak var workspace: Workspace?
-    @ObservationIgnored private let coordinator = CoreCoordinator()
+    @ObservationIgnored private let coordinator = CoreCoordinator(maximumRequestBytes: SessionLimits.maximumRequestBytes)
     @ObservationIgnored private var inboxID: RawIdentifier?
     @ObservationIgnored private var inboxRevision: UInt64?
     @ObservationIgnored private var diskDigest: String?

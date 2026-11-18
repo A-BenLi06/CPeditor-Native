@@ -67,4 +67,16 @@ import NativeEditorModel
             try JSONDecoder().decode(WireBytes.self, from: Data("{\"encoding\":\"base64\",\"data\":\"Zh==\"}".utf8))
         }
     }
+
+    @Test func toolchainValidationChecksOriginalJSONAndRetainsLargeIntegers() throws {
+        let prefix = #"{"id":"custom","language_id":"cpp","source_filename":"main.cpp","run":{"executable":"/usr/bin/true","arguments":[]},"#
+        let valid = prefix + #""schema_version":1,"run_limits":{"stdout_bytes":9007199254740993}}"#
+        let profile = try ToolchainProfile(validating: Data(valid.utf8))
+        try profile.validateForExecution()
+        #expect(try profile.jsonText().contains("9007199254740993"))
+
+        for version in [#""schema_version":1.0}"#, #""schema_version":1,"schema_version":1}"#] {
+            #expect(throws: CoreFailure.self) { try ToolchainProfile(validating: Data((prefix + version).utf8)) }
+        }
+    }
 }

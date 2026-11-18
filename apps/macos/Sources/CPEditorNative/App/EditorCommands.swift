@@ -134,7 +134,7 @@ struct EditorCommands: Commands {
                 if workspace?.runner.configurationDraft != nil { openSettings() }
             }
             .disabled(workspace?.canConfigureRunner != true)
-            Button(L10n.string("import_toolchain_profile")) { workspace?.runner.loadProfile() }
+            Button(L10n.string("import_toolchain_profile")) { workspace?.importToolchain() }
                 .disabled(workspace?.canConfigureRunner != true)
             Button(L10n.string("checker_settings")) {
                 workspace?.runner.beginCheckerEdit()

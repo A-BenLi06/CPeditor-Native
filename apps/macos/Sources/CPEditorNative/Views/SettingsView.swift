@@ -128,7 +128,7 @@ struct SettingsView: View {
                     Button(L10n.string("edit_toolchain")) { runner.beginProfileEdit() }
                         .disabled(runner.selectedProfile == nil)
                     Button(L10n.string("import_toolchain_profile")) {
-                        runner.loadProfile(onError: { importError = $0 })
+                        workspace.importToolchain(onError: { importError = $0 })
                     }
                 }
             }

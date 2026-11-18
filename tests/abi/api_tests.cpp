@@ -21,6 +21,12 @@ std::string request(const std::filesystem::path& helper,std::string mode="echo")
 }
 void run(const std::filesystem::path& helper){
     cpn_error error{};error.struct_size=sizeof(error);
+    auto profile = Json::parse(request(helper))["toolchain"];
+    expect(cpn_validate_toolchain_json(view(profile.dump()), &error) == CPN_OK, "toolchain validates without engine");
+    profile.erase("source_filename");
+    expect(cpn_validate_toolchain_json(view(profile.dump()), &error) == CPN_INVALID_ARGUMENT && error.message[0],
+           "incomplete toolchain reports validation error");
+    expect(cpn_validate_toolchain_json({nullptr, 1}, &error) == CPN_INVALID_ARGUMENT, "null profile input is rejected");
     cpn_engine_handle engine=0;
     cpn_engine_options options{sizeof(options),CPN_ABI_VERSION,1,1,1,0,1024*1024,1024*1024};
     auto wrong=options;wrong.abi_version=99;

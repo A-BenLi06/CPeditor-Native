@@ -7,6 +7,10 @@ struct RunnerConfigurationBusy: LocalizedError {
     var errorDescription: String? { L10n.string("runner_configuration_busy") }
 }
 
+struct ToolchainPreferenceCapacityError: LocalizedError {
+    var errorDescription: String? { L10n.string("toolchain_preference_capacity") }
+}
+
 struct RunConfiguration: Decodable, Sendable {
     let schemaVersion: Int
     let profileResources: [String]
@@ -38,6 +42,7 @@ struct RunConfiguration: Decodable, Sendable {
     @ObservationIgnored private let persistence: PersistenceGate
     var persistentChangesAllowed: Bool { persistence.canMutate }
     private var storedProfiles: [ToolchainProfile] = []
+    @ObservationIgnored private(set) var bundledProfiles: [ToolchainProfile] = []
     private var storedProfileID = RawIdentifier("")
     private var storedComparison: ComparisonPolicy = .trailing
     private var storedCheckerEnabled = false
@@ -69,20 +74,30 @@ struct RunConfiguration: Decodable, Sendable {
     private(set) var submitted: SourceSnapshot?
     var configurationDraft: ConfigurationJSONDraft?
     var errorMessage: String?
-    fileprivate final class RunIdentity: Sendable {}
     @MainActor @Observable fileprivate final class DocumentRun {
-        let identity: RunIdentity
+        let cancellation = CoreCoordinator.RunCancellation()
+        let originalPath: RawIdentifier?
+        let toolchain: ToolchainProfile
+        let tests: [TestCaseInput]
+        let comparison: ComparisonPolicy
+        let checker: CheckerConfiguration?
         var state: JobState
         var result: BatchResult?
-        init(identity: RunIdentity, state: JobState) {
-            self.identity = identity
-            self.state = state
+        init(originalPath: String?, toolchain: ToolchainProfile, tests: [TestCaseInput],
+             comparison: ComparisonPolicy, checker: CheckerConfiguration?) {
+            self.originalPath = originalPath.map(RawIdentifier.init(_:))
+            self.toolchain = toolchain
+            self.tests = tests
+            self.comparison = comparison
+            self.checker = checker
+            self.state = .queued
         }
     }
     private var documentRuns: [RawIdentifier: DocumentRun] = [:]
     @ObservationIgnored private var configuration: RunConfiguration?
     @ObservationIgnored private var coordinator: CoreCoordinator?
     @ObservationIgnored private var task: Task<Void, Never>?
+    @ObservationIgnored private var activeCancellation: CoreCoordinator.RunCancellation?
 
     var selectedProfile: ToolchainProfile? { profiles.first { $0.id == selectedProfileID } }
     var canConfigureChecker: Bool { !checkerPreferencesAreOpaque && checkerPreferenceStorageAvailable }
@@ -90,9 +105,39 @@ struct RunConfiguration: Decodable, Sendable {
     func result(for documentID: RawIdentifier) -> BatchResult? { documentRuns[documentID]?.result }
     func state(for documentID: RawIdentifier) -> JobState? { documentRuns[documentID]?.state }
 
+    private var effectiveChecker: CheckerConfiguration? { externalCheckerEnabled ? externalChecker : nil }
+
+    private func toolchain(for session: NativeEditorSession) -> ToolchainProfile? {
+        if let id = session.toolchainProfileID, let recorded = profiles.first(where: { $0.id == id }) {
+            return recorded
+        }
+        return selectedProfile
+    }
+
+    func resultIsCurrent(for session: NativeEditorSession) -> Bool {
+        guard let run = documentRuns[session.document.id], let result = run.result,
+              result.revision == session.document.revision, result.sourceDigest == session.document.sourceDigest,
+              !session.isComposing, session.captureFailure == nil, !externalCheckerEnabled || externalChecker != nil,
+              run.originalPath == session.document.url.map({ RawIdentifier($0.path) }) else { return false }
+        // A background tab retains its own toolchain when another tab is selected.
+        return run.toolchain == toolchain(for: session) && run.tests == session.testCases && run.comparison == comparison &&
+            run.checker.map { RawIdentifier($0.originalJSON) } == effectiveChecker.map { RawIdentifier($0.originalJSON) }
+    }
+
+    func useOutputAsExpected(_ displayedOutput: WireBytes, for session: NativeEditorSession, testcaseID: RawIdentifier) {
+        guard !isRunning, session.canMutatePersistence else { return }
+        session.capture()
+        guard resultIsCurrent(for: session),
+              let index = session.testCases.firstIndex(where: { $0.id == testcaseID }),
+              let output = result(for: session.document.id)?.tests.first(where: { RawIdentifier($0.testcaseID) == testcaseID })?.process.completeTextOutput,
+              displayedOutput == output
+        else { return }
+        session.testCases[index].expected = output
+    }
+
     func canRun(_ session: NativeEditorSession?) -> Bool {
         guard let session else { return false }
-        return !isRunning && !isClosed && selectedProfile != nil && session.companionRunNotice == nil
+        return !isRunning && !isClosed && toolchain(for: session) != nil && session.companionRunNotice == nil
     }
 
     func beginCheckerEdit(enableOnApply: Bool = false) {
@@ -119,10 +164,11 @@ struct RunConfiguration: Decodable, Sendable {
             configuration = config
             comparison = config.comparison
             binaryPreviewBytes = config.binaryPreviewBytes
-            for resource in config.profileResources {
+            bundledProfiles = try config.profileResources.map { resource in
                 guard let url = Bundle.module.url(forResource: resource, withExtension: "json") else { throw CocoaError(.fileNoSuchFile) }
-                profiles.append(try JSONDecoder().decode(ToolchainProfile.self, from: Data(contentsOf: url)))
+                return try ToolchainProfile(validating: Data(contentsOf: url))
             }
+            profiles = bundledProfiles
             selectedProfileID = RawIdentifier(config.defaultProfileID)
             guard selectedProfile != nil else { throw WireError.invalidProfile }
             coordinator = CoreCoordinator(pollingMilliseconds: config.pollingMilliseconds, drainEvents: config.drainEvents)
@@ -130,7 +176,7 @@ struct RunConfiguration: Decodable, Sendable {
     }
 
     func runAll(_ session: NativeEditorSession) {
-        guard !isRunning, !isClosed, let coordinator, let profile = selectedProfile else { return }
+        guard !isRunning, !isClosed, let coordinator, let profile = toolchain(for: session) else { return }
         do {
             guard try CompanionProvenance.ordinaryStdioAllowed(documentID: session.document.id, preferences: session.preservedPreferences) else {
                 errorMessage = L10n.string("companion_run_incompatible"); return
@@ -144,47 +190,52 @@ struct RunConfiguration: Decodable, Sendable {
         guard !externalCheckerEnabled || externalChecker != nil else { errorMessage = L10n.string("checker_configuration_required"); return }
         let snapshot = session.document.snapshot()
         if persistence.canMutate && session.canMutatePersistence { session.toolchainProfileID = profile.id }
-        let request = BatchRequest(snapshot: snapshot, originalPath: session.document.url?.path,
-                                   toolchain: profile, tests: session.testCases, comparison: comparison,
-                                   externalChecker: externalCheckerEnabled ? externalChecker : nil)
+        let run = DocumentRun(originalPath: session.document.url?.path, toolchain: profile,
+                              tests: session.testCases, comparison: comparison, checker: effectiveChecker)
+        let request = BatchRequest(snapshot: snapshot, originalPath: run.originalPath?.rawValue,
+                                   toolchain: run.toolchain, tests: run.tests, comparison: run.comparison,
+                                   externalChecker: run.checker)
         submitted = snapshot
         result = nil
         state = .queued
-        let identity = RunIdentity()
-        documentRuns[snapshot.documentID] = DocumentRun(identity: identity, state: .queued)
+        let cancellation = run.cancellation
+        activeCancellation = cancellation
+        documentRuns[snapshot.documentID] = run
         isRunning = true
         task = Task { @MainActor [weak self] in
             do {
-                let value = try await coordinator.run(request) { [weak self] event in
-                    await self?.receive(event, documentID: snapshot.documentID, identity: identity)
+                let value = try await coordinator.run(request, cancellation: cancellation) { [weak self] event in
+                    await self?.receive(event, documentID: snapshot.documentID, cancellation: cancellation)
                 }
                 guard value.documentID == snapshot.documentID, value.revision == snapshot.revision else { throw WireError.malformedTerminal }
-                if let self, let run = self.documentRuns[snapshot.documentID], run.identity === identity {
+                if let self, let run = self.documentRuns[snapshot.documentID], run.cancellation === cancellation {
                     self.result = value
                     run.result = value
                 }
             } catch {
                 self?.state = .failed
-                if let self, let run = self.documentRuns[snapshot.documentID], run.identity === identity {
+                if let self, let run = self.documentRuns[snapshot.documentID], run.cancellation === cancellation {
                     run.state = .failed
                     if !self.isClosed { self.errorMessage = L10n.describe(error) }
                 }
             }
+            self?.activeCancellation = nil
             self?.isRunning = false
             self?.task = nil
         }
     }
 
-    private func receive(_ event: CoreEvent, documentID: RawIdentifier, identity: RunIdentity) {
+    private func receive(_ event: CoreEvent, documentID: RawIdentifier, cancellation: CoreCoordinator.RunCancellation) {
         state = event.state
-        guard let run = documentRuns[documentID], run.identity === identity else { return }
+        guard let run = documentRuns[documentID], run.cancellation === cancellation else { return }
         run.state = event.state
     }
 
     func cancel() {
-        guard isRunning, let coordinator else { return }
+        guard let cancellation = activeCancellation, let coordinator else { return }
+        cancellation.request()
         Task { @MainActor [weak self] in
-            do { try await coordinator.cancel() }
+            do { try await coordinator.cancel(cancellation) }
             catch { if self?.isClosed == false { self?.errorMessage = L10n.describe(error) } }
         }
     }
@@ -241,15 +292,41 @@ struct RunConfiguration: Decodable, Sendable {
         return try String(contentsOf: url, encoding: .utf8)
     }
 
-    func applyProfile(_ jsonText: String) throws {
+    func applyProfile(_ profile: ToolchainProfile, validatePreferences: ([ToolchainProfile], RawIdentifier) throws -> Void) throws {
         guard persistence.canMutate else { throw DocumentError.revisionExhausted }
-        let profile = try JSONDecoder().decode(ToolchainProfile.self, from: Data(jsonText.utf8))
-        if let index = profiles.firstIndex(where: { $0.id == profile.id }) { profiles[index] = profile }
-        else { profiles.append(profile) }
+        guard profile.id.rawValue.utf8.count <= SessionLimits.maximumIdentifierBytes else { throw WireError.invalidProfile }
+        try profile.validateForExecution()
+        var candidate = profiles
+        if let index = candidate.firstIndex(where: { $0.id == profile.id }) { candidate[index] = profile }
+        else { candidate.append(profile) }
+        try validatePreferences(candidate, profile.id)
+        profiles = candidate
         selectedProfileID = profile.id
     }
 
-    func loadProfile(onError: ((String) -> Void)? = nil) {
+    func recoverToolchains(_ saved: [ToolchainProfile], selected: RawIdentifier) throws
+        -> (profiles: [ToolchainProfile], selected: RawIdentifier, repaired: Bool) {
+        guard !saved.isEmpty, Set(saved.map(\.id)).count == saved.count,
+              saved.contains(where: { $0.id == selected }) else { throw WireError.invalidProfile }
+        var repaired = false
+        var recovered = saved.compactMap { profile in
+            do {
+                guard profile.id.rawValue.utf8.count <= SessionLimits.maximumIdentifierBytes else { throw WireError.invalidProfile }
+                try profile.validateForExecution()
+                return profile
+            } catch {
+                repaired = true
+                return bundledProfiles.first { $0.id == profile.id }
+            }
+        }
+        if recovered.isEmpty { recovered = bundledProfiles }
+        guard let first = recovered.first else { throw WireError.invalidProfile }
+        let fallbackID = RawIdentifier(configuration?.defaultProfileID ?? "")
+        let preferred = recovered.first { $0.id == selected } ?? recovered.first { $0.id == fallbackID } ?? first
+        return (recovered, preferred.id, repaired)
+    }
+
+    func loadProfile(apply: @escaping (ToolchainProfile) throws -> Void, onError: ((String) -> Void)? = nil) {
         guard !isRunning, !isClosed, pendingImportCount == 0, let config = configuration else { return }
         guard let operation = try? persistence.beginOperation() else { return }
         let panel = NSOpenPanel(); panel.allowsMultipleSelection = false
@@ -259,13 +336,12 @@ struct RunConfiguration: Decodable, Sendable {
             guard let self else { return }
             defer { self.pendingImportCount -= 1; self.persistence.endOperation(operation) }
             do {
-                let text = try await Task.detached {
+                let profile = try await Task.detached {
                     let data = try Self.boundedRead(url, limit: config.maxImportBytes)
-                    guard let text = String(data: data, encoding: .utf8) else { throw DocumentError.invalidUTF8 }
-                    return text
+                    return try ToolchainProfile(validating: data)
                 }.value
                 guard !self.isClosed else { return }
-                try self.applyProfile(text)
+                try apply(profile)
             } catch {
                 guard !self.isClosed else { return }
                 let message = L10n.describe(error)

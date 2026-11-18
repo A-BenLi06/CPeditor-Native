@@ -22,7 +22,7 @@ import NativeCoreBridge
         applicationAttempts.append(text)
         switch kind {
         case .checker: try runner.applyChecker(text)
-        case .toolchain: try runner.applyProfile(text)
+        case .toolchain: try runner.applyProfile(ToolchainProfile(validating: Data(text.utf8))) { _, _ in }
         }
     }
 }

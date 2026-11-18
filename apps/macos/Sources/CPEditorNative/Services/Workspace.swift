@@ -112,12 +112,14 @@ struct WorkspaceConfiguration: Decodable {
     var canConfigureRunner: Bool { canChangeEditorSettings && !runner.isRunning && !runner.isClosed }
 
     /// 测试默认不访问用户恢复目录；真实 Scene 显式启用 automaticRecovery。
-    init(arguments: [String] = [], automaticRecovery: Bool = false, recoveryURL: URL? = nil) {
+    init(arguments: [String] = [], automaticRecovery: Bool = false, recoveryURL: URL? = nil,
+         recoveryConfiguration: RecoveryConfiguration? = nil) {
         runner = RunController(persistence: persistence)
         let recoveryIndex = arguments.firstIndex(of: "--recovery-file")
         let argumentURL = recoveryIndex.flatMap { $0 + 1 < arguments.count ? URL(fileURLWithPath: arguments[$0 + 1]) : nil }
         let requestedRecovery = recoveryURL ?? argumentURL
-        recovery = (automaticRecovery || requestedRecovery != nil) ? try? RecoveryController(file: requestedRecovery, configuration: .load()) : nil
+        recovery = (automaticRecovery || requestedRecovery != nil)
+            ? try? RecoveryController(file: requestedRecovery, configuration: recoveryConfiguration ?? .load()) : nil
         isLoading = automaticRecovery || requestedRecovery != nil
         persistence.onModeChange = { [weak self] in
             guard let self else { return }
@@ -166,6 +168,10 @@ struct WorkspaceConfiguration: Decodable {
     func selectToolchain(_ id: RawIdentifier) {
         guard canConfigureRunner, runner.profiles.contains(where: { $0.id == id }) else { return }
         runner.selectedProfileID = id
+        bindToolchainToActiveDocument(id)
+    }
+
+    private func bindToolchainToActiveDocument(_ id: RawIdentifier) {
         if let session = activeSession, session.canMutatePersistence {
             session.toolchainProfileID = id
         }
@@ -176,10 +182,29 @@ struct WorkspaceConfiguration: Decodable {
         guard canConfigureRunner else { throw RunnerConfigurationBusy() }
         switch draft.kind {
         case .toolchain:
-            try runner.applyProfile(jsonText)
+            try applyToolchain(ToolchainProfile(validating: Data(jsonText.utf8)))
         case .checker:
             try runner.applyChecker(jsonText, enabled: draft.enableCheckerOnApply || runner.externalCheckerEnabled)
         }
+    }
+
+    func importToolchain(onError: ((String) -> Void)? = nil) {
+        guard canConfigureRunner else { return }
+        runner.loadProfile(apply: { [weak self] profile in
+            try self?.applyToolchain(profile)
+        }, onError: onError)
+    }
+
+    private func applyToolchain(_ profile: ToolchainProfile) throws {
+        guard !isClosing, !isShutDown, !runner.isRunning else { throw RunnerConfigurationBusy() }
+        try runner.applyProfile(profile) { profiles, selected in
+            let preferences = WorkspaceNativePreferences(profiles: profiles, selectedProfileID: selected,
+                comparison: runner.comparison, newEditor: newEditor, wrapText: wrapText, showMinimap: showMinimap)
+            guard try JSONEncoder().encode(preferences).count <= SessionLimits.maximumPreferenceBytes else {
+                throw ToolchainPreferenceCapacityError()
+            }
+        }
+        bindToolchainToActiveDocument(profile.id)
     }
 
     func companionProblemTitle(for session: NativeEditorSession) -> String? {
@@ -296,9 +321,34 @@ struct WorkspaceConfiguration: Decodable {
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
+    private func hasRecoveryCapacity(forSourceBytes newBytes: Int) -> Bool {
+        guard recovery != nil else { return true }
+        guard newBytes <= SessionLimits.maximumSourceBytes, sessions.count < SessionLimits.maximumDocuments else { return false }
+        var availableBytes = SessionLimits.maximumTotalContentBytes - newBytes
+        var availableTests = SessionLimits.maximumTotalTests - 1
+        for session in sessions {
+            let sourceBytes = session.document.text.utf8.count
+            guard sourceBytes <= SessionLimits.maximumSourceBytes, sourceBytes <= availableBytes,
+                  session.testCases.count <= SessionLimits.maximumTestsPerDocument,
+                  session.testCases.count <= availableTests else { return false }
+            availableBytes -= sourceBytes
+            availableTests -= session.testCases.count
+            for test in session.testCases {
+                let inputBytes = test.input.data.count, expectedBytes = test.expected?.data.count ?? 0
+                guard inputBytes <= SessionLimits.maximumTestBytes, expectedBytes <= SessionLimits.maximumTestBytes,
+                      inputBytes <= availableBytes, expectedBytes <= availableBytes - inputBytes else { return false }
+                availableBytes -= inputBytes + expectedBytes
+            }
+        }
+        return true
+    }
+
     @discardableResult func createDocument(text: String = "", editor: EditorKind? = nil, languageID: String? = nil) -> NativeEditorSession? {
         guard persistence.canMutate, !isLoading, !isClosing, let config = configuration,
               let profile = profiles[RawIdentifier(languageID ?? config.defaultLanguageID)] else { return nil }
+        guard hasRecoveryCapacity(forSourceBytes: text.utf8.count) else {
+            errorMessage = L10n.string("recovery_open_capacity_exceeded"); return nil
+        }
         do {
             let document = SourceDocument(text: text, editorKind: editor ?? newEditor, languageID: profile.id, saved: text.isEmpty)
             let session = try NativeEditorSession(document: document, profile: profile)
@@ -332,6 +382,9 @@ struct WorkspaceConfiguration: Decodable {
             guard !isClosing, !isShutDown else { return }
             if let existing = sessions.first(where: { $0.document.url?.standardizedFileURL == normalized }) {
                 selection = existing.document.id; return
+            }
+            guard hasRecoveryCapacity(forSourceBytes: contents.text.utf8.count) else {
+                errorMessage = L10n.string("recovery_open_capacity_exceeded"); return
             }
             let point = SourceSavePoint(revision: 0, sourceDigest: SourceDigest.sha256(Data(contents.text.utf8)), diskDigest: contents.diskDigest)
             let document = SourceDocument(text: contents.text, url: url, editorKind: newEditor, languageID: profile.id, savePoint: point)
@@ -462,6 +515,9 @@ struct WorkspaceConfiguration: Decodable {
             persistence.endOperation(operation)
         }
         guard await canClose(session), let originalIndex = sessions.firstIndex(where: { $0 === session }) else { return }
+        let capacityBlocked = recovery?.isCapacityBlocked == true
+        let hasUnsavedTests = recovery?.hasUnsavedTests(in: session) == true
+        if capacityBlocked && hasUnsavedTests && !confirmDiscardTests(in: session) { return }
         let originalSelection = selection
         closingDocumentID = session.document.id
         // 从持久模型同步移除，再释放自己的 operation；原容器仍隐藏挂载，失败可原位回滚。
@@ -470,19 +526,33 @@ struct WorkspaceConfiguration: Decodable {
         if selection == session.document.id { selection = sessions.last?.document.id }
         persistence.endOperation(operation)
         if let recovery, !(await recovery.flush()) {
-            if persistence.canMutate {
+            // Closing an approved tab can reduce a still-oversized workspace. Other errors
+            // retain the existing transactional close behavior.
+            let canReduce = recovery.isCapacityBlocked && (capacityBlocked || !hasUnsavedTests || confirmDiscardTests(in: session))
+            if !canReduce && persistence.canMutate {
                 if !sessions.contains(where: { $0 === session }) { sessions.insert(session, at: min(originalIndex, sessions.count)) }
                 if let originalSelection, sessions.contains(where: { $0.document.id == originalSelection }) { selection = originalSelection }
                 else if selection == nil { selection = session.document.id }
                 errorMessage = recovery.notice ?? L10n.string("document_close_pending")
                 return
             }
-            // MAX 已实际替换时保留精确的已移除模型；不能重新插入无法再保存的幽灵标签。
-            errorMessage = recovery.notice ?? L10n.string("workspace_revision_frozen")
+            if !canReduce {
+                // MAX 已实际替换时保留精确的已移除模型；不能重新插入无法再保存的幽灵标签。
+                errorMessage = recovery.notice ?? L10n.string("workspace_revision_frozen")
+            }
         }
         retainedCloseSession = nil
         runner.forget(documentID: session.document.id); session.dispose()
         AppTelemetry.documents.info("Closed document")
+    }
+
+    private func confirmDiscardTests(in session: NativeEditorSession) -> Bool {
+        let alert = NSAlert()
+        alert.messageText = String(format: L10n.string("recovery_discard_samples_title"), title(for: session))
+        alert.informativeText = L10n.string("recovery_discard_samples_message")
+        alert.addButton(withTitle: L10n.string("cancel"))
+        alert.addButton(withTitle: L10n.string("discard"))
+        return alert.runModal() == .alertSecondButtonReturn
     }
 
     func prepareToClose() async -> Bool {
@@ -578,10 +648,7 @@ struct WorkspaceConfiguration: Decodable {
         let checkerPrefs = try (opaqueChecker ? nil : ownChecker.first).map { try JSONDecoder().decode(CheckerNativePreferences.self, from: Data($0.objectJSON.utf8)) }
         let checker = try checkerPrefs?.configurationJSON.map { try runner.validateChecker($0) }
         guard checkerPrefs?.enabled != true || checker != nil else { throw CheckerConfigurationError("checker_error_required_configuration") }
-        if let native {
-            guard !native.profiles.isEmpty, Set(native.profiles.map(\.id)).count == native.profiles.count,
-                  native.profiles.contains(where: { $0.id == native.selectedProfileID }) else { throw WireError.invalidProfile }
-        }
+        let recoveredToolchains = try native.map { try runner.recoverToolchains($0.profiles, selected: $0.selectedProfileID) }
         var constructed: [NativeEditorSession] = []
         do {
             for record in candidate.documents {
@@ -605,11 +672,12 @@ struct WorkspaceConfiguration: Decodable {
         }
         let workspaceCapacityFull = !hasOpaqueWorkspace && workspaceSlots == 0
         let notices = [hasOpaqueWorkspace || hasOpaqueDocument || opaqueChecker ? L10n.string("future_native_preferences") : nil,
-                       workspaceCapacityFull || documentCapacityFull || !runner.checkerPreferenceStorageAvailable ? L10n.string("preference_capacity_notice") : nil].compactMap { $0 }
+                       workspaceCapacityFull || documentCapacityFull || !runner.checkerPreferenceStorageAvailable ? L10n.string("preference_capacity_notice") : nil,
+                       recoveredToolchains?.repaired == true ? L10n.string("recovered_invalid_toolchains") : nil].compactMap { $0 }
         preferenceNotice = notices.isEmpty ? nil : notices.joined(separator: " ")
         runner.restoreChecker(checker, enabled: checkerPrefs?.enabled ?? false, opaque: opaqueChecker)
-        if let native {
-            runner.profiles = native.profiles; runner.selectedProfileID = native.selectedProfileID; runner.comparison = native.comparison
+        if let native, let recoveredToolchains {
+            runner.profiles = recoveredToolchains.profiles; runner.selectedProfileID = recoveredToolchains.selected; runner.comparison = native.comparison
             newEditor = native.newEditor; wrapText = native.wrapText; showMinimap = native.showMinimap
         }
         sessions = constructed; selection = candidate.selectedDocumentID

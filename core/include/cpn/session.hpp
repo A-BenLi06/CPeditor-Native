@@ -10,6 +10,7 @@
 #include <mutex>
 #include <optional>
 #include <stop_token>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -30,6 +31,10 @@ struct SessionBounds {
     std::size_t max_preferences_depth{16};
     std::size_t max_id_bytes{1024};
     std::size_t max_path_bytes{32768};
+};
+class SessionCapacityError final : public std::invalid_argument {
+public:
+    using std::invalid_argument::invalid_argument;
 };
 struct NativeEditorPreferences {
     std::string namespace_id;
@@ -74,7 +79,7 @@ struct SessionLoadResult {
     std::string detail;
 };
 enum class SessionSaveStatus { saved, conflict, invalid_session, invalid_existing, io_failed,
-                               durability_unknown, lock_unavailable, cancelled };
+                               durability_unknown, lock_unavailable, cancelled, capacity_exceeded };
 struct SessionSaveResult {
     SessionSaveStatus status{SessionSaveStatus::io_failed};
     // Last observed recovery-file digest. Advance the token only when recovery_replaced is true.

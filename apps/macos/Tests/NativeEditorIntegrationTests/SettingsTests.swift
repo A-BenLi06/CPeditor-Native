@@ -77,6 +77,84 @@ import NativeEditorModel
         reopened.sessions.forEach { $0.dispose() }
     }
 
+    @Test func invalidToolchainEditsKeepTheSelectedProfileIntact() throws {
+        _ = NSApplication.shared
+        let workspace = Workspace()
+        defer { workspace.sessions.forEach { $0.dispose() } }
+        let session = try #require(workspace.activeSession)
+        let original = try #require(workspace.runner.selectedProfile)
+        let originalCatalog = workspace.runner.profiles
+        workspace.selectToolchain(original.id)
+        let draft = ConfigurationJSONDraft(kind: .toolchain, jsonText: try original.jsonText())
+
+        let invalid = try JSONEncoder().encode(ToolchainProfile(payload: .object([
+            ToolchainProfile.Field.id.rawValue: .string(original.id.rawValue),
+            ToolchainProfile.Field.languageID.rawValue: .string(original.languageID),
+            ToolchainProfile.Field.schemaVersion.rawValue: .number(1)
+        ])))
+        #expect(throws: CoreFailure.self) {
+            try workspace.applyRunnerConfiguration(draft, jsonText: String(decoding: invalid, as: UTF8.self))
+        }
+
+        let oversized = try original.updating(buildExecutable: original.buildExecutable,
+            buildArguments: [String(repeating: "a", count: SessionLimits.maximumPreferenceBytes)],
+            buildWallTimeoutMS: 30_000, runWallTimeoutMS: 2_000)
+        #expect(throws: ToolchainPreferenceCapacityError.self) {
+            try workspace.applyRunnerConfiguration(draft, jsonText: oversized.jsonText())
+        }
+        #expect(workspace.runner.profiles == originalCatalog)
+        #expect(workspace.runner.selectedProfile == original)
+        #expect(session.toolchainProfileID == original.id)
+
+        var replacementFields = try #require(original.payload.object)
+        replacementFields[ToolchainProfile.Field.id.rawValue] = .string("custom-toolchain")
+        let replacement = try ToolchainProfile(payload: .object(replacementFields))
+        try workspace.applyRunnerConfiguration(draft, jsonText: replacement.jsonText())
+        #expect(workspace.runner.selectedProfile == replacement)
+        #expect(session.toolchainProfileID == replacement.id)
+    }
+
+    @Test func recoveryReplacesLegacyInvalidToolchainAndKeepsDocuments() async throws {
+        _ = NSApplication.shared
+        let workspace = Workspace()
+        defer { workspace.sessions.forEach { $0.dispose() } }
+        let configuration = try RecoveryConfiguration.load()
+        let original = try #require(workspace.runner.selectedProfile)
+        let source = "// recover this source\nint main() {}\n"
+        let document = try #require(workspace.createDocument(text: source))
+        document.testCases = [TestCaseInput(input: "", expected: "")]
+        let invalidCustomID = RawIdentifier("legacy-incomplete")
+        document.toolchainProfileID = invalidCustomID
+        let previous = try workspace.sessionRecord(revision: 1, configuration: configuration)
+        var invalidFields: [String: JSONValue] = [
+            ToolchainProfile.Field.id.rawValue: .string(original.id.rawValue),
+            ToolchainProfile.Field.languageID.rawValue: .string(original.languageID),
+            ToolchainProfile.Field.schemaVersion.rawValue: .number(1)
+        ]
+        let invalidBundled = try ToolchainProfile(payload: .object(invalidFields))
+        invalidFields[ToolchainProfile.Field.id.rawValue] = .string(invalidCustomID.rawValue)
+        let invalidCustom = try ToolchainProfile(payload: .object(invalidFields))
+        let native = WorkspaceNativePreferences(profiles: [invalidBundled, invalidCustom], selectedProfileID: invalidCustomID,
+            comparison: .byte, newEditor: .stTextView, wrapText: true, showMinimap: false)
+        let preference = NativePreferences(namespaceID: configuration.workspaceNamespace, schemaVersion: 1,
+            objectJSON: String(decoding: try JSONEncoder().encode(native), as: UTF8.self))
+        let legacy = WorkspaceSessionRecord(workspaceID: previous.workspaceID, revision: previous.revision,
+            selectedDocumentID: document.document.id, documents: previous.documents, editorPreferences: [preference])
+
+        try workspace.applyRecoveryCandidate(legacy, configuration: configuration)
+        let restored = try #require(workspace.activeSession)
+        #expect(workspace.runner.selectedProfile == original)
+        #expect(restored.toolchainProfileID == invalidCustomID)
+        #expect(workspace.runner.comparison == .byte)
+        #expect(restored.document.text == source)
+        #expect(workspace.preferenceNotice?.contains(L10n.string("recovered_invalid_toolchains")) == true)
+        workspace.runner.runAll(restored)
+        await workspace.runner.waitForCurrentRun()
+        #expect(workspace.runner.result(for: restored.document.id)?.profileID == original.id.rawValue)
+        #expect(workspace.runner.result(for: restored.document.id)?.tests.first?.verdict == "AC")
+        await workspace.runner.shutdown()
+    }
+
     @Test func frozenWorkspaceRejectsPersistentSettingsButAllowsLayoutChanges() throws {
         _ = NSApplication.shared
         let workspace = Workspace()

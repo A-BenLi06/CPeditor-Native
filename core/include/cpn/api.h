@@ -29,7 +29,8 @@ typedef enum cpn_status {
     CPN_CAPACITY = 4,
     CPN_BUSY = 5,
     CPN_CLOSED = 6,
-    CPN_INTERNAL_ERROR = 7
+    CPN_INTERNAL_ERROR = 7,
+    CPN_SESSION_CAPACITY = 8
 } cpn_status;
 typedef struct cpn_bytes {
     const uint8_t* data;
@@ -50,6 +51,17 @@ typedef struct cpn_engine_options {
     uint64_t max_request_bytes;
     uint64_t max_retained_output_bytes;
 } cpn_engine_options;
+typedef struct cpn_session_limits {
+    uint64_t max_request_bytes;
+    uint64_t max_documents;
+    uint64_t max_tests_per_document;
+    uint64_t max_total_tests;
+    uint64_t max_source_bytes;
+    uint64_t max_test_bytes;
+    uint64_t max_total_content_bytes;
+    uint64_t max_preferences_bytes;
+    uint64_t max_id_bytes;
+} cpn_session_limits;
 /* Optional caller-owned error storage. Initialize struct_size before calling. */
 typedef struct cpn_error {
     uint32_t struct_size;
@@ -58,6 +70,8 @@ typedef struct cpn_error {
 } cpn_error;
 
 CPN_API uint32_t cpn_abi_version(void);
+/* Validates a versioned toolchain profile without creating an engine or starting a process. */
+CPN_API cpn_status cpn_validate_toolchain_json(cpn_bytes profile_json, cpn_error*);
 /* NULL options selects finite defaults. Nonzero fields override those defaults. */
 CPN_API cpn_status cpn_engine_create(const cpn_engine_options*, cpn_engine_handle*, cpn_error*);
 /* close/destroy cancel and join workers; call them from a background coordinator. */
@@ -72,6 +86,8 @@ CPN_API cpn_status cpn_engine_release_job(cpn_engine_handle, cpn_job_handle, cpn
 CPN_API cpn_status cpn_engine_drain_json(cpn_engine_handle, uint32_t max_events, cpn_buffer*, cpn_error*);
 CPN_API cpn_status cpn_engine_info_json(cpn_engine_handle, cpn_buffer*, cpn_error*);
 /* Recovery file I/O is synchronous; native clients call these from their background actor. */
+/* Returns the limits for a recovery client using the largest supported request envelope. */
+CPN_API cpn_session_limits cpn_session_default_limits(void);
 CPN_API cpn_status cpn_engine_session_load(cpn_engine_handle, cpn_bytes path_utf8, cpn_buffer*, cpn_error*);
 CPN_API cpn_status cpn_engine_session_save_json(cpn_engine_handle, cpn_bytes request_json, cpn_buffer*, cpn_error*);
 /* Companion calls are synchronous and use schema-versioned JSON requests.

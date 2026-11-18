@@ -45,7 +45,7 @@
 "cancel_run" = "Cancel Run";
 "last_run" = "Last Run";
 "source_current" = "Source matches this run";
-"source_older" = "Source has changed since this run";
+"run_result_outdated_help" = "The source, samples, or run settings have changed since this run.";
 "run_revision" = "Source revision %llu";
 "output_title" = "Output";
 "stderr_title" = "Standard Error";
@@ -91,6 +91,10 @@
 "recovery_preserved" = "The recovery file could not be restored safely and has been preserved. Save a separate recovery file to continue.";
 "recovery_conflict" = "Another writer changed the recovery file. The original file and your open documents are preserved.";
 "recovery_invalid_session" = "The current workspace cannot be saved as a valid recovery session.";
+"recovery_capacity_exceeded" = "The workspace exceeds its recovery limits. Save your source files and reduce the open documents or test data to resume recovery saves.";
+"recovery_open_capacity_exceeded" = "This document would exceed the workspace recovery limits. Close other documents or reduce test data, then try again.";
+"recovery_discard_samples_title" = "Close “%@” and discard its test cases?";
+"recovery_discard_samples_message" = "Closing this tab removes its test cases from the workspace. Save the source file separately to keep its code.";
 "recovery_io_failed" = "An I/O error prevented the workspace recovery from being saved.";
 "recovery_durability_unknown" = "The recovery file was replaced, but the operating system could not confirm durable storage.";
 "recovery_lock_unavailable" = "The recovery file is locked by another writer. Try again or save a separate recovery file.";
@@ -125,6 +129,8 @@
 "checker_verdict_error" = "Checker Error";
 "checker_verdict_unknown" = "Unknown (%@)";
 "preference_capacity_notice" = "Workspace settings storage is full. Existing settings are preserved; source and tests can still be saved.";
+"toolchain_preference_capacity" = "This toolchain would exceed the space available for workspace settings.";
+"recovered_invalid_toolchains" = "Some saved toolchain profiles were invalid. Choose a working toolchain in Settings.";
 "done" = "Done";
 "companion_title" = "Companion Inbox";
 "companion_show" = "Show Companion Inbox";

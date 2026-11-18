@@ -26,14 +26,14 @@ struct RunPanelView: View {
 
     private var removedTestResults: [TestResult] {
         guard let result = latestResult else { return [] }
-        let activeIDs = Set(session.testCases.map(\.id.rawValue))
-        return result.tests.filter { !activeIDs.contains($0.testcaseID) }
+        let activeIDs = Set(session.testCases.map(\.id))
+        return result.tests.filter { !activeIDs.contains(RawIdentifier($0.testcaseID)) }
     }
 
     var body: some View {
-        let snapshot = session.document.snapshot()
+        let resultIsStale = latestResult != nil && !runner.resultIsCurrent(for: session)
         VStack(alignment: .leading, spacing: 0) {
-            headerBar(snapshot: snapshot)
+            headerBar(resultIsStale: resultIsStale)
             Divider()
             checkerControlBar
             Divider()
@@ -67,17 +67,18 @@ struct RunPanelView: View {
                             emptyTestsPlaceholder
                                 .frame(minHeight: 140)
                         } else {
-                            let isStale = latestResult.map { !$0.matches(snapshot) } ?? false
                             ForEach($session.testCases) { $test in
-                                let index = session.testCases.firstIndex(where: { $0.id == test.id }) ?? 0
-                                let matchingResult = latestResult?.tests.first(where: { $0.testcaseID == test.id.rawValue })
+                                let id = test.id
+                                let index = session.testCases.firstIndex(where: { $0.id == id }) ?? 0
+                                let matchingResult = latestResult?.tests.first(where: { RawIdentifier($0.testcaseID) == id })
                                 TestCaseCardView(
                                     test: $test,
                                     number: index + 1,
                                     canEdit: canEditTests,
                                     matchingResult: matchingResult,
-                                    resultIsStale: isStale,
+                                    resultIsStale: resultIsStale,
                                     binaryPreviewBytes: runner.binaryPreviewBytes,
+                                    useOutputAsExpected: { runner.useOutputAsExpected($0, for: session, testcaseID: id) },
                                     duplicate: {
                                         var copy = TestCaseInput(enabled: test.enabled)
                                         copy.input = test.input
@@ -114,7 +115,7 @@ struct RunPanelView: View {
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
-    private func headerBar(snapshot: SourceSnapshot) -> some View {
+    private func headerBar(resultIsStale: Bool) -> some View {
         HStack(spacing: 8) {
             Text(L10n.string("test_cases_title"))
                 .font(.subheadline.weight(.semibold))
@@ -125,20 +126,20 @@ struct RunPanelView: View {
             } else if let result = latestResult {
                 let descriptor = VerdictDescriptor.summary(for: result)
                 let passed = result.tests.reduce(0) { $0 + ($1.verdict == "AC" ? 1 : 0) }
-                VerdictBadge(descriptor: descriptor, compact: true)
+                VerdictBadge(descriptor: descriptor, compact: true, dimmed: resultIsStale)
                 if result.buildOutcome == "Succeeded" && !result.tests.isEmpty {
                     Text("\(passed)/\(result.tests.count)")
                         .font(.caption.monospacedDigit().weight(.medium))
                         .foregroundStyle(.secondary)
                 }
-                if !result.matches(snapshot) {
+                if resultIsStale {
                     Text(L10n.string("outdated_short"))
                         .font(.caption2.weight(.medium))
                         .foregroundStyle(.orange)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1.5)
                         .background(Color.orange.opacity(0.12), in: Capsule())
-                        .help(L10n.string("source_older"))
+                        .help(L10n.string("run_result_outdated_help"))
                 }
             } else {
                 Text("\(enabledTestCount)/\(session.testCases.count)")
@@ -364,14 +365,16 @@ private struct TestCaseCardView: View {
     let matchingResult: TestResult?
     let resultIsStale: Bool
     let binaryPreviewBytes: Int
+    let useOutputAsExpected: (WireBytes) -> Void
     let duplicate: () -> Void
     let remove: () -> Void
 
     @State private var isExpandedHeight = false
 
-    private var canUseOutputAsExpected: Bool {
-        guard canEdit, let stdout = matchingResult?.process.stdout, stdout.canDisplayAsText else { return false }
-        return test.expected?.data != stdout.data
+    private var replacementExpectedOutput: WireBytes? {
+        guard canEdit, !resultIsStale, let output = matchingResult?.process.completeTextOutput,
+              test.expected != output else { return nil }
+        return output
     }
 
     private var cardBorderColor: Color {
@@ -416,9 +419,9 @@ private struct TestCaseCardView: View {
 
                 Spacer(minLength: 4)
 
-                if canUseOutputAsExpected, let stdout = matchingResult?.process.stdout {
+                if let output = replacementExpectedOutput {
                     Button {
-                        test.expected = stdout
+                        useOutputAsExpected(output)
                     } label: {
                         Image(systemName: "arrow.uturn.up.square")
                             .font(.caption)
@@ -426,6 +429,7 @@ private struct TestCaseCardView: View {
                     }
                     .buttonStyle(.borderless)
                     .help(L10n.string("use_output_as_expected"))
+                    .accessibilityLabel(L10n.string("use_output_as_expected"))
                 }
 
                 Button {

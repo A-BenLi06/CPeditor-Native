@@ -283,7 +283,7 @@ struct ConfigurationSheet: View {
     private func syncVisualFromJSON(_ text: String) throws {
         switch kind {
         case .toolchain:
-            let profile = try JSONDecoder().decode(ToolchainProfile.self, from: Data(text.utf8))
+            let profile = try ToolchainProfile(validating: Data(text.utf8))
             guard let buildMS = profile.buildWallTimeoutMS, let runMS = profile.runWallTimeoutMS else {
                 throw WireError.invalidProfile
             }
@@ -347,7 +347,7 @@ struct ConfigurationSheet: View {
         do {
             switch kind {
             case .toolchain:
-                let profile = try JSONDecoder().decode(ToolchainProfile.self, from: Data(jsonText.utf8))
+                let profile = try ToolchainProfile(validating: Data(jsonText.utf8))
                 jsonText = try profile.jsonText()
             case .checker:
                 let checker = try CheckerConfiguration(jsonText: jsonText)

@@ -17,6 +17,13 @@ int main(){
         const auto recovery=workspace/cpn::path_from_utf8("会话.json"),backup=workspace/"previous.json",lock=workspace/"workspace.lock";
         cpn_engine_options options{sizeof(options),CPN_ABI_VERSION,1,1,1,0,1024*1024,1024*1024};
         expect(cpn_engine_create(&options,&engine,nullptr)==CPN_OK,"engine create");
+        const auto limits = cpn_session_default_limits();
+        expect(limits.max_documents == cpn::SessionBounds{}.max_documents && limits.max_request_bytes > options.max_request_bytes,
+            "recovery limits match Core and allow a larger configured request");
+        cpn_buffer oversized_result{};
+        const std::string oversized_bytes(options.max_request_bytes + 1, ' ');
+        expect(cpn_engine_session_save_json(engine, view(oversized_bytes), &oversized_result, nullptr) == CPN_SESSION_CAPACITY &&
+            !oversized_result.handle, "oversized recovery request reports session capacity");
         cpn::WorkspaceSession session;session.workspace_id="workspace";session.revision=1;session.selected_document_id="source";
         cpn::SessionDocument document;document.document_id="source";document.revision=1;document.source_text="中文 😀";
         document.tests={{"binary",std::string("a\0b",3),std::string(""),true},{"absent","",std::nullopt,true}};

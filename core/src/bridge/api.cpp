@@ -29,6 +29,7 @@ void session_fields(const Json& object,std::initializer_list<std::string_view> a
 }
 constexpr std::size_t total_buffer_limit=256*1024*1024;
 constexpr std::size_t individual_buffer_limit=128*1024*1024;
+constexpr std::uint64_t maximum_request_bytes=64*1024*1024;
 struct ListenerConfiguration {
     std::string workspace_id;
     cpn::CompanionInboxPaths paths;
@@ -497,6 +498,18 @@ private:
 }
 extern "C" {
 uint32_t cpn_abi_version(void){return CPN_ABI_VERSION;}
+cpn_status cpn_validate_toolchain_json(cpn_bytes profile, cpn_error* destination) {
+    return boundary(destination, [&] {
+        if (!profile.data || !profile.size)
+            return error(destination, CPN_INVALID_ARGUMENT, "Toolchain profile bytes are required");
+        try {
+            (void)cpn::parse_toolchain_profile({reinterpret_cast<const char*>(profile.data), profile.size});
+        } catch (const std::runtime_error& ex) {
+            return error(destination, CPN_INVALID_ARGUMENT, ex.what());
+        }
+        return error(destination, CPN_OK, {});
+    });
+}
 cpn_status cpn_engine_create(const cpn_engine_options* given,cpn_engine_handle* output,cpn_error* destination){
     if(output)*output=0;
     return boundary(destination,[&]{
@@ -513,7 +526,7 @@ cpn_status cpn_engine_create(const cpn_engine_options* given,cpn_engine_handle* 
             if(given->max_retained_output_bytes)options.max_retained_output_bytes=given->max_retained_output_bytes;
         }
         if(options.max_workers>8 || options.max_jobs>64 || options.max_workers>options.max_jobs || options.max_buffers>16 ||
-           options.max_request_bytes>64*1024*1024 || options.max_retained_output_bytes>64*1024*1024)
+           options.max_request_bytes>maximum_request_bytes || options.max_retained_output_bytes>64*1024*1024)
             return error(destination,CPN_INVALID_ARGUMENT,"Engine options exceed supported limits");
         std::lock_guard guard(handles_mutex);
         if(engines.size()>=16 || next_handle==std::numeric_limits<std::uint64_t>::max())return error(destination,CPN_CAPACITY,"Engine capacity exhausted");
@@ -585,6 +598,11 @@ cpn_status cpn_engine_info_json(cpn_engine_handle handle,cpn_buffer* output,cpn_
         return allocate_buffer(handle,*engine,doc.dump(),output,destination);
     });
 }
+cpn_session_limits cpn_session_default_limits(void) {
+    const cpn::SessionBounds bounds;
+    return {maximum_request_bytes, bounds.max_documents, bounds.max_tests_per_document, bounds.max_total_tests,
+        bounds.max_source_bytes, bounds.max_test_bytes, bounds.max_total_content_bytes, bounds.max_preferences_bytes, bounds.max_id_bytes};
+}
 cpn_status cpn_engine_session_load(cpn_engine_handle handle,cpn_bytes path,cpn_buffer* output,cpn_error* destination){
     if(output)*output={};
     return boundary(destination,[&]{auto engine=lookup(handle);if(!engine)return error(destination,CPN_INVALID_HANDLE,"Unknown engine");
@@ -600,8 +618,10 @@ cpn_status cpn_engine_session_save_json(cpn_engine_handle handle,cpn_bytes reque
     if(output)*output={};
     return boundary(destination,[&]{auto engine=lookup(handle);if(!engine)return error(destination,CPN_INVALID_HANDLE,"Unknown engine");
         if(engine->operations.stop_requested())return error(destination,CPN_CLOSED,"Engine is closed");
-        if(!output || !request.data || !request.size || request.size>engine->options.max_request_bytes)
+        if(!output || !request.data || !request.size)
             return error(destination,CPN_INVALID_ARGUMENT,"Invalid session request bytes");
+        if(request.size>engine->options.max_request_bytes)
+            return error(destination,CPN_SESSION_CAPACITY,"Session request exceeds byte limit");
         cpn::SessionPaths locations;cpn::WorkspaceSession session;std::optional<std::string> digest;
         std::int64_t timeout=5000;
         {
@@ -621,7 +641,8 @@ cpn_status cpn_engine_session_save_json(cpn_engine_handle handle,cpn_bytes reque
             session_fields(paths,{"recovery_file","backup_file","lock_file"});
             locations={cpn::path_from_utf8(paths.at("recovery_file").get<std::string>()),
                 cpn::path_from_utf8(paths.at("backup_file").get<std::string>()),cpn::path_from_utf8(paths.at("lock_file").get<std::string>())};
-            session=cpn::parse_workspace_session(doc.at("session").dump());
+            try { session=cpn::parse_workspace_session(doc.at("session").dump()); }
+            catch(const cpn::SessionCapacityError& ex) { return error(destination,CPN_SESSION_CAPACITY,ex.what()); }
             if(doc.contains("expected_disk_digest") && !doc.at("expected_disk_digest").is_null())digest=doc.at("expected_disk_digest").get<std::string>();
             if(doc.contains("lock_timeout_ms")){
                 const auto& value=doc.at("lock_timeout_ms");
@@ -633,6 +654,8 @@ cpn_status cpn_engine_session_save_json(cpn_engine_handle handle,cpn_bytes reque
         const auto allocated=allocate_buffer(handle,*engine,std::string(companion_response_bytes,'\0'),&reserved.value,destination);
         if(allocated!=CPN_OK)return allocated;
         const auto saved=cpn::SessionService().save(locations,session,digest,std::chrono::milliseconds(timeout),engine->operations.get_token());
+        if(saved.status==cpn::SessionSaveStatus::capacity_exceeded)
+            return error(destination,CPN_SESSION_CAPACITY,saved.detail);
         reserved.publish(response.render(saved),output);
         return error(destination,CPN_OK,{});
     });
