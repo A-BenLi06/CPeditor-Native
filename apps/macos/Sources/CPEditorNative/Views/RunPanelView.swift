@@ -14,9 +14,27 @@ struct RunPanelView: View {
         !runner.isRunning && session.canMutatePersistence
     }
 
+    private var latestResult: BatchResult? {
+        runner.result(for: session.document.id)
+    }
+
+    private var currentState: JobState? {
+        runner.state(for: session.document.id)
+    }
+
+    private var removedTestResults: [TestResult] {
+        guard let result = latestResult else { return [] }
+        let activeIDs = Set(session.testCases.map(\.id.rawValue))
+        return result.tests.filter { !activeIDs.contains($0.testcaseID) }
+    }
+
     var body: some View {
+        let snapshot = session.document.snapshot()
         VStack(alignment: .leading, spacing: 0) {
-            RunExecutionToolbar(session: session, runner: runner)
+            headerBar(snapshot: snapshot)
+            Divider()
+            checkerControlBar
+            Divider()
 
             if let notice = session.persistenceNotice {
                 NoticeBannerView(kind: .warning, message: notice)
@@ -24,24 +42,74 @@ struct RunPanelView: View {
             if let notice = session.companionRunNotice {
                 NoticeBannerView(kind: .warning, message: notice)
             }
-
-            HSplitView {
-                TestCasesPane(
-                    session: session,
-                    runner: runner,
-                    enabledTestCount: enabledTestCount,
-                    canEditTests: canEditTests
-                )
-                .frame(minWidth: 260, idealWidth: 490, maxHeight: .infinity)
-
-                RunResultsView(runner: runner, session: session)
-                    .frame(minWidth: 220, idealWidth: 350, maxHeight: .infinity)
+            if let result = latestResult {
+                if !result.error.isEmpty {
+                    NoticeBannerView(kind: .error, message: result.error)
+                }
+                if let build = result.build,
+                   result.buildOutcome != "Succeeded" || !build.stderr.data.isEmpty || !build.stdout.data.isEmpty {
+                    CompilerOutputBanner(
+                        build: build,
+                        buildSucceeded: result.buildOutcome == "Succeeded",
+                        binaryPreviewBytes: runner.binaryPreviewBytes
+                    )
+                }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            if session.testCases.isEmpty && removedTestResults.isEmpty {
+                emptyTestsPlaceholder
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 10) {
+                        if session.testCases.isEmpty {
+                            emptyTestsPlaceholder
+                                .frame(minHeight: 140)
+                        } else {
+                            let isStale = latestResult.map { !$0.matches(snapshot) } ?? false
+                            ForEach($session.testCases) { $test in
+                                let index = session.testCases.firstIndex(where: { $0.id == test.id }) ?? 0
+                                let matchingResult = latestResult?.tests.first(where: { $0.testcaseID == test.id.rawValue })
+                                TestCaseCardView(
+                                    test: $test,
+                                    number: index + 1,
+                                    canEdit: canEditTests,
+                                    matchingResult: matchingResult,
+                                    resultIsStale: isStale,
+                                    binaryPreviewBytes: runner.binaryPreviewBytes,
+                                    duplicate: {
+                                        var copy = TestCaseInput(enabled: test.enabled)
+                                        copy.input = test.input
+                                        copy.expected = test.expected
+                                        session.testCases.insert(copy, at: min(index + 1, session.testCases.count))
+                                    },
+                                    remove: {
+                                        session.testCases.removeAll { $0.id == test.id }
+                                    }
+                                )
+                            }
+                        }
+
+                        if !removedTestResults.isEmpty {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(L10n.string("removed_test_results_title"))
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                ForEach(removedTestResults) { test in
+                                    RemovedTestResultCard(
+                                        test: test,
+                                        binaryPreviewBytes: runner.binaryPreviewBytes
+                                    )
+                                }
+                            }
+                            .padding(.top, 4)
+                        }
+                    }
+                    .padding(12)
+                }
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .frame(minHeight: 215, idealHeight: 305)
-        .background(.background)
+        .background(Color(nsColor: .windowBackgroundColor))
         .alert(L10n.string("error_title"), isPresented: Binding(
             get: { runner.errorMessage != nil },
             set: { if !$0 { runner.errorMessage = nil } }
@@ -51,249 +119,294 @@ struct RunPanelView: View {
             Text(runner.errorMessage ?? "")
         }
     }
-}
 
-private struct RunExecutionToolbar: View {
-    @Bindable var session: NativeEditorSession
-    @Bindable var runner: RunController
+    private func headerBar(snapshot: SourceSnapshot) -> some View {
+        HStack(spacing: 8) {
+            Text(L10n.string("test_cases_title"))
+                .font(.subheadline.weight(.semibold))
+                .fixedSize()
+
+            if let state = currentState, !state.isTerminal {
+                RunStateBadge(state: state)
+            } else if let result = latestResult {
+                let descriptor = VerdictDescriptor.summary(for: result)
+                let passed = result.tests.reduce(0) { $0 + ($1.verdict == "AC" ? 1 : 0) }
+                VerdictBadge(descriptor: descriptor, compact: true)
+                if result.buildOutcome == "Succeeded" && !result.tests.isEmpty {
+                    Text("\(passed)/\(result.tests.count)")
+                        .font(.caption.monospacedDigit().weight(.medium))
+                        .foregroundStyle(.secondary)
+                }
+                if !result.matches(snapshot) {
+                    Text(L10n.string("outdated_short"))
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1.5)
+                        .background(Color.orange.opacity(0.12), in: Capsule())
+                        .help(L10n.string("source_older"))
+                }
+            } else {
+                Text("\(enabledTestCount)/\(session.testCases.count)")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(.quaternary.opacity(0.5), in: Capsule())
+                    .help(String(format: L10n.string("tests_count_format"), enabledTestCount, session.testCases.count))
+            }
+
+            Spacer(minLength: 4)
+
+            Button {
+                session.testCases.append(TestCaseInput())
+            } label: {
+                Label(L10n.string("add_short"), systemImage: "plus")
+            }
+            .controlSize(.small)
+            .fixedSize()
+            .disabled(!canEditTests)
+            .help(L10n.string("add_test"))
+
+            Menu {
+                Button(L10n.string("import_tests")) {
+                    runner.importTests(into: session)
+                }
+                Divider()
+                Button(L10n.string("enable_all_tests")) {
+                    for index in session.testCases.indices { session.testCases[index].enabled = true }
+                }
+                .disabled(session.testCases.isEmpty)
+                Button(L10n.string("disable_all_tests")) {
+                    for index in session.testCases.indices { session.testCases[index].enabled = false }
+                }
+                .disabled(session.testCases.isEmpty)
+                Button(L10n.string("remove_disabled_tests")) {
+                    session.testCases.removeAll { !$0.enabled }
+                }
+                .disabled(!session.testCases.contains { !$0.enabled })
+                Button(L10n.string("clear_all_tests"), role: .destructive) {
+                    session.testCases.removeAll()
+                }
+                .disabled(session.testCases.isEmpty)
+            } label: {
+                Label(L10n.string("more_actions"), systemImage: "ellipsis.circle")
+                    .labelStyle(.iconOnly)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .disabled(!canEditTests)
+            .help(L10n.string("more_actions"))
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.bar)
+    }
+
+    private var comparisonDisplayName: String {
+        switch runner.comparison {
+        case .trailing: return L10n.string("comparison_trailing")
+        case .strict: return L10n.string("comparison_strict")
+        case .byte: return L10n.string("comparison_byte")
+        }
+    }
+
+    private var checkerModeSummary: String {
+        if runner.externalCheckerEnabled {
+            let name = runner.externalChecker.map { URL(fileURLWithPath: $0.executable).lastPathComponent } ?? L10n.string("external_checker")
+            return String(format: L10n.string("checker_mode_external_format"), name)
+        }
+        return comparisonDisplayName
+    }
 
     private var checkerControlsDisabled: Bool {
         runner.checkerPreferencesAreOpaque || !runner.checkerPreferenceStorageAvailable || runner.isRunning || !runner.persistentChangesAllowed
     }
 
-    private var checkerExecutableLabel: String? {
-        guard let executable = runner.externalChecker?.executable, !executable.isEmpty else { return nil }
-        return URL(fileURLWithPath: executable).lastPathComponent
-    }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                HStack(spacing: 6) {
-                    Image(systemName: "hammer")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Picker(L10n.string("toolchain"), selection: $runner.selectedProfileID) {
-                        ForEach(runner.profiles) { profile in
-                            Text(profile.id.rawValue).tag(profile.id)
-                        }
+    private var checkerControlBar: some View {
+        HStack(spacing: 8) {
+            Menu {
+                Toggle(L10n.string("use_external_checker"), isOn: Binding(
+                    get: { runner.externalCheckerEnabled },
+                    set: { enabled in
+                        if enabled, runner.externalChecker == nil { runner.beginCheckerEdit() }
+                        else { runner.externalCheckerEnabled = enabled }
                     }
-                    .labelsHidden()
-                    .controlSize(.small)
-                    .frame(minWidth: 130, maxWidth: 210)
-                    .disabled(runner.isRunning || !runner.persistentChangesAllowed)
-                    .help(L10n.string("toolchain"))
+                ))
+                .disabled(checkerControlsDisabled)
 
-                    Menu {
-                        Button(L10n.string("load_toolchain")) { runner.loadProfile() }
-                        Button(L10n.string("edit_toolchain")) { runner.beginProfileEdit() }
-                    } label: {
-                        Image(systemName: "gearshape")
-                    }
-                    .menuStyle(.borderlessButton)
-                    .fixedSize()
-                    .help(L10n.string("toolchain"))
-                    .disabled(runner.isRunning || !runner.persistentChangesAllowed)
+                Button(L10n.string("checker_settings")) {
+                    runner.beginCheckerEdit()
                 }
+                .disabled(checkerControlsDisabled)
 
-                Divider().frame(height: 15)
-
-                HStack(spacing: 8) {
-                    Toggle(L10n.string("external_checker"), isOn: Binding(
-                        get: { runner.externalCheckerEnabled },
-                        set: { enabled in
-                            if enabled, runner.externalChecker == nil { runner.beginCheckerEdit() }
-                            else { runner.externalCheckerEnabled = enabled }
-                        }
-                    ))
-                    .toggleStyle(.checkbox)
-                    .controlSize(.small)
-                    .fixedSize()
-                    .disabled(checkerControlsDisabled)
-                    .help(L10n.string("checker_expected_required"))
-
-                    Button(L10n.string("edit_checker")) {
-                        runner.beginCheckerEdit()
-                    }
-                    .controlSize(.small)
-                    .fixedSize()
-                    .disabled(checkerControlsDisabled)
-
-                    if let executableName = checkerExecutableLabel, let fullPath = runner.externalChecker?.executable {
-                        Text(executableName)
-                            .font(.system(.caption2, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 4))
-                            .help(fullPath)
-                    }
-                }
-
-                Spacer(minLength: 8)
-
-                RunStateBadge(state: runner.state(for: session.document.id))
-
-                if runner.isRunning {
-                    Button {
-                        runner.cancel()
-                    } label: {
-                        Label(L10n.string("cancel_run"), systemImage: "stop.fill")
-                    }
-                    .controlSize(.small)
-                    .help(L10n.string("help_cancel_run"))
-                } else {
-                    Button {
-                        runner.runAll(session)
-                    } label: {
-                        Label(L10n.string("run_all"), systemImage: "play.fill")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                    .disabled(!runner.canRun(session))
-                    .help(L10n.string("help_run_all"))
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-            .background(.bar)
-
-            Divider()
-        }
-    }
-}
-
-private struct TestCasesPane: View {
-    @Bindable var session: NativeEditorSession
-    @Bindable var runner: RunController
-    let enabledTestCount: Int
-    let canEditTests: Bool
-
-    private var latestResult: BatchResult? {
-        runner.result(for: session.document.id)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
-                Text(L10n.string("tests_title"))
-                    .font(.subheadline.weight(.semibold))
-                    .fixedSize()
-                Text("\(enabledTestCount)/\(session.testCases.count)")
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .fixedSize()
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(.quaternary.opacity(0.5), in: Capsule())
-                    .help(String(format: L10n.string("tests_count_format"), enabledTestCount, session.testCases.count))
-
-                Spacer(minLength: 6)
+                Divider()
 
                 Picker(L10n.string("comparison"), selection: $runner.comparison) {
                     Text(L10n.string("comparison_trailing")).tag(ComparisonPolicy.trailing)
                     Text(L10n.string("comparison_strict")).tag(ComparisonPolicy.strict)
                     Text(L10n.string("comparison_byte")).tag(ComparisonPolicy.byte)
                 }
-                .labelsHidden()
-                .controlSize(.small)
-                .fixedSize()
+                .pickerStyle(.inline)
                 .disabled(runner.externalCheckerEnabled || runner.isRunning || !runner.persistentChangesAllowed)
-                .help(L10n.string("comparison"))
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: runner.externalCheckerEnabled ? "checkmark.shield" : "slider.horizontal.3")
+                        .font(.caption)
+                        .foregroundStyle(runner.externalCheckerEnabled ? Color.accentColor : Color.secondary)
+                    Text("\(L10n.string("checker_mode_prefix")) \(checkerModeSummary)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 5))
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .disabled(runner.isRunning)
 
+            Spacer(minLength: 4)
+
+            if runner.isRunning {
+                Button {
+                    runner.cancel()
+                } label: {
+                    Label(L10n.string("stop_short"), systemImage: "stop.fill")
+                }
+                .controlSize(.small)
+                .help(L10n.string("help_cancel_run"))
+            } else {
+                Button {
+                    runner.runAll(session)
+                } label: {
+                    Label(L10n.string("run_short"), systemImage: "play.fill")
+                }
+                .controlSize(.small)
+                .disabled(!runner.canRun(session))
+                .help(L10n.string("help_run_all"))
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+    }
+
+    private var emptyTestsPlaceholder: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "list.bullet.rectangle")
+                .font(.title2)
+                .foregroundStyle(.tertiary)
+            Text(L10n.string("no_tests_title"))
+                .font(.subheadline.weight(.medium))
+            Text(L10n.string("no_tests_description"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            HStack(spacing: 8) {
                 Button {
                     session.testCases.append(TestCaseInput())
                 } label: {
                     Label(L10n.string("add_test"), systemImage: "plus")
                 }
                 .controlSize(.small)
-                .fixedSize()
-                .disabled(!canEditTests)
-
                 Button(L10n.string("import_tests")) {
                     runner.importTests(into: session)
                 }
                 .controlSize(.small)
-                .fixedSize()
-                .disabled(!canEditTests)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-
-            Divider()
-
-            if session.testCases.isEmpty {
-                VStack(spacing: 10) {
-                    Image(systemName: "list.bullet.rectangle")
-                        .font(.title2)
-                        .foregroundStyle(.tertiary)
-                    Text(L10n.string("no_tests_title"))
-                        .font(.subheadline.weight(.medium))
-                    Text(L10n.string("no_tests_description"))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                    HStack(spacing: 8) {
-                        Button {
-                            session.testCases.append(TestCaseInput())
-                        } label: {
-                            Label(L10n.string("add_test"), systemImage: "plus")
-                        }
-                        .controlSize(.small)
-                        Button(L10n.string("import_tests")) {
-                            runner.importTests(into: session)
-                        }
-                        .controlSize(.small)
-                    }
-                    .disabled(!canEditTests)
-                }
-                .padding(16)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                let currentSnapshot = session.document.snapshot()
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 10) {
-                        ForEach($session.testCases) { $test in
-                            let index = session.testCases.firstIndex(where: { $0.id == test.id }) ?? 0
-                            let matchingTestResult = latestResult?.tests.first(where: { $0.testcaseID == test.id.rawValue })
-                            let isStaleResult = latestResult.map { !$0.matches(currentSnapshot) } ?? false
-                            TestCaseEditorView(
-                                test: $test,
-                                number: index + 1,
-                                canEdit: canEditTests,
-                                matchingResult: matchingTestResult,
-                                resultIsStale: isStaleResult,
-                                duplicate: {
-                                    var copy = TestCaseInput(enabled: test.enabled)
-                                    copy.input = test.input
-                                    copy.expected = test.expected
-                                    let insertion = min(index + 1, session.testCases.count)
-                                    session.testCases.insert(copy, at: insertion)
-                                },
-                                remove: {
-                                    session.testCases.removeAll { $0.id == test.id }
-                                }
-                            )
-                        }
-                    }
-                    .padding(10)
-                }
-            }
+            .disabled(!canEditTests)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
-struct TestCaseEditorView: View {
+private struct CompilerOutputBanner: View {
+    let build: ProcessReport
+    let buildSucceeded: Bool
+    let binaryPreviewBytes: Int
+    @State private var isExpanded: Bool
+
+    init(build: ProcessReport, buildSucceeded: Bool, binaryPreviewBytes: Int) {
+        self.build = build
+        self.buildSucceeded = buildSucceeded
+        self.binaryPreviewBytes = binaryPreviewBytes
+        _isExpanded = State(initialValue: !buildSucceeded)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            DisclosureGroup(isExpanded: $isExpanded) {
+                ProcessOutputView(report: build, binaryPreviewBytes: binaryPreviewBytes)
+                    .padding(.top, 6)
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: buildSucceeded ? "terminal" : "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(buildSucceeded ? Color.secondary : Color.orange)
+                    Text(L10n.string("compiler_output"))
+                        .font(.caption.weight(.semibold))
+                    if !buildSucceeded {
+                        VerdictBadge(verdict: "CE", compact: true)
+                    }
+                    Spacer(minLength: 4)
+                    Text(String(format: L10n.string("elapsed_format"), build.elapsedMS))
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(buildSucceeded ? Color.clear : Color.orange.opacity(0.08))
+
+            Divider()
+        }
+    }
+}
+
+private struct TestCaseCardView: View {
     @Binding var test: TestCaseInput
     let number: Int
-    var canEdit = true
-    var matchingResult: TestResult? = nil
-    var resultIsStale = false
-    var duplicate: (() -> Void)? = nil
+    let canEdit: Bool
+    let matchingResult: TestResult?
+    let resultIsStale: Bool
+    let binaryPreviewBytes: Int
+    let duplicate: () -> Void
     let remove: () -> Void
+
+    @State private var isExpandedHeight = false
+
+    private var canUseOutputAsExpected: Bool {
+        guard canEdit, let stdout = matchingResult?.process.stdout, stdout.canDisplayAsText else { return false }
+        return test.expected?.data != stdout.data
+    }
+
+    private var cardBorderColor: Color {
+        guard let matchingResult, !resultIsStale else {
+            return Color(nsColor: .separatorColor).opacity(0.75)
+        }
+        return VerdictDescriptor.forVerdict(matchingResult.verdict).tone.color.opacity(0.40)
+    }
+
+    private var outputBorderColor: Color? {
+        guard let matchingResult else { return nil }
+        return VerdictDescriptor.forVerdict(matchingResult.verdict).tone.color.opacity(resultIsStale ? 0.25 : 0.45)
+    }
+
+    private func outputStatusSummary(for result: TestResult) -> String {
+        var parts = [result.process.termination]
+        if let exit = result.process.exitCode, exit != 0 {
+            parts.append(String(format: L10n.string("solution_exit_code_format"), exit))
+        }
+        if let signal = result.process.signal {
+            parts.append(String(format: L10n.string("solution_signal_format"), signal))
+        }
+        return parts.joined(separator: " · ")
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -312,27 +425,38 @@ struct TestCaseEditorView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                Spacer(minLength: 6)
+                Spacer(minLength: 4)
 
-                Toggle(L10n.string("check_expected"), isOn: Binding(
-                    get: { test.expected != nil },
-                    set: { test.expected = $0 ? WireBytes("") : nil }
-                ))
-                .toggleStyle(.checkbox)
-                .controlSize(.small)
-                .foregroundStyle(.secondary)
-                .disabled(!canEdit)
-
-                if let duplicate {
-                    Button(action: duplicate) {
-                        Image(systemName: "plus.square.on.square")
+                if canUseOutputAsExpected, let stdout = matchingResult?.process.stdout {
+                    Button {
+                        test.expected = stdout
+                    } label: {
+                        Image(systemName: "arrow.uturn.up.square")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Color.accentColor)
                     }
                     .buttonStyle(.borderless)
-                    .disabled(!canEdit)
-                    .help(L10n.string("duplicate_test"))
+                    .help(L10n.string("use_output_as_expected"))
                 }
+
+                Button {
+                    isExpandedHeight.toggle()
+                } label: {
+                    Image(systemName: isExpandedHeight ? "rectangle.compress.vertical" : "rectangle.expand.vertical")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.borderless)
+                .help(L10n.string(isExpandedHeight ? "collapse_editor" : "expand_editor"))
+
+                Button(action: duplicate) {
+                    Image(systemName: "plus.square.on.square")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.borderless)
+                .disabled(!canEdit)
+                .help(L10n.string("duplicate_test"))
 
                 Button(action: remove) {
                     Image(systemName: "trash")
@@ -345,25 +469,68 @@ struct TestCaseEditorView: View {
             }
 
             ViewThatFits(in: .horizontal) {
-                HStack(alignment: .top, spacing: 10) {
-                    inputColumn.frame(minWidth: 165, maxWidth: .infinity)
-                    expectedColumn.frame(minWidth: 165, maxWidth: .infinity)
+                HStack(alignment: .top, spacing: 8) {
+                    inputColumn.frame(minWidth: 135, maxWidth: .infinity)
+                    expectedColumn.frame(minWidth: 135, maxWidth: .infinity)
                 }
                 VStack(alignment: .leading, spacing: 8) {
                     inputColumn
                     expectedColumn
                 }
             }
-            .opacity(test.enabled ? 1.0 : 0.68)
+            .opacity(test.enabled ? 1.0 : 0.65)
+
+            if let matchingResult {
+                Divider()
+                    .padding(.top, 2)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    OutputBytesView(
+                        title: L10n.string("output_title"),
+                        bytes: matchingResult.process.stdout,
+                        binaryPreviewBytes: binaryPreviewBytes,
+                        trailingSubtitle: outputStatusSummary(for: matchingResult),
+                        borderColor: outputBorderColor
+                    )
+
+                    if !matchingResult.process.stderr.data.isEmpty {
+                        OutputBytesView(
+                            title: L10n.string("stderr_title"),
+                            bytes: matchingResult.process.stderr,
+                            binaryPreviewBytes: binaryPreviewBytes
+                        )
+                    }
+
+                    if matchingResult.process.stdoutTruncated || matchingResult.process.stderrTruncated {
+                        Label(L10n.string("output_truncated"), systemImage: "scissors")
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                    }
+
+                    if !matchingResult.detail.isEmpty {
+                        Text(matchingResult.detail)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+
+                    if let checker = matchingResult.checker {
+                        CheckerDiagnosticsView(report: checker, binaryPreviewBytes: binaryPreviewBytes)
+                    }
+                }
+            }
         }
         .padding(10)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.separator, lineWidth: 1))
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.65), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(cardBorderColor, lineWidth: 1))
     }
+
+    private var editorMinHeight: CGFloat { isExpandedHeight ? 132 : 68 }
+    private var editorMaxHeight: CGFloat { isExpandedHeight ? 200 : 96 }
 
     private var inputColumn: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
+            HStack(spacing: 5) {
                 Text(L10n.string("test_input"))
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.secondary)
@@ -373,16 +540,17 @@ struct TestCaseEditorView: View {
                 Spacer(minLength: 4)
                 CopyTextButton(text: test.input.text)
             }
+
             TextEditor(text: Binding(
                 get: { test.input.text },
                 set: { test.input = WireBytes($0) }
             ))
             .font(.system(.callout, design: .monospaced))
             .scrollContentBackground(.hidden)
-            .padding(5)
-            .frame(minHeight: 68, idealHeight: 82, maxHeight: 140)
+            .padding(4)
+            .frame(minHeight: editorMinHeight, maxHeight: editorMaxHeight)
             .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.quaternary, lineWidth: 1))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(nsColor: .separatorColor).opacity(0.6), lineWidth: 1))
             .disabled(!canEdit)
             .accessibilityLabel(L10n.string("test_input"))
 
@@ -396,28 +564,44 @@ struct TestCaseEditorView: View {
 
     @ViewBuilder
     private var expectedColumn: some View {
-        if let expected = test.expected {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Text(L10n.string("test_expected"))
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 5) {
+                Text(L10n.string("test_expected"))
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                if let expected = test.expected {
                     Text(String(format: L10n.string("bytes_count_format"), UInt64(expected.data.count)))
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(.tertiary)
-                    Spacer(minLength: 4)
+                }
+                Spacer(minLength: 4)
+                Toggle("", isOn: Binding(
+                    get: { test.expected != nil },
+                    set: { test.expected = $0 ? WireBytes("") : nil }
+                ))
+                .toggleStyle(.checkbox)
+                .labelsHidden()
+                .controlSize(.mini)
+                .disabled(!canEdit)
+                .help(L10n.string("check_expected"))
+                .accessibilityLabel(L10n.string("check_expected"))
+
+                if let expected = test.expected {
                     CopyTextButton(text: expected.text)
                 }
+            }
+
+            if let expected = test.expected {
                 TextEditor(text: Binding(
                     get: { test.expected?.text ?? "" },
                     set: { test.expected = WireBytes($0) }
                 ))
                 .font(.system(.callout, design: .monospaced))
                 .scrollContentBackground(.hidden)
-                .padding(5)
-                .frame(minHeight: 68, idealHeight: 82, maxHeight: 140)
+                .padding(4)
+                .frame(minHeight: editorMinHeight, maxHeight: editorMaxHeight)
                 .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
-                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.quaternary, lineWidth: 1))
+                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(nsColor: .separatorColor).opacity(0.6), lineWidth: 1))
                 .disabled(!canEdit)
                 .accessibilityLabel(L10n.string("test_expected"))
 
@@ -426,12 +610,7 @@ struct TestCaseEditorView: View {
                         .font(.caption2)
                         .foregroundStyle(.orange)
                 }
-            }
-        } else {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(L10n.string("test_expected"))
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
+            } else {
                 VStack(spacing: 6) {
                     Text(L10n.string("expected_unchecked_hint"))
                         .font(.caption2)
@@ -444,298 +623,44 @@ struct TestCaseEditorView: View {
                     .disabled(!canEdit)
                 }
                 .padding(8)
-                .frame(maxWidth: .infinity, minHeight: 78)
+                .frame(maxWidth: .infinity, minHeight: editorMinHeight)
                 .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 6))
                 .overlay(
                     RoundedRectangle(cornerRadius: 6)
                         .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                        .foregroundStyle(.quaternary)
+                        .foregroundStyle(Color(nsColor: .separatorColor).opacity(0.75))
                 )
             }
         }
     }
 }
 
-struct RunResultsView: View {
-    let runner: RunController
-    let session: NativeEditorSession
-
-    private var currentResult: BatchResult? {
-        runner.result(for: session.document.id)
-    }
-
-    private var currentState: JobState? {
-        runner.state(for: session.document.id)
-    }
-
-    private func displayName(for testcaseID: String) -> (primary: String, secondary: String?) {
-        if let index = session.testCases.firstIndex(where: { $0.id.rawValue == testcaseID }) {
-            let primary = String(format: L10n.string("test_number"), index + 1)
-            let secondary = testcaseID.count > 16 ? String(testcaseID.prefix(8)) + "…" : testcaseID
-            return (primary, secondary)
-        }
-        if testcaseID.count > 24 {
-            return (String(testcaseID.prefix(12)) + "…", testcaseID)
-        }
-        return (testcaseID, nil)
-    }
-
-    var body: some View {
-        let snapshot = session.document.snapshot()
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
-                Text(L10n.string("last_run"))
-                    .font(.subheadline.weight(.semibold))
-                Spacer(minLength: 6)
-                if let result = currentResult {
-                    let isCurrent = result.matches(snapshot)
-                    HStack(spacing: 4) {
-                        Image(systemName: isCurrent ? "checkmark.circle.fill" : "exclamationmark.arrow.triangle.2.circlepath")
-                            .font(.caption2)
-                        Text(isCurrent ? L10n.string("source_current_short") : L10n.string("source_older_short"))
-                            .font(.caption2.weight(.medium))
-                    }
-                    .foregroundStyle(isCurrent ? Color.green : Color.orange)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background((isCurrent ? Color.green : Color.orange).opacity(0.12), in: Capsule())
-                    .help(isCurrent ? L10n.string("source_current") : L10n.string("source_older"))
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-
-            Divider()
-
-            if let result = currentResult {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 10) {
-                        RunSummaryBanner(result: result, isCurrentSource: result.matches(snapshot))
-
-                        if let build = result.build,
-                           !build.stderr.data.isEmpty || !build.stdout.data.isEmpty || result.buildOutcome != "Succeeded" {
-                            CompilerOutputCard(
-                                build: build,
-                                buildSucceeded: result.buildOutcome == "Succeeded",
-                                binaryPreviewBytes: runner.binaryPreviewBytes
-                            )
-                        }
-
-                        ForEach(result.tests) { test in
-                            let label = displayName(for: test.testcaseID)
-                            TestResultCard(
-                                test: test,
-                                primaryLabel: label.primary,
-                                secondaryID: label.secondary,
-                                binaryPreviewBytes: runner.binaryPreviewBytes
-                            )
-                        }
-                    }
-                    .padding(10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            } else if let state = currentState, !state.isTerminal {
-                VStack(spacing: 10) {
-                    ProgressView()
-                    Text(L10n.jobState(state))
-                        .font(.subheadline.weight(.semibold))
-                    Text(L10n.string("results_running_description"))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                }
-                .padding(20)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                VStack(spacing: 10) {
-                    Image(systemName: "play.rectangle")
-                        .font(.title2)
-                        .foregroundStyle(.tertiary)
-                    Text(L10n.string("results_empty_title"))
-                        .font(.subheadline.weight(.medium))
-                    Text(L10n.string("results_empty_description"))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                    if runner.canRun(session) {
-                        Button {
-                            runner.runAll(session)
-                        } label: {
-                            Label(L10n.string("run_all"), systemImage: "play.fill")
-                        }
-                        .controlSize(.small)
-                    }
-                }
-                .padding(20)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    }
-}
-
-private struct RunSummaryBanner: View {
-    let result: BatchResult
-    let isCurrentSource: Bool
-
-    private var passedCount: Int {
-        result.tests.reduce(0) { $0 + ($1.verdict == "AC" ? 1 : 0) }
-    }
-
-    private var maxElapsedMS: UInt64? {
-        result.tests.map(\.process.elapsedMS).max()
-    }
-
-    private var headlineText: String {
-        if result.buildOutcome == "Cancelled" {
-            return L10n.string("summary_build_cancelled")
-        }
-        if result.buildOutcome != "Succeeded" {
-            return L10n.string("summary_build_failed")
-        }
-        guard !result.tests.isEmpty else {
-            return L10n.jobState(.completed)
-        }
-        if passedCount == result.tests.count {
-            return String(format: L10n.string("summary_all_passed_format"), passedCount, result.tests.count)
-        }
-        return String(format: L10n.string("summary_passed_count_format"), passedCount, result.tests.count)
-    }
-
-    var body: some View {
-        let summaryDescriptor = VerdictDescriptor.summary(for: result)
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                VerdictBadge(descriptor: summaryDescriptor)
-                Text(headlineText)
-                    .font(.subheadline.weight(.semibold))
-                Spacer(minLength: 4)
-                if let maxElapsedMS {
-                    Text(String(format: L10n.string("summary_max_time_format"), maxElapsedMS))
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            HStack(spacing: 8) {
-                Text(String(format: L10n.string("run_revision"), result.revision))
-                    .monospacedDigit()
-                Text("·")
-                Text(result.profileID)
-                if !isCurrentSource {
-                    Text("·")
-                    Text(L10n.string("source_older"))
-                        .foregroundStyle(.orange)
-                }
-            }
-            .font(.caption2)
-            .foregroundStyle(.secondary)
-
-            if !result.error.isEmpty {
-                Text(result.error)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .textSelection(.enabled)
-            }
-        }
-        .padding(10)
-        .background(summaryDescriptor.tone.color.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(summaryDescriptor.tone.color.opacity(0.25), lineWidth: 1))
-    }
-}
-
-private struct CompilerOutputCard: View {
-    let build: ProcessReport
-    let buildSucceeded: Bool
-    let binaryPreviewBytes: Int
-    @State private var isExpanded: Bool
-
-    init(build: ProcessReport, buildSucceeded: Bool, binaryPreviewBytes: Int) {
-        self.build = build
-        self.buildSucceeded = buildSucceeded
-        self.binaryPreviewBytes = binaryPreviewBytes
-        _isExpanded = State(initialValue: !buildSucceeded)
-    }
-
-    var body: some View {
-        DisclosureGroup(isExpanded: $isExpanded) {
-            ProcessOutputView(report: build, binaryPreviewBytes: binaryPreviewBytes)
-                .padding(.top, 6)
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: buildSucceeded ? "terminal" : "exclamationmark.triangle.fill")
-                    .foregroundStyle(buildSucceeded ? Color.secondary : Color.orange)
-                Text(L10n.string("compiler_output"))
-                    .font(.caption.weight(.semibold))
-                Spacer(minLength: 4)
-                Text(String(format: L10n.string("elapsed_format"), build.elapsedMS))
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(9)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.separator, lineWidth: 1))
-    }
-}
-
-private struct TestResultCard: View {
+private struct RemovedTestResultCard: View {
     let test: TestResult
-    let primaryLabel: String
-    let secondaryID: String?
     let binaryPreviewBytes: Int
-
-    private var terminationSummary: String {
-        var parts = [String(format: L10n.string("solution_status_format"), test.process.termination)]
-        if let exit = test.process.exitCode, exit != 0 {
-            parts.append(String(format: L10n.string("solution_exit_code_format"), exit))
-        }
-        if let signal = test.process.signal {
-            parts.append(String(format: L10n.string("solution_signal_format"), signal))
-        }
-        return parts.joined(separator: " · ")
-    }
 
     var body: some View {
         let descriptor = VerdictDescriptor.forVerdict(test.verdict)
-        VStack(alignment: .leading, spacing: 7) {
+        VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                VerdictBadge(descriptor: descriptor)
-                Text(primaryLabel)
-                    .font(.subheadline.weight(.semibold))
-                if let secondaryID {
-                    Text(secondaryID)
-                        .font(.system(.caption2, design: .monospaced))
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                        .help(test.testcaseID)
-                }
+                VerdictBadge(descriptor: descriptor, compact: true)
+                Text(test.testcaseID)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
                 Spacer(minLength: 4)
                 Text(String(format: L10n.string("elapsed_format"), test.process.elapsedMS))
-                    .font(.caption.monospacedDigit())
+                    .font(.caption2.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
-
-            Text(terminationSummary)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-
-            if !test.detail.isEmpty {
-                Text(test.detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-            }
-
             ProcessOutputView(report: test.process, binaryPreviewBytes: binaryPreviewBytes)
-
             if let checker = test.checker {
                 CheckerDiagnosticsView(report: checker, binaryPreviewBytes: binaryPreviewBytes)
             }
         }
-        .padding(10)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(descriptor.tone.color.opacity(0.28), lineWidth: 1))
+        .padding(9)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(descriptor.tone.color.opacity(0.3), lineWidth: 1))
     }
 }
 
@@ -841,6 +766,8 @@ struct OutputBytesView: View {
     var title: String? = nil
     let bytes: WireBytes
     let binaryPreviewBytes: Int
+    var trailingSubtitle: String? = nil
+    var borderColor: Color? = nil
 
     var body: some View {
         let canDisplay = bytes.canDisplayAsText
@@ -849,6 +776,8 @@ struct OutputBytesView: View {
             title: title,
             displayText: content,
             byteCount: UInt64(bytes.data.count),
+            trailingSubtitle: trailingSubtitle,
+            borderColor: borderColor,
             isBinaryPreview: !canDisplay,
             binaryPreviewShownBytes: min(bytes.data.count, binaryPreviewBytes)
         )

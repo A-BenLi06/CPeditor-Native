@@ -1,10 +1,10 @@
 # 实施任务登记
 
-登记时间：2026-11-18T02:39:54+08:00。
+登记时间：2026-11-18T14:51:32+08:00。
 
 | 所有者 | 独占范围 | 工作 | 状态 |
 | --- | --- | --- | --- |
-| 根 agent | 共享 Core、CMake、tests/core、共享文档与提交；已交由其他所有者的文件除外 | Core 契约／服务集成与统一验收 | 会话／外部 checker／严格 ABI 已提交；macOS 26.0 工具链、稀疏行列索引及 SwiftUI UI/UX 优化已集成验收；Windows CI 回归持续验收 |
+| 根 agent | 共享 Core、CMake、tests/core、共享文档与提交；已交由其他所有者的文件除外 | Core 契约／服务集成、macOS 产品化 UX/UI 重构与统一验收 | 会话／外部 checker／严格 ABI 已提交；macOS 顶部标签栏与左编右测布局、Visual＋JSON 配置表、深浅色同步及产品化命名重构已完成 17/17 Core CTest、81 项 Swift 测试与 9 组视觉快照核验；Windows CI 回归持续验收 |
 | xcode27_target26 | apps/macos/Package.swift、AppMetadata.plist、script | Xcode 27 与 macOS 26 最低目标的一致构建、对象检查和入口 | 已集成并通过 17/17 Core CTest、80 项 Swift 测试与 Mach-O 对象／bundle 验证，文件已释放 |
 | cursor_position_perf | SourceDocument、TextLineIndex、EditorStatusView、相关测试与 tools/macos 基准 | 状态栏 UTF-16 行列索引及有界内存／性能取证 | 稀疏 64 单元位集索引、双编辑器位置／组合输入测试与局部基准已通过验收，文件已释放 |
 | perf_toolchain_review | 只读审查／out 下探针 | 索引语义、最坏内存及工具链一致性复核 | 107303 项偏移／边界检查与旧 Core 拒绝验证通过，已完结 |

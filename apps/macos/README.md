@@ -1,8 +1,8 @@
 # macOS 原生编辑器原型
 
-验证记录时间：2026-11-18T02:39:54+08:00（Xcode 27／macOS 26.0 构建核验、状态栏稀疏位集索引与 SwiftUI 工作区 UI/UX 重构）。
+验证记录时间：2026-11-18T14:51:32+08:00（左编右测布局重构、产品化去内部实现命名、Visual＋JSON 双模配置表与双编辑器深浅色外观修复）。
 
-本目录实现 SwiftUI 窗口、菜单和文档侧栏，以及两个真实 AppKit 编辑器适配器。当前已完成 M0 双编辑器原型、共享 Core 的样例运行、会话恢复、外部 checker、Companion 文件收件箱接入及竞赛工作流 UI/UX 优化，组件集成不代表已选择生产编辑器，也不代表后续完整里程碑已验收。主项目仍以 Windows 10 22H2 为第一目标。
+本目录实现 SwiftUI 顶部标签栏、左编右测分栏窗口、原生菜单，以及两个真实 AppKit 编辑器适配器（用户可见界面统一以编辑器能力呈现，不暴露内部组件类名）。当前已完成双编辑器适配器、共享 Core 的样例运行、会话恢复、外部 checker、Companion 文件收件箱接入及产品化 UI/UX 重构，组件集成不代表已选择生产编辑器，也不代表后续完整里程碑已验收。主项目仍以 Windows 10 22H2 为第一目标。
 
 ## 构建和启动
 
@@ -15,7 +15,7 @@
 ./script/build_and_run.sh --verify --editor codeeditorview "$PWD/tests/fixtures/editor/unicode.cpp"
 ```
 
-改为 `--editor sttextview` 可在同一文件上启动另一组件。应用的 **Editor → Open Copy in Other Editor** 将当前已提交文本复制到独立文档。两个编辑器各自拥有编辑缓冲区和撤销历史；复制的文档没有磁盘路径，不会自动覆盖来源文件。
+改为 `--editor sttextview` 可在同一文件上通过命令行参数切换至备选编辑器适配器以供开发评估；用户可见菜单与窗口界面不再暴露内部编辑器组件名称或原型调试菜单（Workspace Recovery 已收拢至 **File → Workspace Recovery** 子菜单）。
 
 启动脚本为 [script/build_and_run.sh](../../script/build_and_run.sh)，产物为仓库内 `out/macos/CPEditorNative.app`。脚本先用 CMake 构建聚合静态库 `out/core/dev/libcpn_core.a`，然后从 `AppMetadata.plist` 读取应用标识和可执行文件名，构建 Swift 应用、复制 SwiftPM 资源、临时签名，然后使用 `open -n` 启动真实应用 bundle。资源位于 `Contents/Resources`，已按当前工具链生成的 `Bundle.module` accessor 验证。Codex 的 Run 按钮配置位于 `.codex/environments/environment.toml`。
 
@@ -238,3 +238,10 @@ RunController 按原始字节 document ID 保存独立结果、状态与不可�
 - 工具栏与菜单栏补齐 `Run` 菜单及快捷键（`⌘R` 运行、`⌘.` 取消、`⌘⇧T` 添加样例、`⌘⇧Y` 折叠／展开底部测试面板、`⌘⇧I` 打开收件箱、`⌘⌥L` 自动换行、`⌘⇧M` Minimap），折叠测试面板时保持 `NativeEditorDeck` 内部 `NSTextView` 与撤销栈不变。
 - 测试与运行面板消除工具链齿轮菜单横向拉伸及空样例顶部留白，采用自适应双栏 `Input`／`Expected Output` 编辑器卡片（字节计数、一键复制、复制样例）与语义化判题徽章、汇总横幅；Companion 收件箱支持状态筛选并将 `Apply to Workspace` 固定在题目信息头部；`STTextView` 补齐浅色／深色外观动态重绘。
 - 验证：工具链环境 17/17 Core CTest、80 项 Swift 测试、状态栏局部基准 `out/macos/cursor-position-perf/benchmark.json`、真实渲染快照 `out/macos/layout-audit/`、`build_and_run.sh --verify`、Mach-O 回执 `out/macos/build-verification.json`、严格 `codesign` 与正常退出全部通过。
+
+2026-11-18T14:51:32+08:00 完成面向产品化与原生 macOS 体验的全面 UX/UI 重构：
+- 仿照上游 CP Editor 竞赛工作台结构，将底部运行面板移至**右侧**并配合**顶部标签栏**（`DocumentTabBar`）：通过 `WorkspaceSplitContainer` 在 `Editor Only`（`⌃⌘1`）、`Split`（`⌃⌘2`）与 `Tests & Output Only`（`⌃⌘3`）及 `⌘⇧Y` 之间切换时，始终挂载并复用同一个 `NativeEditorDeck`（保持 `NSTextView`／`STTextView` 实例与 `UndoManager` 撤销栈），消除面板互相挤压与切换重置问题。
+- 彻底去除用户界面中暴露的 M0 内部实现词汇（`New Document with STTextView`／`CodeEditorView`、状态栏与副标题中的组件名、顶层 `Recovery` 与 `Editor` 菜单）；`File → Workspace Recovery` 收拢恢复功能，新增 `Save All`（`⌘⌥S`）、`Close Saved Tabs`（`⌘⌥W`）及仅关闭其它已保存／干净标签页。
+- 右侧面板整合按需折叠的 `CompilerOutputBanner`、单一工具链显示名选择器（内置 `macos-clang-cpp17` `C++17 (Clang)` 与 `macos-clang-cpp20` `C++20 (Clang)`）、统一 `TestCaseCardView`（并排或紧凑堆叠的 `Input`／`Expected Output`、内联 `Output`／stderr／checker 诊断、`Use Output as Expected`）与 `More` 批量操作菜单。
+- `ConfigurationSheet` 提供 `Visual` 分组表单与 `JSON` 双模式编辑并无损保留未知协议字段；`CompanionInboxView` 改用原生卡片选区避免非焦点系统列表黑底高对比；修复 `CodeEditorSurface` 深色模式白底与 `NSHostingView` 安全区边距问题及 `STTextView` 自动滚动内边距偏移。
+- 验证：工具链环境 17/17 Core CTest、81 项 Swift 测试（15 套件）、`out/macos/layout-audit/` 9 组浅色／深色／紧凑窗口与配置弹窗真实渲染快照、`./script/build_and_run.sh --verify` 启动及 `codesign --verify --strict` 全部通过（macOS 27.0.1 arm64 主机验证，不代表 Windows 或 macOS 26 实机验证）。

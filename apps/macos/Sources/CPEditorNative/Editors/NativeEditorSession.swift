@@ -91,6 +91,8 @@ import NativeCoreBridge
             let state = try CodeEditorState(text: document.text, profile: profile)
             codeState = state
             let host = NSHostingView(rootView: CodeEditorSurface(state: state))
+            host.sizingOptions = []
+            host.safeAreaRegions = []
             codeHost = host
             container.install(host)
             for name in [NSText.didBeginEditingNotification, NSText.didChangeNotification,
@@ -115,6 +117,7 @@ import NativeCoreBridge
             let scroll = STTextView.scrollableTextView()
             guard let view = scroll.documentView as? STTextView else { throw CocoaError(.coderInvalidValue) }
             stView = view
+            scroll.automaticallyAdjustsContentInsets = false
             scroll.drawsBackground = true
             scroll.backgroundColor = .textBackgroundColor
             view.backgroundColor = .textBackgroundColor

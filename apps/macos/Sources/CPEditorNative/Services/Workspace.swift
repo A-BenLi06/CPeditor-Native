@@ -3,6 +3,12 @@ import Observation
 import NativeEditorModel
 import NativeCoreBridge
 
+enum WorkspaceLayoutMode: String, CaseIterable, Sendable {
+    case editorOnly
+    case split
+    case ioOnly
+}
+
 struct WorkspaceConfiguration: Decodable {
     let schemaVersion: Int
     let defaultLanguageID: String
@@ -53,7 +59,11 @@ struct WorkspaceConfiguration: Decodable {
         get { storedShowMinimap }
         set { guard persistence.canMutate else { errorMessage = L10n.string("workspace_revision_frozen"); return }; storedShowMinimap = newValue }
     }
-    var isRunPanelVisible = true
+    var layoutMode: WorkspaceLayoutMode = .split
+    var isRunPanelVisible: Bool {
+        get { layoutMode != .editorOnly }
+        set { layoutMode = newValue ? .split : .editorOnly }
+    }
     var errorMessage: String?
     private(set) var preferenceNotice: String?
     private(set) var isLoading = false
@@ -162,16 +172,20 @@ struct WorkspaceConfiguration: Decodable {
     }
 
     func sidebarSubtitle(for session: NativeEditorSession) -> String {
-        let editor = L10n.editorName(session.document.editorKind)
         if let preview = companion.preview(forDocumentID: session.document.id) {
             let group = preview.group.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !group.isEmpty { return "\(group) · \(editor)" }
+            if !group.isEmpty { return group }
         }
         if let url = session.document.url {
             let parent = url.deletingLastPathComponent().lastPathComponent
-            if !parent.isEmpty && parent != "/" { return "\(parent) · \(editor)" }
+            if !parent.isEmpty && parent != "/" { return parent }
         }
-        return "\(languageDisplayName(for: session)) · \(editor)"
+        return languageDisplayName(for: session)
+    }
+
+    func companionLimitsSummary(for session: NativeEditorSession) -> String? {
+        guard let preview = companion.preview(forDocumentID: session.document.id) else { return nil }
+        return String(format: L10n.string("status_companion_limits_format"), preview.timeLimit, preview.memoryLimit)
     }
 
     func windowSubtitle(for session: NativeEditorSession) -> String {
@@ -187,25 +201,63 @@ struct WorkspaceConfiguration: Decodable {
             }
             return String(format: L10n.string("companion_source_limits"), preview.timeLimit, preview.memoryLimit)
         }
-        return "\(languageDisplayName(for: session)) · \(L10n.editorName(session.document.editorKind))"
+        return languageDisplayName(for: session)
     }
 
     func runActiveDocument() {
         guard let session = activeSession else { return }
-        if !isRunPanelVisible { isRunPanelVisible = true }
+        if layoutMode == .editorOnly { layoutMode = .split }
         runner.runAll(session)
     }
 
     func addTestToActiveDocument() {
         guard let session = activeSession, session.canMutatePersistence, !runner.isRunning else { return }
-        if !isRunPanelVisible { isRunPanelVisible = true }
+        if layoutMode == .editorOnly { layoutMode = .split }
         session.testCases.append(TestCaseInput())
     }
 
     func importTestsIntoActiveDocument() {
         guard let session = activeSession, session.canMutatePersistence, !runner.isRunning else { return }
-        if !isRunPanelVisible { isRunPanelVisible = true }
+        if layoutMode == .editorOnly { layoutMode = .split }
         runner.importTests(into: session)
+    }
+
+    func setAllTestsEnabled(_ enabled: Bool, for target: NativeEditorSession? = nil) {
+        guard let session = target ?? activeSession, session.canMutatePersistence, !runner.isRunning else { return }
+        var updated = session.testCases
+        for index in updated.indices { updated[index].enabled = enabled }
+        session.testCases = updated
+    }
+
+    func saveAllDocuments() async {
+        guard !isBusy, persistence.canMutate else { return }
+        for session in Array(sessions) {
+            session.capture()
+            guard !session.isComposing else { errorMessage = L10n.string("finish_composition"); return }
+            if session.document.isDirty && session.canMutatePersistence {
+                guard await save(session) else { return }
+            }
+        }
+    }
+
+    func closeSavedDocuments() async {
+        guard !isBusy, persistence.canMutate else { return }
+        for session in Array(sessions) {
+            guard persistence.canMutate else { return }
+            session.capture()
+            guard !session.isComposing, session.captureFailure == nil, !session.document.isDirty else { continue }
+            await closeDocument(session)
+            if sessions.contains(where: { $0 === session }) { return }
+        }
+    }
+
+    func closeOtherDocuments(keeping kept: NativeEditorSession) async {
+        guard !isBusy, persistence.canMutate else { return }
+        for session in Array(sessions) where session !== kept {
+            guard persistence.canMutate else { return }
+            await closeDocument(session)
+            if sessions.contains(where: { $0 === session }) { return }
+        }
     }
 
     func revealInFinder(_ session: NativeEditorSession? = nil) {

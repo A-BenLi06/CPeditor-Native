@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "profile_resources": ["macos-clang"],
+  "profile_resources": ["macos-clang", "macos-clang-cpp20"],
   "default_profile_id": "macos-clang-cpp17",
   "polling_milliseconds": 30,
   "drain_events": 16,

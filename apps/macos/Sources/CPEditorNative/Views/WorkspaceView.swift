@@ -1,9 +1,11 @@
+import AppKit
 import SwiftUI
 import NativeEditorModel
 import NativeCoreBridge
 
 struct WorkspaceView: View {
     @State private var workspace: Workspace
+    @State private var splitRatio: CGFloat = 0.57
 
     init(workspace: Workspace = Workspace(arguments: Array(CommandLine.arguments.dropFirst()), automaticRecovery: true)) {
         _workspace = State(initialValue: workspace)
@@ -16,9 +18,9 @@ struct WorkspaceView: View {
     private var companionToolbarTitle: String {
         let pending = workspace.companion.pendingCount
         if pending > 0 {
-            return String(format: L10n.string("companion_pending_badge_format"), pending)
+            return String(format: L10n.string("open_companion_count_format"), pending)
         }
-        return L10n.string("companion_title")
+        return L10n.string("open_companion_short")
     }
 
     private var companionToolbarHelp: String {
@@ -30,101 +32,40 @@ struct WorkspaceView: View {
     }
 
     var body: some View {
-        NavigationSplitView {
-            List(selection: $workspace.selection) {
-                ForEach(workspace.sessions, id: \.document.id) { session in
-                    DocumentSidebarRow(workspace: workspace, session: session)
-                        .tag(session.document.id)
+        VStack(spacing: 0) {
+            DocumentTabBar(workspace: workspace)
+
+            if let notice = workspace.preferenceNotice {
+                NoticeBannerView(kind: .info, message: notice)
+            }
+            if let recovery = workspace.recovery, let notice = recovery.notice {
+                NoticeBannerView(kind: recovery.isBlocked ? .warning : .info, message: notice) {
+                    HStack(spacing: 6) {
+                        Button(L10n.string("save_recovery_as")) { Task { await recovery.saveElsewhere() } }
+                        Button(L10n.string("load_recovery_backup")) { Task { await recovery.loadBackup() } }
+                            .disabled(!workspace.persistentChangesAllowed)
+                        Button(L10n.string("retry_recovery")) { Task { await recovery.retry() } }
+                    }
+                    .controlSize(.small)
+                    .disabled(workspace.isBusy)
                 }
             }
-            .listStyle(.sidebar)
-            .navigationTitle(L10n.string("documents"))
-            .disabled(workspace.isLoading || workspace.isClosing || workspace.closingDocumentID != nil || workspace.decidingCloseID != nil)
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                SidebarFooterBar(workspace: workspace)
+
+            WorkspaceSplitContainer(
+                layoutMode: workspace.layoutMode,
+                splitRatio: $splitRatio
+            ) {
+                leftEditorPane
+            } right: {
+                rightRunPane
             }
-            .navigationSplitViewColumnWidth(min: 185, ideal: 225, max: 320)
-        } detail: {
-            VSplitView {
-                VStack(spacing: 0) {
-                    if let notice = workspace.preferenceNotice {
-                        NoticeBannerView(kind: .info, message: notice)
-                    }
-                    if let recovery = workspace.recovery, let notice = recovery.notice {
-                        NoticeBannerView(kind: recovery.isBlocked ? .warning : .info, message: notice) {
-                            HStack(spacing: 6) {
-                                Button(L10n.string("save_recovery_as")) { Task { await recovery.saveElsewhere() } }
-                                Button(L10n.string("load_recovery_backup")) { Task { await recovery.loadBackup() } }
-                                    .disabled(!workspace.persistentChangesAllowed)
-                                Button(L10n.string("retry_recovery")) { Task { await recovery.retry() } }
-                            }
-                            .controlSize(.small)
-                            .disabled(workspace.isBusy)
-                        }
-                    }
-                    ZStack {
-                        NativeEditorDeck(
-                            sessions: workspace.editorDeckSessions,
-                            selectedID: workspace.selection,
-                            wrapText: workspace.wrapText,
-                            showMinimap: workspace.showMinimap
-                        )
-                        if workspace.activeSession == nil && !workspace.isLoading {
-                            ContentUnavailableView {
-                                Label(L10n.string("no_document"), systemImage: "chevron.left.forwardslash.chevron.right")
-                            } description: {
-                                Text(L10n.string("open_or_create"))
-                            } actions: {
-                                HStack(spacing: 8) {
-                                    Button {
-                                        workspace.createDocument()
-                                    } label: {
-                                        Label(L10n.string("new_document"), systemImage: "doc.badge.plus")
-                                    }
-                                    .buttonStyle(.borderedProminent)
-                                    .disabled(!canMutateWorkspace)
-
-                                    Button {
-                                        Task { await workspace.openPanel() }
-                                    } label: {
-                                        Label(L10n.string("open_document"), systemImage: "folder")
-                                    }
-                                    .disabled(!canMutateWorkspace)
-
-                                    Button {
-                                        workspace.companion.isPresented = true
-                                    } label: {
-                                        Label(L10n.string("companion_title"), systemImage: "tray.and.arrow.down")
-                                    }
-                                    .disabled(workspace.isLoading || workspace.isClosing)
-                                }
-                            }
-                        }
-                        if workspace.isLoading {
-                            ProgressView(L10n.string("loading_recovery"))
-                                .padding(16)
-                                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
-                        }
-                    }
-                    if let session = workspace.activeSession {
-                        Divider()
-                        EditorStatusView(session: session, languageName: workspace.languageDisplayName(for: session))
-                    }
-                }
-                .frame(minHeight: 190)
-
-                if workspace.isRunPanelVisible, let session = workspace.activeSession {
-                    RunPanelView(session: session, runner: workspace.runner)
-                        .disabled(workspace.isLoading || workspace.isClosing)
-                }
-            }
-            .navigationTitle(workspace.activeSession.map(workspace.title(for:)) ?? L10n.string("app_name"))
-            .navigationSubtitle(workspace.activeSession.map(workspace.windowSubtitle(for:)) ?? "")
         }
+        .navigationTitle(workspace.activeSession.map(workspace.title(for:)) ?? L10n.string("app_name"))
+        .navigationSubtitle(workspace.activeSession.map(workspace.windowSubtitle(for:)) ?? "")
         .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
+            ToolbarItemGroup(placement: .navigation) {
                 Button { workspace.createDocument() } label: {
-                    Label(L10n.string("new_document"), systemImage: "doc.badge.plus")
+                    Label(L10n.string("new_file"), systemImage: "doc.badge.plus")
                 }
                 .help(L10n.string("help_new_document"))
                 .disabled(!canMutateWorkspace)
@@ -140,16 +81,48 @@ struct WorkspaceView: View {
                 }
                 .help(L10n.string("help_save_document"))
                 .disabled(workspace.activeSession?.canMutatePersistence != true || !canMutateWorkspace)
+            }
+
+            ToolbarItemGroup(placement: .primaryAction) {
+                Menu {
+                    ForEach(workspace.runner.profiles) { profile in
+                        Button {
+                            workspace.runner.selectedProfileID = profile.id
+                        } label: {
+                            if profile.id == workspace.runner.selectedProfileID {
+                                Label(profile.displayName, systemImage: "checkmark")
+                            } else {
+                                Text(profile.displayName)
+                            }
+                        }
+                    }
+                    Divider()
+                    Button(L10n.string("toolchain_settings")) {
+                        workspace.runner.beginProfileEdit()
+                    }
+                    Button(L10n.string("import_toolchain_profile")) {
+                        workspace.runner.loadProfile()
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "hammer")
+                        Text(workspace.runner.selectedProfile?.displayName ?? L10n.string("toolchain"))
+                            .lineLimit(1)
+                    }
+                }
+                .help(L10n.string("help_toolchain_menu"))
+                .disabled(workspace.runner.isRunning || !workspace.runner.persistentChangesAllowed || workspace.isLoading || workspace.isClosing)
 
                 if workspace.runner.isRunning {
                     Button { workspace.runner.cancel() } label: {
-                        Label(L10n.string("cancel_run"), systemImage: "stop.fill")
+                        Label(L10n.string("stop_short"), systemImage: "stop.fill")
                     }
                     .help(L10n.string("help_cancel_run"))
                 } else {
                     Button { workspace.runActiveDocument() } label: {
-                        Label(L10n.string("run_all"), systemImage: "play.fill")
+                        Label(L10n.string("run_short"), systemImage: "play.fill")
                     }
+                    .buttonStyle(.borderedProminent)
                     .help(L10n.string("help_run_all"))
                     .disabled(workspace.isLoading || workspace.isClosing || !workspace.runner.canRun(workspace.activeSession))
                 }
@@ -163,23 +136,25 @@ struct WorkspaceView: View {
                 .help(companionToolbarHelp)
                 .disabled(workspace.isLoading || workspace.isClosing)
 
-                Toggle(isOn: $workspace.wrapText) {
-                    Label(L10n.string("wrap_lines"), systemImage: "text.alignleft")
+                Picker(L10n.string("layout_mode"), selection: $workspace.layoutMode) {
+                    Image(systemName: "doc.text")
+                        .help(L10n.string("layout_editor_only"))
+                        .accessibilityLabel(L10n.string("layout_editor_only"))
+                        .tag(WorkspaceLayoutMode.editorOnly)
+                    Image(systemName: "rectangle.split.2x1")
+                        .help(L10n.string("layout_split"))
+                        .accessibilityLabel(L10n.string("layout_split"))
+                        .tag(WorkspaceLayoutMode.split)
+                    Image(systemName: "checklist")
+                        .help(L10n.string("layout_io_only"))
+                        .accessibilityLabel(L10n.string("layout_io_only"))
+                        .tag(WorkspaceLayoutMode.ioOnly)
                 }
-                .help(L10n.string("help_wrap_lines"))
-                .disabled(workspace.isLoading || workspace.isClosing || !workspace.persistentChangesAllowed)
-
-                Toggle(isOn: $workspace.showMinimap) {
-                    Label(L10n.string("show_minimap"), systemImage: "sidebar.right")
-                }
-                .help(L10n.string("help_show_minimap"))
-                .disabled(workspace.activeSession?.document.editorKind != .codeEditorView || workspace.isLoading || workspace.isClosing || !workspace.persistentChangesAllowed)
-
-                Toggle(isOn: $workspace.isRunPanelVisible) {
-                    Label(L10n.string("toggle_run_panel"), systemImage: "rectangle.bottomthird.inset.filled")
-                }
-                .help(L10n.string("help_toggle_run_panel"))
-                .disabled(workspace.isLoading || workspace.isClosing || workspace.activeSession == nil)
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+                .help(L10n.string("help_layout_mode"))
+                .disabled(workspace.isLoading || workspace.isClosing)
             }
         }
         .sheet(isPresented: Binding(
@@ -192,7 +167,7 @@ struct WorkspaceView: View {
             get: { workspace.runner.configurationDraft },
             set: { workspace.runner.configurationDraft = $0 }
         )) { draft in
-            ConfigurationJSONSheet(draft: draft) { jsonText in
+            ConfigurationSheet(draft: draft) { jsonText in
                 switch draft.kind {
                 case .toolchain: try workspace.runner.applyProfile(jsonText)
                 case .checker: try workspace.runner.applyChecker(jsonText)
@@ -210,13 +185,260 @@ struct WorkspaceView: View {
         } message: {
             Text(workspace.errorMessage ?? "")
         }
-        .frame(minWidth: 720, minHeight: 460)
+        .frame(minWidth: 740, minHeight: 480)
+    }
+
+    private var leftEditorPane: some View {
+        VStack(spacing: 0) {
+            ZStack {
+                NativeEditorDeck(
+                    sessions: workspace.editorDeckSessions,
+                    selectedID: workspace.selection,
+                    wrapText: workspace.wrapText,
+                    showMinimap: workspace.showMinimap
+                )
+                if workspace.activeSession == nil && !workspace.isLoading {
+                    ContentUnavailableView {
+                        Label(L10n.string("no_document"), systemImage: "chevron.left.forwardslash.chevron.right")
+                    } description: {
+                        Text(L10n.string("open_or_create"))
+                    } actions: {
+                        HStack(spacing: 8) {
+                            Button {
+                                workspace.createDocument()
+                            } label: {
+                                Label(L10n.string("new_file"), systemImage: "doc.badge.plus")
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(!canMutateWorkspace)
+
+                            Button {
+                                Task { await workspace.openPanel() }
+                            } label: {
+                                Label(L10n.string("open_document"), systemImage: "folder")
+                            }
+                            .disabled(!canMutateWorkspace)
+
+                            Button {
+                                workspace.companion.isPresented = true
+                            } label: {
+                                Label(L10n.string("companion_title"), systemImage: "tray.and.arrow.down")
+                            }
+                            .disabled(workspace.isLoading || workspace.isClosing)
+                        }
+                    }
+                }
+                if workspace.isLoading {
+                    ProgressView(L10n.string("loading_recovery"))
+                        .padding(16)
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+                }
+            }
+
+            if let session = workspace.activeSession {
+                Divider()
+                EditorStatusView(
+                    session: session,
+                    languageName: workspace.languageDisplayName(for: session),
+                    companionLimits: workspace.companionLimitsSummary(for: session)
+                )
+            }
+        }
+        .background(Color(nsColor: .textBackgroundColor))
+    }
+
+    @ViewBuilder
+    private var rightRunPane: some View {
+        if let session = workspace.activeSession {
+            RunPanelView(session: session, runner: workspace.runner)
+                .disabled(workspace.isLoading || workspace.isClosing)
+        } else {
+            ContentUnavailableView(
+                L10n.string("no_document"),
+                systemImage: "checklist",
+                description: Text(L10n.string("no_tests_right_pane_hint"))
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(nsColor: .windowBackgroundColor))
+        }
     }
 }
 
-private struct DocumentSidebarRow: View {
+private struct WorkspaceSplitContainer<Left: View, Right: View>: View {
+    let layoutMode: WorkspaceLayoutMode
+    @Binding var splitRatio: CGFloat
+    private let left: Left
+    private let right: Right
+
+    init(
+        layoutMode: WorkspaceLayoutMode,
+        splitRatio: Binding<CGFloat>,
+        @ViewBuilder left: () -> Left,
+        @ViewBuilder right: () -> Right
+    ) {
+        self.layoutMode = layoutMode
+        self._splitRatio = splitRatio
+        self.left = left()
+        self.right = right()
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            let totalWidth = max(0, proxy.size.width)
+            let totalHeight = max(0, proxy.size.height)
+            let dividerWidth: CGFloat = 1
+            let available = max(0, totalWidth - dividerWidth)
+            let minLeft = min(300, available * 0.45)
+            let minRight = min(320, available * 0.45)
+            let clampedLeft = min(max(available * splitRatio, minLeft), max(minLeft, available - minRight))
+            let rightWidth = max(0, available - clampedLeft)
+
+            ZStack(alignment: .topLeading) {
+                left
+                    .frame(width: layoutMode == .editorOnly ? totalWidth : max(300, clampedLeft), height: totalHeight)
+                    .opacity(layoutMode == .ioOnly ? 0 : 1)
+                    .allowsHitTesting(layoutMode != .ioOnly)
+                    .accessibilityHidden(layoutMode == .ioOnly)
+
+                if layoutMode != .editorOnly {
+                    HStack(spacing: 0) {
+                        if layoutMode == .split {
+                            Color.clear
+                                .frame(width: clampedLeft)
+                                .allowsHitTesting(false)
+                            SplitResizeHandle(
+                                splitRatio: $splitRatio,
+                                totalWidth: available,
+                                minLeft: minLeft,
+                                minRight: minRight
+                            )
+                        }
+                        right
+                            .frame(width: layoutMode == .ioOnly ? totalWidth : rightWidth, height: totalHeight)
+                            .background(Color(nsColor: .windowBackgroundColor))
+                    }
+                }
+            }
+            .frame(width: totalWidth, height: totalHeight, alignment: .topLeading)
+        }
+    }
+}
+
+private struct SplitResizeHandle: View {
+    @Binding var splitRatio: CGFloat
+    let totalWidth: CGFloat
+    let minLeft: CGFloat
+    let minRight: CGFloat
+
+    @State private var dragStartRatio: CGFloat?
+    @State private var pushedResizeCursor = false
+
+    var body: some View {
+        Rectangle()
+            .fill(Color(nsColor: .separatorColor))
+            .frame(width: 1)
+            .frame(maxHeight: .infinity)
+            .overlay {
+                Color.clear
+                    .frame(width: 9)
+                    .contentShape(Rectangle())
+            }
+            .onHover { hovering in
+                if hovering && !pushedResizeCursor {
+                    NSCursor.resizeLeftRight.push()
+                    pushedResizeCursor = true
+                } else if !hovering && pushedResizeCursor {
+                    NSCursor.pop()
+                    pushedResizeCursor = false
+                }
+            }
+            .onDisappear {
+                if pushedResizeCursor {
+                    NSCursor.pop()
+                    pushedResizeCursor = false
+                }
+            }
+            .gesture(
+                DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                    .onChanged { value in
+                        guard totalWidth > minLeft + minRight else { return }
+                        if dragStartRatio == nil {
+                            dragStartRatio = splitRatio
+                        }
+                        let baseLeft = (dragStartRatio ?? splitRatio) * totalWidth
+                        let proposedLeft = min(max(baseLeft + value.translation.width, minLeft), totalWidth - minRight)
+                        splitRatio = proposedLeft / totalWidth
+                    }
+                    .onEnded { _ in
+                        dragStartRatio = nil
+                    }
+            )
+    }
+}
+
+private struct DocumentTabBar: View {
+    @Bindable var workspace: Workspace
+
+    private var canMutateWorkspace: Bool {
+        !workspace.isBusy && workspace.persistentChangesAllowed
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                ScrollViewReader { proxy in
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 4) {
+                            ForEach(workspace.sessions, id: \.document.id) { session in
+                                DocumentTabItem(
+                                    workspace: workspace,
+                                    session: session,
+                                    isSelected: workspace.selection == session.document.id
+                                )
+                                .id(session.document.id)
+                            }
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                    }
+                    .onChange(of: workspace.selection) { _, newID in
+                        guard let newID else { return }
+                        withAnimation(.easeOut(duration: 0.15)) {
+                            proxy.scrollTo(newID)
+                        }
+                    }
+                }
+
+                Divider()
+                    .frame(height: 16)
+                    .padding(.horizontal, 4)
+
+                Button {
+                    workspace.createDocument()
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.caption.weight(.semibold))
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+                .disabled(!canMutateWorkspace)
+                .help(L10n.string("help_new_document"))
+                .padding(.trailing, 8)
+            }
+            .frame(height: 34)
+            .background(.bar)
+            .disabled(workspace.isLoading || workspace.isClosing || workspace.closingDocumentID != nil || workspace.decidingCloseID != nil)
+
+            Divider()
+        }
+    }
+}
+
+private struct DocumentTabItem: View {
     let workspace: Workspace
     let session: NativeEditorSession
+    let isSelected: Bool
     @State private var isHovering = false
 
     private var iconName: String {
@@ -242,24 +464,15 @@ private struct DocumentSidebarRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             Image(systemName: iconName)
-                .symbolRenderingMode(.monochrome)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .frame(width: 16)
+                .font(.caption)
+                .foregroundStyle(isSelected ? Color.primary : Color.secondary)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(workspace.title(for: session))
-                    .font(.body.weight(session.document.isDirty ? .medium : .regular))
-                    .lineLimit(1)
-                Text(workspace.sidebarSubtitle(for: session))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-
-            Spacer(minLength: 4)
+            Text(workspace.title(for: session))
+                .font(.callout.weight(isSelected ? .medium : .regular))
+                .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+                .lineLimit(1)
 
             if let state = runState, !state.isTerminal {
                 ProgressView()
@@ -268,41 +481,59 @@ private struct DocumentSidebarRow: View {
                 VerdictBadge(
                     descriptor: .summary(for: result),
                     compact: true,
-                    dimmed: !result.matches(session.document.snapshot()),
-                    prominentSelection: workspace.selection == session.document.id
+                    dimmed: !result.matches(session.document.snapshot())
                 )
             }
 
             ZStack {
-                let isSelected = workspace.selection == session.document.id
                 if isHovering && canCloseTab {
                     Button {
                         Task { await workspace.closeDocument(session) }
                     } label: {
                         Image(systemName: "xmark")
                             .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(isSelected ? .white : .secondary)
-                            .frame(width: 16, height: 16)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 14, height: 14)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.borderless)
-                    .help(L10n.string("close_document"))
+                    .help(L10n.string("close_tab"))
                 } else if !session.canMutatePersistence {
                     Image(systemName: "lock.fill")
                         .font(.system(size: 9))
-                        .foregroundStyle(isSelected ? .white.opacity(0.85) : .secondary)
+                        .foregroundStyle(.secondary)
                         .accessibilityLabel(L10n.string("readonly_status"))
                 } else if session.document.isDirty {
                     Circle()
-                        .fill(isSelected ? Color.white : Color.orange)
-                        .frame(width: 7, height: 7)
+                        .fill(Color.orange)
+                        .frame(width: 6, height: 6)
                         .accessibilityLabel(L10n.string("unsaved_changes"))
                 }
             }
-            .frame(width: 16, height: 16)
+            .frame(width: 14, height: 14)
         }
-        .padding(.vertical, 2)
-        .contentShape(Rectangle())
+        .padding(.horizontal, 9)
+        .padding(.vertical, 4)
+        .frame(height: 26)
+        .background {
+            if isSelected {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color(nsColor: .controlBackgroundColor))
+            } else if isHovering {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(.quaternary.opacity(0.6))
+            }
+        }
+        .overlay {
+            if isSelected {
+                RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(Color(nsColor: .separatorColor).opacity(0.75), lineWidth: 1)
+            }
+        }
+        .contentShape(RoundedRectangle(cornerRadius: 6))
+        .onTapGesture {
+            workspace.selection = session.document.id
+        }
         .onHover { isHovering = $0 }
         .contextMenu {
             Button(L10n.string("save")) {
@@ -322,76 +553,20 @@ private struct DocumentSidebarRow: View {
 
             Divider()
 
-            Button(L10n.string("open_copy_alternative")) {
-                workspace.selection = session.document.id
-                workspace.openCopyInAlternativeEditor()
-            }
-            .disabled(workspace.isBusy || !workspace.persistentChangesAllowed)
-
-            Divider()
-
-            Button(L10n.string("close_document"), role: .destructive) {
+            Button(L10n.string("close_tab")) {
                 Task { await workspace.closeDocument(session) }
             }
             .disabled(!canCloseTab)
-        }
-    }
-}
 
-private struct SidebarFooterBar: View {
-    let workspace: Workspace
-
-    private var canMutate: Bool {
-        !workspace.isBusy && workspace.persistentChangesAllowed
-    }
-
-    private var countLabel: String {
-        let count = workspace.sessions.count
-        if count == 1 {
-            return L10n.string("document_count_single")
-        }
-        return String(format: L10n.string("document_count_plural"), count)
-    }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            Divider()
-            HStack(spacing: 10) {
-                Menu {
-                    ForEach(EditorKind.allCases, id: \.self) { editor in
-                        Button(String(format: L10n.string("new_with_editor"), L10n.editorName(editor))) {
-                            workspace.createDocument(editor: editor)
-                        }
-                    }
-                } label: {
-                    Image(systemName: "plus")
-                } primaryAction: {
-                    workspace.createDocument()
-                }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
-                .disabled(!canMutate)
-                .help(L10n.string("help_new_document"))
-
-                Button {
-                    Task { await workspace.openPanel() }
-                } label: {
-                    Image(systemName: "folder")
-                }
-                .buttonStyle(.borderless)
-                .disabled(!canMutate)
-                .help(L10n.string("help_open_document"))
-
-                Spacer(minLength: 4)
-
-                Text(countLabel)
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+            Button(L10n.string("close_other_tabs")) {
+                Task { await workspace.closeOtherDocuments(keeping: session) }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(.bar)
+            .disabled(!canCloseTab || workspace.sessions.count <= 1)
+
+            Button(L10n.string("close_saved_tabs")) {
+                Task { await workspace.closeSavedDocuments() }
+            }
+            .disabled(!canCloseTab)
         }
     }
 }
@@ -399,6 +574,7 @@ private struct SidebarFooterBar: View {
 struct EditorStatusView: View {
     let session: NativeEditorSession
     var languageName: String = ""
+    var companionLimits: String? = nil
 
     private var saveStateLabel: String {
         if !session.canMutatePersistence {
@@ -410,11 +586,19 @@ struct EditorStatusView: View {
     var body: some View {
         let position = session.document.position(atUTF16Offset: session.selection.location)
         HStack(spacing: 10) {
-            Text(L10n.editorName(session.document.editorKind))
-                .fontWeight(.medium)
+            if session.selection.length > 0 {
+                Text(String(format: L10n.string("position_selection_format"), position.line, position.column, session.selection.length))
+                    .monospacedDigit()
+            } else {
+                Text(String(format: L10n.string("position_format"), position.line, position.column))
+                    .monospacedDigit()
+            }
+            Divider().frame(height: 11)
+            Text(L10n.string("encoding_utf8"))
             if !languageName.isEmpty {
                 Divider().frame(height: 11)
                 Text(languageName)
+                    .fontWeight(.medium)
             }
             Divider().frame(height: 11)
             HStack(spacing: 4) {
@@ -428,9 +612,6 @@ struct EditorStatusView: View {
                 }
                 Text(saveStateLabel)
             }
-            Text(String(format: L10n.string("revision_badge_format"), session.document.revision))
-                .monospacedDigit()
-                .foregroundStyle(.tertiary)
 
             Spacer(minLength: 8)
 
@@ -442,15 +623,12 @@ struct EditorStatusView: View {
                     .padding(.vertical, 1)
                     .background(Color.accentColor.opacity(0.12), in: Capsule())
             }
-            if session.selection.length > 0 {
-                Text(String(format: L10n.string("position_selection_format"), position.line, position.column, session.selection.length))
+            if let companionLimits {
+                Text(companionLimits)
                     .monospacedDigit()
-            } else {
-                Text(String(format: L10n.string("position_format"), position.line, position.column))
-                    .monospacedDigit()
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
             }
-            Divider().frame(height: 11)
-            Text(L10n.string("encoding_utf8"))
         }
         .font(.caption)
         .foregroundStyle(.secondary)

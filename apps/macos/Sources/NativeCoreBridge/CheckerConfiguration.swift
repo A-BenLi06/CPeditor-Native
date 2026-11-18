@@ -19,6 +19,13 @@ public struct CheckerConfiguration: Encodable, Sendable, Equatable {
     public let arguments: [String]
     private let value: CheckerJSON
     public static let maximumJSONBytes = 1024 * 1024
+    public struct FormValues: Equatable, Sendable {
+        public var executable: String
+        public var arguments: [String]
+        public var wallTimeoutMS: UInt64
+        public var acceptedExitCodes: [UInt64]
+        public var wrongAnswerExitCodes: [UInt64]
+    }
     private enum Field: String {
         case schemaVersion = "schema_version", command, limits, accepted = "accepted_exit_codes"
         case wrong = "wrong_answer_exit_codes", inherit = "inherit_environment", environment
@@ -81,6 +88,55 @@ public struct CheckerConfiguration: Encodable, Sendable, Equatable {
     }
     public func encode(to encoder: Encoder) throws { try value.encode(to: encoder) }
     public func jsonText() -> String { originalJSON }
+
+    public func formValues() -> FormValues {
+        var wallMS: UInt64 = 2000
+        var accepted: [UInt64] = [0]
+        var wrong: [UInt64] = [1, 2]
+        if case .object(let root) = value {
+            if case .object(let limits)? = root[RawIdentifier(Field.limits.rawValue)],
+               case .integer(let wall)? = limits[RawIdentifier(Field.wall.rawValue)] {
+                wallMS = wall
+            }
+            if case .array(let codes)? = root[RawIdentifier(Field.accepted.rawValue)] {
+                accepted = codes.compactMap { if case .integer(let v) = $0 { return v }; return nil }
+            }
+            if case .array(let codes)? = root[RawIdentifier(Field.wrong.rawValue)] {
+                wrong = codes.compactMap { if case .integer(let v) = $0 { return v }; return nil }
+            }
+        }
+        return FormValues(executable: executable, arguments: arguments, wallTimeoutMS: wallMS,
+                          acceptedExitCodes: accepted, wrongAnswerExitCodes: wrong)
+    }
+
+    public func updatingJSON(executable: String, arguments: [String], wallTimeoutMS: UInt64,
+                             acceptedExitCodes: [UInt64], wrongAnswerExitCodes: [UInt64]) throws -> String {
+        guard case .object(var root) = value else { throw CheckerConfigurationError("checker_error_object") }
+        var commandFields: [RawIdentifier: CheckerJSON] = [:]
+        if case .object(let existingCommand)? = root[RawIdentifier(Field.command.rawValue)] {
+            commandFields = existingCommand
+        }
+        commandFields[RawIdentifier(Field.executable.rawValue)] = .string(executable)
+        commandFields[RawIdentifier(Field.arguments.rawValue)] = .array(arguments.map { .string($0) })
+        root[RawIdentifier(Field.command.rawValue)] = .object(commandFields)
+
+        var limitFields: [RawIdentifier: CheckerJSON] = [:]
+        if case .object(let existingLimits)? = root[RawIdentifier(Field.limits.rawValue)] {
+            limitFields = existingLimits
+        }
+        limitFields[RawIdentifier(Field.wall.rawValue)] = .integer(wallTimeoutMS)
+        root[RawIdentifier(Field.limits.rawValue)] = .object(limitFields)
+
+        root[RawIdentifier(Field.accepted.rawValue)] = .array(acceptedExitCodes.map { .integer($0) })
+        root[RawIdentifier(Field.wrong.rawValue)] = .array(wrongAnswerExitCodes.map { .integer($0) })
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        let updatedText = String(decoding: try encoder.encode(CheckerJSON.object(root)), as: UTF8.self)
+        _ = try CheckerConfiguration(jsonText: updatedText)
+        return updatedText
+    }
+
     public static func == (a: Self, b: Self) -> Bool { a.originalJSON.utf8.elementsEqual(b.originalJSON.utf8) }
     private static func text(_ text: String) throws { if text.utf8.contains(0) { throw CheckerConfigurationError("checker_error_nul") } }
     private static func template(_ text: String) throws {

@@ -83,7 +83,7 @@ struct CompanionInboxView: View {
                 NoticeBannerView(kind: .info, message: notice)
             }
 
-            HSplitView {
+            HStack(spacing: 0) {
                 VStack(spacing: 0) {
                     if filteredItems.isEmpty {
                         VStack(spacing: 10) {
@@ -105,17 +105,22 @@ struct CompanionInboxView: View {
                         .padding(16)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
-                        List(selection: $controller.selection) {
-                            ForEach(filteredItems) { item in
-                                CompanionInboxRow(
-                                    item: item,
-                                    preview: controller.preview(for: item),
-                                    isSelected: controller.selection == item.id
-                                )
-                                .tag(item.id)
+                        ScrollView {
+                            LazyVStack(spacing: 4) {
+                                ForEach(filteredItems) { item in
+                                    CompanionInboxRow(
+                                        item: item,
+                                        preview: controller.preview(for: item),
+                                        isSelected: controller.selection == item.id
+                                    )
+                                    .contentShape(RoundedRectangle(cornerRadius: 7))
+                                    .onTapGesture {
+                                        controller.selection = item.id
+                                    }
+                                }
                             }
+                            .padding(8)
                         }
-                        .listStyle(.sidebar)
                     }
 
                     if controller.hasMore {
@@ -128,11 +133,15 @@ struct CompanionInboxView: View {
                         .padding(8)
                     }
                 }
-                .frame(minWidth: 230, idealWidth: 270, maxHeight: .infinity)
+                .frame(width: 265)
+                .frame(maxHeight: .infinity)
+                .background(Color(nsColor: .controlBackgroundColor).opacity(0.45))
+
+                Divider()
 
                 if let item = controller.selectedItem, let preview = controller.preview(for: item) {
                     CompanionDetailPane(controller: controller, item: item, preview: preview)
-                        .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     ContentUnavailableView(
                         L10n.string("companion_empty"),
@@ -140,11 +149,11 @@ struct CompanionInboxView: View {
                         description: Text(L10n.string("companion_empty_description"))
                     )
                     .padding()
-                    .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
         }
-        .frame(minWidth: 720, idealWidth: 900, minHeight: 460, idealHeight: 640)
+        .frame(minWidth: 740, idealWidth: 900, minHeight: 460, idealHeight: 620)
         .interactiveDismissDisabled(controller.isOperating)
         .onChange(of: filter) { _, _ in
             if let selection = controller.selection, filteredItems.contains(where: { $0.id == selection }) {
@@ -158,7 +167,7 @@ struct CompanionInboxView: View {
 private struct CompanionInboxRow: View {
     let item: CompanionItem
     let preview: CompanionPreview?
-    var isSelected = false
+    let isSelected: Bool
 
     private var sampleCountText: String? {
         guard let count = preview?.tests.count else { return nil }
@@ -169,7 +178,8 @@ private struct CompanionInboxRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             Text(preview?.name ?? item.importID.rawValue)
-                .font(.body.weight(item.state == .pending ? .semibold : .regular))
+                .font(.body.weight(item.state == .pending || isSelected ? .semibold : .regular))
+                .foregroundStyle(.primary)
                 .lineLimit(2)
 
             if let group = preview?.group, !group.isEmpty {
@@ -180,38 +190,51 @@ private struct CompanionInboxRow: View {
             }
 
             HStack(spacing: 5) {
-                CompanionStatePill(state: item.state, prominentSelection: isSelected)
+                CompanionStatePill(state: item.state)
                 if item.previousImportID != nil {
                     Text(L10n.string("companion_update"))
                         .font(.caption2.weight(.medium))
-                        .foregroundStyle(isSelected ? .white : .purple)
+                        .foregroundStyle(.purple)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
-                        .background((isSelected ? Color.white : Color.purple).opacity(isSelected ? 0.22 : 0.12), in: Capsule())
+                        .background(Color.purple.opacity(0.12), in: Capsule())
                 }
                 if preview?.requiresSpecialIOMode == true {
                     Text(L10n.string("companion_non_stdio_badge"))
                         .font(.caption2.weight(.medium))
-                        .foregroundStyle(isSelected ? .white : .orange)
+                        .foregroundStyle(.orange)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
-                        .background((isSelected ? Color.white : Color.orange).opacity(isSelected ? 0.22 : 0.12), in: Capsule())
+                        .background(Color.orange.opacity(0.12), in: Capsule())
                 }
                 Spacer(minLength: 2)
                 if let sampleCountText {
                     Text(sampleCountText)
                         .font(.caption2.monospacedDigit())
-                        .foregroundStyle(isSelected ? .white.opacity(0.85) : .secondary)
+                        .foregroundStyle(.secondary)
                 }
             }
         }
-        .padding(.vertical, 3)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            if isSelected {
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(Color.accentColor.opacity(0.14))
+            }
+        }
+        .overlay {
+            if isSelected {
+                RoundedRectangle(cornerRadius: 7)
+                    .strokeBorder(Color.accentColor.opacity(0.35), lineWidth: 1)
+            }
+        }
     }
 }
 
 private struct CompanionStatePill: View {
     let state: CompanionState
-    var prominentSelection = false
 
     var body: some View {
         let isPending = state == .pending
@@ -222,10 +245,10 @@ private struct CompanionStatePill: View {
             Text(L10n.string(isPending ? "companion_pending" : "companion_applied_state"))
                 .font(.caption2.weight(.semibold))
         }
-        .foregroundStyle(prominentSelection ? .white : tint)
+        .foregroundStyle(tint)
         .padding(.horizontal, 6)
         .padding(.vertical, 1.5)
-        .background(prominentSelection ? Color.white.opacity(0.22) : tint.opacity(0.14), in: Capsule())
+        .background(tint.opacity(0.14), in: Capsule())
     }
 }
 
@@ -337,9 +360,9 @@ private struct CompanionDetailPane: View {
                                 ViewThatFits(in: .horizontal) {
                                     HStack(alignment: .top, spacing: 10) {
                                         sampleBlock(preview.tests[index].input, labelKey: "test_input")
-                                            .frame(minWidth: 170, maxWidth: .infinity)
+                                            .frame(minWidth: 160, maxWidth: .infinity)
                                         sampleBlock(preview.tests[index].output, labelKey: "test_expected")
-                                            .frame(minWidth: 170, maxWidth: .infinity)
+                                            .frame(minWidth: 160, maxWidth: .infinity)
                                     }
                                     VStack(alignment: .leading, spacing: 8) {
                                         sampleBlock(preview.tests[index].input, labelKey: "test_input")
@@ -348,8 +371,8 @@ private struct CompanionDetailPane: View {
                                 }
                             }
                             .padding(10)
-                            .background(Color(nsColor: .controlBackgroundColor).opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
-                            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.separator, lineWidth: 1))
+                            .background(Color(nsColor: .controlBackgroundColor).opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
+                            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color(nsColor: .separatorColor).opacity(0.75), lineWidth: 1))
                         }
                     }
                 }

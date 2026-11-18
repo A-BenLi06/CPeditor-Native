@@ -240,19 +240,32 @@ struct CodeBlockBox: View {
     let title: String?
     let displayText: String
     let byteCount: UInt64
+    var trailingSubtitle: String? = nil
+    var borderColor: Color? = nil
     var isBinaryPreview = false
     var binaryPreviewShownBytes = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            if let title {
+            if title != nil || trailingSubtitle != nil {
                 HStack(spacing: 6) {
-                    Text(title)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
+                    if let title {
+                        Text(title)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                    }
                     Text(String(format: L10n.string("bytes_count_format"), byteCount))
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(.tertiary)
+                    if let trailingSubtitle, !trailingSubtitle.isEmpty {
+                        Text("·")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                        Text(trailingSubtitle)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                     Spacer(minLength: 4)
                     CopyTextButton(text: displayText)
                 }
@@ -266,12 +279,17 @@ struct CodeBlockBox: View {
                     Text(displayText)
                         .font(.system(.caption, design: .monospaced))
                         .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(7)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
             .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.quaternary, lineWidth: 1))
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(borderColor ?? Color(nsColor: .separatorColor).opacity(0.6), lineWidth: 1)
+            )
 
             if isBinaryPreview {
                 Text(String(format: L10n.string("output_binary_preview"), binaryPreviewShownBytes, byteCount))

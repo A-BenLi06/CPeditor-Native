@@ -502,3 +502,26 @@ Core 规则区分空输入、缺少预期输出与预期输出为空、checker �
 - Swift 测试套件：执行 `./script/test_macos.sh`，15 个套件共 80 项测试全部通过（新增 `TextPositionTests`、`CursorPositionTests` 与覆盖智能标题／面板折叠保留原生编辑器身份与撤销栈／后台标签关闭／判题汇总优先级／真实离屏快照渲染的 `WorkspaceUXTests`）。
 - 性能局部基准与构建产物核验：`./tools/macos/cursor_position_benchmark.sh` 生成 `out/macos/cursor-position-perf/benchmark.json`（约 16 MiB 多行文本近文件尾查询由旧路径双次扫描 p50 约 105–238 ms 降至同版本缓存查询 p50 约 68 ns，无 LF 单长行逻辑索引载荷为 0 字节）；`script/verify_macos_build.py` 核对 15 个 Core 对象与最终可执行文件均为 `minos 26.0`、`sdk 27.2`，回执写入 `out/macos/build-verification.json`。
 - 真实应用打包、签名与界面快照核验：使用独立恢复文件 `out/macos/ux-verification/workspace.json` 执行 `./script/build_and_run.sh --verify`、严格 `codesign --verify --strict` 与正常 `AppLifecycle quit` 全部退出 0；真实 AppKit／SwiftUI 渲染快照保存在 `out/macos/layout-audit/`（覆盖浅色／深色工作区、非 stdio 空样例门禁、Companion 收件箱与配置弹窗）。上游研究子模块 `references/cpeditor` 保持干净未修改；macOS 26 实机、Intel、系统中文输入法候选窗口、原生 HTTP 监听界面及性能预算仍待后续目标矩阵验收。
+
+## 2026-11-18T14:51:32+08:00 macOS 原生应用产品化重构：仿上游左编右测布局、去内部原型暴露与双编辑器视觉修复
+
+### 改动与思路
+
+- **工作区结构与视图模式对齐上游 CP Editor（消除内外边距挤压）**：
+  - 将原先的“左栏文档列表 + 编辑器 + 底部运行面板”三层堆叠改为原生**顶部文档标签栏**（`DocumentTabBar`）+ **左编右测水平分栏**（`WorkspaceSplitContainer`，自定义 `SplitResizeHandle`）。
+  - 在 `Workspace` 中新增 `WorkspaceLayoutMode`（`editorOnly` / `split` / `ioOnly`，保留 `isRunPanelVisible` 兼容计算属性），对应快捷键 `⌃⌘1` / `⌃⌘2` / `⌃⌘3` 与 `⌘⇧Y`。分栏容器通过保持 `leftEditorPane` 始终挂载在视图树中且宽度不为 0 来确保切换视图模式时不卸载 `NativeEditorDeck`、不丢失 `NSTextView`／`STTextView` 实例与 `UndoManager` 撤销栈，并支持 `Save All`（`⌘⌥S`）、`Close Saved Tabs`（`⌘⌥W`）与 `closeOtherDocuments(keeping:)`。
+  - 修复 `NativeEditorSession` 中 `NSHostingView`（设置 `sizingOptions = []` 与 `safeAreaRegions = []`）及 `STTextView` 滚动画布（`automaticallyAdjustsContentInsets = false`）引起的额外系统内边距／安全区漂移问题；在 `CodeEditorSurface` 中注入随 `@Environment(\.colorScheme)` 切换的 `@MainActor` 静态 `Theme` 常量，彻底消除 `CodeEditorView` 在深色模式下呈现纯白画布的视觉缺陷。
+- **产品化去原型化与菜单收拢**：
+  - 移除 `Editor` 顶层菜单、顶层 `Recovery` 调试菜单以及“New Document with STTextView / CodeEditorView”等暴露内部组件名的文案（保留底层 `--editor` 启动参数及内部兼容 API 以不破坏既有验证测试）；将恢复入口收拢至 `File → Workspace Recovery ▸`。
+  - 工具栏与菜单聚焦编程竞赛高频动作：简洁语言／工具链菜单、`Run`／`Stop`、收件箱触发器与三段式视图切换；新增内置 `macos-clang-cpp20.json`（并在 `running.json` 注册），`ToolchainProfile` 对常用工具链返回人类可读名称（如 `C++17 (Clang)`、`C++20 (Clang)`）。
+- **右侧运行面板、双模配置表与收件箱视觉精修**：
+  - `RunPanelView` 重构为右侧窄幅适配布局：紧凑顶栏、`Checker:` 选择菜单、按需展开的 `CompilerOutputBanner`、统一 `TestCaseCardView`（在宽幅并排、`780×520` 紧凑窗口自动切换为竖向堆叠 `Input` / `Expected Output`，下方内联展示 `Output`／stderr／独立 checker 诊断与 `Use Output as Expected` 一键采纳）以及 `More` 批量测试动作菜单。
+  - 新增 `ConfigurationSheet` 提供分组原生表单（`Visual`）与原始 `JSON` 切换视图，协议读取与更新经由 `NativeCoreBridge`（`WireModels.swift`、`CheckerConfiguration.swift`）无损保留既有未知 JSON 字段。
+  - `CompanionInboxView` 取消触发非焦点黑底高对比的系统 `List` 与 `HSplitView`，改为干净的 `HStack` + 可选中卡片视图；补充与更新 `Localizable.strings` 本地化键。
+
+### 验证与范围
+
+- **实际执行主机**：macOS 27.0.1（26A434）arm64、Xcode 27.2（27B52）、Swift 6.4.2、Apple Clang 21、macOS SDK 27.2。所有验证均为 macOS 主机结果，不代表 Windows 10 22H2 或 macOS 26 实机验证。
+- **共享 Core CTest**：在 `script/macos_toolchain.sh` 环境下执行 `ctest --test-dir out/core/dev --output-on-failure`，17/17 项全部通过（Core C++ 代码未改）。
+- **Swift 单元测试与离屏界面审计**：执行 `CPN_CORE_PREBUILT=1 CPN_LAYOUT_AUDIT_DIR="$PWD/out/macos/layout-audit" ./script/test_macos.sh`，15 个套件共 81 项测试全部通过；导出并逐张视觉核查 `out/macos/layout-audit/` 下全部 9 张真实 AppKit／SwiftUI 渲染 PNG（覆盖 `CodeEditorView` 与 `STTextView` 浅色／深色、紧凑 `780×520`、`Tests & Output Only` 模式、CE 展开横幅、非 stdio 空状态、Companion 收件箱以及 Toolchain／Checker Visual 配置窗口），无黑底选中、无暗色白底、无按钮挤压与内部组件词汇泄露。
+- **真实应用打包、签名与启动**：执行 `./script/build_and_run.sh --verify` 与 `codesign --verify --strict "$PWD/out/macos/CPEditorNative.app"` 全部退出 0，15 个 Core 对象与最终二进制均通过 `LC_BUILD_VERSION`（`minos 26.0`、`sdk 27.2`）核验，应用已启动（PID 97045）并保持运行供检查；上游子模块 `references/cpeditor` 保持干净未修改。

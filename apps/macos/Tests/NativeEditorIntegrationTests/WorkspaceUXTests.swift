@@ -27,7 +27,7 @@ import NativeCoreBridge
         return nil
     }
 
-    @Test func titlesAndSubtitlesReflectCompanionMetadataNumberedUntitledAndSavedPaths() async throws {
+    @Test func titlesAndSubtitlesReflectCompanionMetadataAndHideInternalEditorNames() async throws {
         _ = NSApplication.shared
         let directory = try folder()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -37,10 +37,13 @@ import NativeCoreBridge
 
         let first = try #require(workspace.activeSession)
         #expect(workspace.title(for: first) == "Untitled")
+        #expect(!workspace.sidebarSubtitle(for: first).contains("STTextView"))
+        #expect(!workspace.windowSubtitle(for: first).contains("STTextView"))
 
-        let second = try #require(workspace.createDocument(editor: .sttextviewFallback))
+        let second = try #require(workspace.createDocument(editor: .codeEditorView))
         #expect(workspace.title(for: first) == "Untitled")
         #expect(workspace.title(for: second) == "Untitled 2")
+        #expect(!workspace.windowSubtitle(for: second).contains("CodeEditorView"))
 
         let payloadFile = directory.appendingPathComponent("problem.json")
         let payloadJSON = """
@@ -61,6 +64,7 @@ import NativeCoreBridge
         #expect(workspace.title(for: imported) == "A. Two Pointers")
         #expect(workspace.sidebarSubtitle(for: imported).contains("Codeforces Round 999"))
         #expect(workspace.windowSubtitle(for: imported).contains("1500 ms"))
+        #expect(workspace.companionLimitsSummary(for: imported)?.contains("1500 ms") == true)
         #expect(await workspace.recovery?.flush() == true)
         await dispose(workspace)
 
@@ -76,12 +80,12 @@ import NativeCoreBridge
         await dispose(reopened)
     }
 
-    @Test func togglingRunPanelAndRunningPreservesMountedEditorAndUndoHistory() async throws {
+    @Test(arguments: EditorKind.allCases) func layoutModesAndRunningPreserveMountedEditorAndUndoHistory(editor: EditorKind) async throws {
         _ = NSApplication.shared
-        let workspace = Workspace(arguments: ["--editor", "codeeditorview"])
+        let workspace = Workspace(arguments: ["--editor", editor.rawValue])
         let session = try #require(workspace.activeSession)
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1080, height: 720),
+            contentRect: NSRect(x: 0, y: 0, width: 1180, height: 740),
             styleMask: [.titled, .resizable],
             backing: .buffered,
             defer: false
@@ -97,34 +101,50 @@ import NativeCoreBridge
             workspace.sessions.forEach { $0.dispose() }
         }
 
-        let initialView = try #require(editableTextView(in: session.container))
-        window.makeFirstResponder(initialView)
+        let initialNative: NSView = editor == .stTextView
+            ? try #require(session.stView)
+            : try #require(editableTextView(in: session.container))
+        window.makeFirstResponder(initialNative)
         let source = "#include <iostream>\nint main(){int a,b;if(std::cin>>a>>b)std::cout<<a+b<<'\\n';}\n"
         session.container.history.groupsByEvent = false
         session.container.history.beginUndoGrouping()
-        initialView.insertText(source, replacementRange: NSRange(location: 0, length: 0))
+        if let stView = session.stView {
+            stView.insertText(source, replacementRange: NSRange(location: 0, length: 0))
+        } else if let textView = initialNative as? NSTextView {
+            textView.insertText(source, replacementRange: NSRange(location: 0, length: 0))
+        }
         session.container.history.endUndoGrouping()
         await Task.yield()
         session.capture()
         #expect(session.document.text == source)
         #expect(session.container.history.canUndo)
 
-        // 折叠底部测试面板不得卸载原生编辑器或清空撤销栈。
-        workspace.isRunPanelVisible = false
-        await Task.yield()
-        host.layoutSubtreeIfNeeded()
-        #expect(editableTextView(in: session.container) === initialView)
-        #expect(session.container.history.canUndo)
+        for mode in [WorkspaceLayoutMode.editorOnly, .ioOnly, .split] {
+            workspace.layoutMode = mode
+            await Task.yield()
+            host.layoutSubtreeIfNeeded()
+            if editor == .stTextView {
+                #expect(session.stView === initialNative)
+            } else {
+                #expect(editableTextView(in: session.container) === initialNative)
+            }
+            #expect(session.container.history.canUndo)
+        }
 
+        workspace.layoutMode = .editorOnly
         session.testCases = [TestCaseInput(id: "ux-sample", input: "10 20\n", expected: "30\n")]
         workspace.runActiveDocument()
-        #expect(workspace.isRunPanelVisible)
+        #expect(workspace.layoutMode == .split)
         await workspace.runner.waitForCurrentRun()
         host.layoutSubtreeIfNeeded()
 
         let result = try #require(workspace.runner.result(for: session.document.id))
         #expect(VerdictDescriptor.summary(for: result).label == "AC")
-        #expect(editableTextView(in: session.container) === initialView)
+        if editor == .stTextView {
+            #expect(session.stView === initialNative)
+        } else {
+            #expect(editableTextView(in: session.container) === initialNative)
+        }
 
         session.container.history.undo()
         await Task.yield()
@@ -133,24 +153,67 @@ import NativeCoreBridge
         await workspace.runner.shutdown()
     }
 
-    @Test func closingBackgroundDocumentKeepsActiveSelectionIntact() async throws {
+    @Test func closingBackgroundAndSavedTabsPreserveUnsavedDocuments() async throws {
         _ = NSApplication.shared
         let workspace = Workspace(arguments: ["--editor", "sttextview"])
         let first = try #require(workspace.activeSession)
-        let middle = try #require(workspace.createDocument(text: "// clean", editor: .stTextView))
-        // 空文本初始 saved=true；这里显式使用干净的新文档测试后台关闭。
-        let cleanMiddle = try #require(workspace.createDocument(editor: .stTextView))
-        let active = try #require(workspace.createDocument(editor: .stTextView))
-        _ = middle
-        workspace.selection = active.document.id
+        let dirtyMiddle = try #require(workspace.createDocument(text: "// unsaved", editor: .stTextView))
+        let cleanTrailing = try #require(workspace.createDocument(editor: .stTextView))
+        workspace.selection = dirtyMiddle.document.id
 
-        await workspace.closeDocument(cleanMiddle)
-        #expect(!workspace.sessions.contains { $0 === cleanMiddle })
-        #expect(workspace.selection == active.document.id)
-        #expect(workspace.sessions.contains { $0 === first })
+        await workspace.closeDocument(cleanTrailing)
+        #expect(!workspace.sessions.contains { $0 === cleanTrailing })
+        #expect(workspace.selection == dirtyMiddle.document.id)
+
+        await workspace.closeSavedDocuments()
+        #expect(workspace.sessions.count == 1)
+        #expect(workspace.sessions.first === dirtyMiddle)
+        #expect(!workspace.sessions.contains { $0 === first })
 
         await workspace.runner.shutdown()
         workspace.sessions.forEach { $0.dispose() }
+    }
+
+    @Test func toolchainDisplayNamesAndVisualFormUpdatesPreserveUnknownFields() throws {
+        let runner = RunController()
+        #expect(runner.profiles.count >= 2)
+        let cpp17 = try #require(runner.profiles.first { $0.id == RawIdentifier("macos-clang-cpp17") })
+        let cpp20 = try #require(runner.profiles.first { $0.id == RawIdentifier("macos-clang-cpp20") })
+        #expect(cpp17.displayName == "C++17 (Clang)")
+        #expect(cpp20.displayName == "C++20 (Clang)")
+
+        let rawWithExtra = """
+        {"schema_version":1,"id":"custom-cpp","language_id":"cpp","source_filename":"main.cpp","artifact_name":"prog","build":{"executable":"/usr/bin/clang++","arguments":["-std=c++20","${source}","-o","${artifact}"]},"run":{"executable":"${artifact}","arguments":[]},"build_limits":{"wall_timeout_ms":30000},"run_limits":{"wall_timeout_ms":2000},"variables":[{"name":"custom_var","value":"42"}]}
+        """
+        let decoded = try JSONDecoder().decode(ToolchainProfile.self, from: Data(rawWithExtra.utf8))
+        let updated = try decoded.updating(
+            buildExecutable: "/usr/bin/g++",
+            buildArguments: ["-std=c++23", "-O2", "${source}", "-o", "${artifact}"],
+            buildWallTimeoutMS: 15000,
+            runWallTimeoutMS: 3500
+        )
+        #expect(updated.buildExecutable == "/usr/bin/g++")
+        #expect(updated.buildWallTimeoutMS == 15000)
+        #expect(updated.runWallTimeoutMS == 3500)
+        #expect(updated.displayName.contains("GCC"))
+        #expect(updated.payload["variables"]?.array?.count == 1)
+
+        let baseChecker = try CheckerConfiguration(jsonText: try runner.checkerDraft())
+        let updatedCheckerText = try baseChecker.updatingJSON(
+            executable: "/usr/bin/true",
+            arguments: ["${input}", "${actual}", "${expected}"],
+            wallTimeoutMS: 4500,
+            acceptedExitCodes: [0, 3],
+            wrongAnswerExitCodes: [1]
+        )
+        let parsedChecker = try CheckerConfiguration(jsonText: updatedCheckerText)
+        let values = parsedChecker.formValues()
+        #expect(values.executable == "/usr/bin/true")
+        #expect(values.wallTimeoutMS == 4500)
+        #expect(values.acceptedExitCodes == [0, 3])
+        #expect(values.wrongAnswerExitCodes == [1])
+        #expect(updatedCheckerText.contains("spawn_timeout_ms"))
+        Task { await runner.shutdown() }
     }
 
     @Test func verdictSummaryPrioritizesBuildFailuresAndSevereVerdicts() throws {
@@ -205,7 +268,7 @@ import NativeCoreBridge
             }
             window.displayIfNeeded()
             host.layoutSubtreeIfNeeded()
-            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+            RunLoop.current.run(until: Date().addingTimeInterval(0.08))
             host.layoutSubtreeIfNeeded()
             guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else {
                 throw CocoaError(.coderInvalidValue)
@@ -220,11 +283,11 @@ import NativeCoreBridge
         let tempDir = try folder()
         defer { try? FileManager.default.removeItem(at: tempDir) }
         let recoveryFile = tempDir.appendingPathComponent("audit-recovery.json")
-        let workspace = Workspace(arguments: ["--editor", "sttextview"], recoveryURL: recoveryFile)
+        let workspace = Workspace(arguments: ["--editor", "codeeditorview"], recoveryURL: recoveryFile)
         await workspace.bootstrap()
 
         let sumJSON = """
-        {"name":"A. Two Pointers","group":"Codeforces Round 999","url":"https://codeforces.com/contest/999/problem/A","memoryLimit":256,"timeLimit":1500,"interactive":false,"tests":[{"input":"7 8\\n","output":"15\\n"},{"input":"100 250\\n","output":"350\\n"}]}
+        {"name":"A. Two Pointers","group":"Codeforces Round 999","url":"https://codeforces.com/contest/999/problem/A","memoryLimit":256,"timeLimit":1500,"interactive":false,"tests":[{"input":"7 8\\n","output":"15\\n"},{"input":"100 250\\n","output":"351\\n"}]}
         """
         let interactiveJSON = """
         {"name":"C. Guess the Number","group":"Interactive Finals","url":"https://codeforces.com/contest/999/problem/C","memoryLimit":512,"timeLimit":2000,"interactive":true,"tests":[]}
@@ -251,30 +314,57 @@ import NativeCoreBridge
         let sumSession = try #require(workspace.sessions.first { $0.document.id == firstItem.documentID })
         let interactiveSession = try #require(workspace.sessions.first { $0.document.id == secondItem.documentID })
         workspace.selection = sumSession.document.id
-        sumSession.stView?.insertText(
+
+        // 渲染前先向默认 CodeEditorView 注入完整 C++ 代码并执行一次真实编译判题。
+        let cevHost = NSHostingView(rootView: WorkspaceView(workspace: workspace).frame(width: 1240, height: 780))
+        let warmupWindow = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1240, height: 780), styleMask: [.titled], backing: .buffered, defer: false)
+        warmupWindow.contentView = cevHost
+        warmupWindow.orderBack(nil)
+        cevHost.layoutSubtreeIfNeeded()
+        try await Task.sleep(for: .milliseconds(50))
+        cevHost.layoutSubtreeIfNeeded()
+        let cevText = try #require(editableTextView(in: sumSession.container))
+        cevText.insertText(
             "#include <iostream>\n\nint main() {\n    long long a, b;\n    if (std::cin >> a >> b) {\n        std::cout << (a + b) << '\\n';\n    }\n    return 0;\n}\n",
             replacementRange: NSRange(location: 0, length: 0)
         )
+        await Task.yield()
         sumSession.capture()
+        warmupWindow.orderOut(nil)
+        warmupWindow.contentView = nil
+
         workspace.runner.runAll(sumSession)
         await workspace.runner.waitForCurrentRun()
 
-        try snapshot(WorkspaceView(workspace: workspace), size: NSSize(width: 1180, height: 760), appearanceName: .aqua, to: "02-workspace-ac-light.png")
-        try snapshot(WorkspaceView(workspace: workspace), size: NSSize(width: 1180, height: 760), appearanceName: .darkAqua, to: "03-workspace-ac-dark.png")
+        try snapshot(WorkspaceView(workspace: workspace), size: NSSize(width: 1240, height: 780), appearanceName: .aqua, to: "01-cev-split-ac-wa-light.png")
+        try snapshot(WorkspaceView(workspace: workspace), size: NSSize(width: 1240, height: 780), appearanceName: .darkAqua, to: "02-cev-split-ac-wa-dark.png")
+        try snapshot(WorkspaceView(workspace: workspace), size: NSSize(width: 780, height: 520), appearanceName: .aqua, to: "04-cev-compact-780x520.png")
+
+        workspace.layoutMode = .ioOnly
+        try snapshot(WorkspaceView(workspace: workspace), size: NSSize(width: 1240, height: 780), appearanceName: .aqua, to: "05-cev-io-only-light.png")
+        workspace.layoutMode = .split
+
+        // 同时验证 STTextView 深色模式及 CE 编译错误横幅展开态。
+        let brokenDoc = try #require(workspace.createDocument(text: "", editor: .stTextView))
+        brokenDoc.stView?.insertText("int main() { broken_identifier; }\n", replacementRange: NSRange(location: 0, length: 0))
+        brokenDoc.capture()
+        brokenDoc.testCases = [TestCaseInput(id: "ce-case", input: "1\n", expected: "1\n")]
+        workspace.runner.runAll(brokenDoc)
+        await workspace.runner.waitForCurrentRun()
+        try snapshot(WorkspaceView(workspace: workspace), size: NSSize(width: 1240, height: 780), appearanceName: .darkAqua, to: "03-st-split-ce-dark.png")
 
         workspace.selection = interactiveSession.document.id
-        try snapshot(WorkspaceView(workspace: workspace), size: NSSize(width: 1180, height: 760), appearanceName: .aqua, to: "04-workspace-incompatible-empty.png")
+        try snapshot(WorkspaceView(workspace: workspace), size: NSSize(width: 1240, height: 780), appearanceName: .aqua, to: "06-workspace-incompatible-empty.png")
 
         workspace.companion.selection = workspace.companion.items.last?.id
-        try snapshot(CompanionInboxView(controller: workspace.companion), size: NSSize(width: 900, height: 620), appearanceName: .aqua, to: "05-companion-inbox-light.png")
+        try snapshot(CompanionInboxView(controller: workspace.companion), size: NSSize(width: 900, height: 620), appearanceName: .aqua, to: "07-companion-inbox-light.png")
 
-        let draft = ConfigurationJSONDraft(kind: .checker, jsonText: try workspace.runner.checkerDraft())
-        try snapshot(ConfigurationJSONSheet(draft: draft) { _ in }, size: NSSize(width: 700, height: 540), appearanceName: .aqua, to: "06-configuration-sheet-light.png")
+        let toolchainDraft = ConfigurationJSONDraft(kind: .toolchain, jsonText: try workspace.runner.selectedProfile!.jsonText())
+        try snapshot(ConfigurationSheet(draft: toolchainDraft) { _ in }, size: NSSize(width: 640, height: 480), appearanceName: .aqua, to: "08-toolchain-config-visual-light.png")
+
+        let checkerDraft = ConfigurationJSONDraft(kind: .checker, jsonText: try workspace.runner.checkerDraft())
+        try snapshot(ConfigurationSheet(draft: checkerDraft) { _ in }, size: NSSize(width: 640, height: 500), appearanceName: .aqua, to: "09-checker-config-visual-light.png")
 
         await dispose(workspace)
     }
-}
-
-private extension EditorKind {
-    static var sttextviewFallback: Self { .stTextView }
 }

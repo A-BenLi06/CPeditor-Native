@@ -25,14 +25,78 @@ public enum JSONValue: Codable, Sendable, Equatable {
         }
     }
     public subscript(_ key: String) -> Self? { if case .object(let values) = self { return values[key] }; return nil }
+    public var object: [String: JSONValue]? { if case .object(let values) = self { return values }; return nil }
+    public var array: [JSONValue]? { if case .array(let values) = self { return values }; return nil }
     public var string: String? { if case .string(let value) = self { return value }; return nil }
+    public var integerValue: Int? {
+        guard case .number(let value) = self, value.isFinite, value.rounded() == value,
+              value >= Double(Int.min), value <= Double(Int.max) else { return nil }
+        return Int(value)
+    }
 }
 
 public struct ToolchainProfile: Codable, Sendable, Identifiable, Equatable {
     public let payload: JSONValue
-    public enum Field: String { case id, languageID = "language_id", schemaVersion = "schema_version" }
+    public enum Field: String {
+        case id
+        case languageID = "language_id"
+        case schemaVersion = "schema_version"
+        case build
+        case run
+        case executable
+        case arguments
+        case buildLimits = "build_limits"
+        case runLimits = "run_limits"
+        case wallTimeoutMS = "wall_timeout_ms"
+    }
     public var id: RawIdentifier { RawIdentifier(payload[Field.id.rawValue]?.string ?? "") }
     public var languageID: String { payload[Field.languageID.rawValue]?.string ?? "" }
+    public var buildExecutable: String? { payload[Field.build.rawValue]?[Field.executable.rawValue]?.string }
+    public var buildArguments: [String] {
+        payload[Field.build.rawValue]?[Field.arguments.rawValue]?.array?.compactMap(\.string) ?? []
+    }
+    public var buildWallTimeoutMS: Int? {
+        payload[Field.buildLimits.rawValue]?[Field.wallTimeoutMS.rawValue]?.integerValue
+    }
+    public var runWallTimeoutMS: Int? {
+        payload[Field.runLimits.rawValue]?[Field.wallTimeoutMS.rawValue]?.integerValue
+    }
+
+    public var displayName: String {
+        let baseLanguage: String = switch languageID.lowercased() {
+        case "cpp": "C++"
+        case "c": "C"
+        case "python": "Python"
+        case "java": "Java"
+        default: languageID.uppercased()
+        }
+        let standardSuffix: String = {
+            for arg in buildArguments where arg.hasPrefix("-std=") {
+                let raw = String(arg.dropFirst(5)).lowercased()
+                if raw.hasPrefix("c++") { return String(raw.dropFirst(3)).uppercased() }
+                if raw.hasPrefix("gnu++") { return String(raw.dropFirst(5)).uppercased() + " (GNU)" }
+                return " " + raw.uppercased()
+            }
+            return ""
+        }()
+        let compilerName: String? = buildExecutable.map { path in
+            let name = URL(fileURLWithPath: path).lastPathComponent.lowercased()
+            if name.contains("clang") { return "Clang" }
+            if name.contains("g++") || name.contains("gcc") { return "GCC" }
+            if name == "cl" || name == "cl.exe" { return "MSVC" }
+            return URL(fileURLWithPath: path).lastPathComponent
+        }
+        let coreTitle: String
+        if let compilerName, !compilerName.isEmpty {
+            coreTitle = "\(baseLanguage)\(standardSuffix) (\(compilerName))"
+        } else {
+            coreTitle = "\(baseLanguage)\(standardSuffix)"
+        }
+        let builtinIDs = ["macos-clang-cpp17", "macos-clang-cpp20"]
+        if builtinIDs.contains(id.rawValue) { return coreTitle }
+        return "\(coreTitle) · \(id.rawValue)"
+    }
+
     public init(payload: JSONValue) throws {
         guard payload[Field.schemaVersion.rawValue] == .number(1),
               !(payload[Field.id.rawValue]?.string ?? "").isEmpty,
@@ -44,6 +108,29 @@ public struct ToolchainProfile: Codable, Sendable, Identifiable, Equatable {
     public func jsonText() throws -> String {
         let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         return String(decoding: try encoder.encode(self), as: UTF8.self)
+    }
+
+    /// 仅更新可视化表单中的编译命令与超时字段，完整保留其余未知字段。
+    public func updating(buildExecutable: String?, buildArguments: [String], buildWallTimeoutMS: Int, runWallTimeoutMS: Int) throws -> ToolchainProfile {
+        guard var root = payload.object, buildWallTimeoutMS > 0, runWallTimeoutMS > 0 else {
+            throw WireError.invalidProfile
+        }
+        if let executable = buildExecutable?.trimmingCharacters(in: .whitespacesAndNewlines), !executable.isEmpty {
+            var buildObject = root[Field.build.rawValue]?.object ?? [:]
+            buildObject[Field.executable.rawValue] = .string(executable)
+            buildObject[Field.arguments.rawValue] = .array(buildArguments.map { .string($0) })
+            root[Field.build.rawValue] = .object(buildObject)
+        } else if root[Field.build.rawValue]?.object != nil {
+            throw WireError.invalidProfile
+        }
+        var buildLimits = root[Field.buildLimits.rawValue]?.object ?? [:]
+        buildLimits[Field.wallTimeoutMS.rawValue] = .number(Double(buildWallTimeoutMS))
+        root[Field.buildLimits.rawValue] = .object(buildLimits)
+
+        var runLimits = root[Field.runLimits.rawValue]?.object ?? [:]
+        runLimits[Field.wallTimeoutMS.rawValue] = .number(Double(runWallTimeoutMS))
+        root[Field.runLimits.rawValue] = .object(runLimits)
+        return try ToolchainProfile(payload: .object(root))
     }
 }
 

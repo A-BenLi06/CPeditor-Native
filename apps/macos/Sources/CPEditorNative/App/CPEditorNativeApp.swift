@@ -6,7 +6,8 @@ import AppKit
 
     var body: some Scene {
         Window(L10n.string("app_name"), id: "workspace") { WorkspaceView() }
-            .defaultSize(width: 1180, height: 760)
+            .defaultSize(width: 1240, height: 780)
+            .windowToolbarStyle(.unifiedCompact)
             .commands { EditorCommands() }
     }
 }
