@@ -552,3 +552,7 @@ Core 规则区分空输入、缺少预期输出与预期输出为空、checker �
 - macOS 恢复端使用 Core 支持的较大请求容量，新文档准入检查 Core 字节与计数限制。编辑后容量超限时保留上次有效快照，允许通过缩减内容、逐步关标签恢复保存。主线程比较结构化快照，共用已提交源码摘要。JSON 转义后的大小由 Core 在写入前最终校验。
 - macOS 27.0.1 arm64、Xcode 27.2 本机 Swift 91/91、Core 17/17。磁盘空间不足中断过一次验证，调整编译缓存后完整复跑成功。应用包临时签名和启动通过，独立恢复文件校验了源码与摘要。真实界面验证样例 AC → 修改期望后 Outdated → 复跑 WA → 回填完整输出后 AC，并正常退出。日志位于 `out/macos/stability-audit/`。
 - 前轮 CI 修复 Bash 后通过 Core，Swift 暴露出恢复导出测试的 5 秒锁等待与调度竞争。本轮用显式开始信号和独立测试锁预算修复，生产超时仍由现有资源配置。参见 [Actions 44322892115](https://github.com/A-BenLi06/CPeditor-Native/actions/runs/44322892115)。最低系统 macOS 26、发布签名、公证和整应用性能仍待验收。
+
+## 2026-11-18T22:50:17+08:00 — 补录 macOS 持续集成通过证据
+
+- [Actions 44327079021](https://github.com/A-BenLi06/CPeditor-Native/actions/runs/44327079021) 验证 `e199f0a`，Xcode 27.1／SDK 27.0 的 ARM64 runner 通过 Swift 91/91、Core CTest 17/17、应用包构建和严格签名校验。核对归档日志和 Mach-O 回执后更新实施状态。

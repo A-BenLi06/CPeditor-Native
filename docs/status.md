@@ -1,6 +1,6 @@
 # 实施状态与证据
 
-更新时间：2026-11-18T19:04:34+08:00。目标仍为完成设计与实施，以下仅是当前进度，不代表全部里程碑已经通过。
+更新时间：2026-11-18T22:50:17+08:00。目标仍为完成设计与实施，以下仅是当前进度，不代表全部里程碑已经通过。
 
 | 阶段 | 状态 | 当前证据与剩余工作 |
 | --- | --- | --- |
@@ -17,7 +17,8 @@
 
 ## 本轮可复核证据
 
-- macOS 原生 Settings（General／Editor／Run）已接入。最新完整复跑为 84 项 Swift 测试（16 套件）与 17/17 Core CTest；签名和隔离应用实测通过。验证范围及首轮失败见 [walkthrough](../walkthrough.md)。
+- macOS 判题结果过期、运行取消归属、工具链验证与工作区恢复容量已修复。macOS 27.0.1 arm64、Xcode 27.2 本机 Swift 91/91、Core CTest 17/17，临时签名检查、隔离工作区保存和前台样例复跑通过。
+- [macOS CI 44327079021](https://github.com/A-BenLi06/CPeditor-Native/actions/runs/44327079021) 对 `e199f0a` 用 `xcode-27` ARM64 runner、Xcode 27.1／SDK 27.0 完成 Swift 91/91、Core CTest 17/17、应用包构建及临时签名核验。最低系统 macOS 26 实机、整应用性能与发布验收仍待补齐。
 
 - `out/macos/build-verification.json` 与 `out/macos/cursor-position-perf/benchmark.json`：Xcode 27.2／SDK 27.2／macOS 26.0 下 15 个 Core 对象与最终可执行文件的 `LC_BUILD_VERSION` 核验、工具链环境 17/17 Core CTest、81 项 Swift 测试（15 套件）、状态栏稀疏位集索引局部基准、`out/macos/layout-audit/` 9 组浅色／深色／紧凑窗口真实界面渲染核验，以及 `./script/build_and_run.sh --verify` + `codesign --verify --strict` 打包启动核验。
 - `out/macos/session-resume-verification/verification.json`：前轮 70 项 Swift 测试、打包启动／严格签名、收件箱前台截图／AX与原字节／回执核对。当前 macOS 27.0.1 arm64，不替代最低系统／Intel／系统 IME 或整应用性能预算。
