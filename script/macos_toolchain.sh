@@ -72,12 +72,11 @@ cpn_swiftpm() {
 }
 
 cpn_prepare_core() {
-    local reuse=()
-    local extra_targets=("$@")
-    local clean_args=()
+    local verify_args=(--core-directory "$CPN_CORE_LIBRARY_DIR")
     if [[ "${CPN_CORE_PREBUILT:-0}" == 1 ]]; then
-        reuse=(--reuse-core)
+        verify_args+=(--reuse-core)
     else
+        local build_args=(--build "$CPN_CORE_LIBRARY_DIR")
         if [[ -f "$CPN_CORE_LIBRARY_DIR/CMakeCache.txt" ]]; then
             local cached_c cached_cxx cached_sysroot cached_target
             cached_c="$(/usr/bin/awk -F= '/^CMAKE_C_COMPILER:[^=]+=/ {print substr($0, index($0, "=") + 1); exit}' "$CPN_CORE_LIBRARY_DIR/CMakeCache.txt")"
@@ -86,13 +85,13 @@ cpn_prepare_core() {
             cached_target="$(/usr/bin/awk -F= '/^CMAKE_OSX_DEPLOYMENT_TARGET:[^=]+=/ {print substr($0, index($0, "=") + 1); exit}' "$CPN_CORE_LIBRARY_DIR/CMakeCache.txt")"
             if [[ "$cached_c" != "$CPN_CLANG" || "$cached_cxx" != "$CPN_CLANGXX" || "$cached_sysroot" != "$SDKROOT" || "$cached_target" != "$MACOSX_DEPLOYMENT_TARGET" ]]; then
                 rm -rf "$CPN_CORE_LIBRARY_DIR/CMakeCache.txt" "$CPN_CORE_LIBRARY_DIR/CMakeFiles"
-                clean_args=(--clean-first)
+                build_args+=(--clean-first)
             fi
         fi
         cmake -S "$ROOT_DIR" -B "$CPN_CORE_LIBRARY_DIR" -G Ninja -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON \
             "-DCMAKE_C_COMPILER=$CPN_CLANG" "-DCMAKE_CXX_COMPILER=$CPN_CLANGXX" \
             "-DCMAKE_OSX_SYSROOT=$SDKROOT" "-DCMAKE_OSX_DEPLOYMENT_TARGET=$MACOSX_DEPLOYMENT_TARGET"
-        cmake --build "$CPN_CORE_LIBRARY_DIR" "${clean_args[@]}" --target cpn_core "${extra_targets[@]}"
+        cmake "${build_args[@]}" --target cpn_core "$@"
     fi
-    "$CPN_PYTHON" "$ROOT_DIR/script/verify_macos_build.py" --core-directory "$CPN_CORE_LIBRARY_DIR" "${reuse[@]}"
+    "$CPN_PYTHON" "$ROOT_DIR/script/verify_macos_build.py" "${verify_args[@]}"
 }

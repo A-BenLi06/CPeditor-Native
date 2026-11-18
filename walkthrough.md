@@ -539,3 +539,8 @@ Core 规则区分空输入、缺少预期输出与预期输出为空、checker �
 - Core 的 `batch` 测试会直接调起已配置的 C++ 编译器。macOS 下由 CTest 将配置时选定的 SDK 路径传给该测试，默认 SDK 通过 `xcrun` 解析。开发者直接按根 README 运行 CTest 即可执行真实编译用例。
 - 新增 `xcode-27` ARM64 工作流，用项目已有入口运行 Swift 测试、Core CTest、应用包构建和临时签名核验。保留通过或失败日志及 Mach-O 构建回执，触发路径包含共享契约样例。
 - 在 macOS 27.0.1 arm64、Xcode 27.2 上，从未载入仓库工具链环境的终端配置、构建并运行 CTest，17 项全部通过。工作流 YAML 已解析并核对提交和 PR 触发路径。GitHub runner 的实测结果在本次提交推送后查验。
+
+## 2026-11-18T22:18:50+08:00 — 修复 macOS 持续集成的 Bash 兼容性
+
+- 首轮 macOS runner 使用 Xcode 27.1。Core CTest 执行成功，Swift 入口在 macOS 系统 Bash 3.2 的 `nounset` 模式下展开空数组时报错，应用包阶段未执行。见 [Actions 44320586299](https://github.com/A-BenLi06/CPeditor-Native/actions/runs/44320586299)。
+- 将可变参数追加到始终含有必需项的命令数组，用 `"$@"` 原样转发可选目标。用系统 `/bin/bash -euo pipefail` 校验新建构建目录、附加目标、只构建默认目标和预编译 Core 的命令分支。新提交推送后复验 Actions。
