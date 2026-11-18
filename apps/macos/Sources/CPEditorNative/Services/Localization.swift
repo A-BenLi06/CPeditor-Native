@@ -11,6 +11,14 @@ enum L10n {
         string(editor == .codeEditorView ? "editor_codeeditorview" : "editor_sttextview")
     }
 
+    static func comparisonName(_ policy: ComparisonPolicy) -> String {
+        switch policy {
+        case .trailing: string("comparison_trailing")
+        case .strict: string("comparison_strict")
+        case .byte: string("comparison_byte")
+        }
+    }
+
     static func describe(_ error: Error) -> String {
         if let document = error as? DocumentError {
             switch document {

@@ -11,6 +11,7 @@ extension FocusedValues {
 
 struct EditorCommands: Commands {
     @FocusedValue(\.editorWorkspace) private var workspace
+    @Environment(\.openSettings) private var openSettings
 
     private var canMutateWorkspace: Bool {
         workspace != nil && workspace?.isBusy == false && workspace?.persistentChangesAllowed == true
@@ -82,31 +83,31 @@ struct EditorCommands: Commands {
         CommandGroup(after: .toolbar) {
             Button(L10n.string("layout_editor_only")) { workspace?.layoutMode = .editorOnly }
                 .keyboardShortcut("1", modifiers: [.command, .control])
-                .disabled(workspace == nil || workspace?.isLoading == true || workspace?.isClosing == true)
+                .disabled(workspace?.canChangeLayout != true)
             Button(L10n.string("layout_split")) { workspace?.layoutMode = .split }
                 .keyboardShortcut("2", modifiers: [.command, .control])
-                .disabled(workspace == nil || workspace?.isLoading == true || workspace?.isClosing == true)
+                .disabled(workspace?.canChangeLayout != true)
             Button(L10n.string("layout_io_only")) { workspace?.layoutMode = .ioOnly }
                 .keyboardShortcut("3", modifiers: [.command, .control])
-                .disabled(workspace == nil || workspace?.isLoading == true || workspace?.isClosing == true)
+                .disabled(workspace?.canChangeLayout != true)
             Button(workspace?.isRunPanelVisible == false ? L10n.string("show_run_panel") : L10n.string("hide_run_panel")) {
                 workspace?.isRunPanelVisible.toggle()
             }
             .keyboardShortcut("y", modifiers: [.command, .shift])
-            .disabled(workspace == nil || workspace?.isLoading == true || workspace?.isClosing == true)
+            .disabled(workspace?.canChangeLayout != true)
             Divider()
             Toggle(L10n.string("wrap_lines"), isOn: Binding(
                 get: { workspace?.wrapText ?? false },
                 set: { workspace?.wrapText = $0 }
             ))
             .keyboardShortcut("l", modifiers: [.command, .option])
-            .disabled(workspace == nil || workspace?.isLoading == true || workspace?.isClosing == true || workspace?.persistentChangesAllowed != true)
+            .disabled(workspace?.canChangeEditorSettings != true)
             Toggle(L10n.string("show_minimap"), isOn: Binding(
                 get: { workspace?.showMinimap ?? false },
                 set: { workspace?.showMinimap = $0 }
             ))
             .keyboardShortcut("m", modifiers: [.command, .shift])
-            .disabled(workspace?.activeSession?.document.editorKind != .codeEditorView || workspace?.isLoading == true || workspace?.isClosing == true || workspace?.persistentChangesAllowed != true)
+            .disabled(workspace?.activeSession?.document.editorKind != .codeEditorView || workspace?.canChangeEditorSettings != true)
             Divider()
         }
 
@@ -128,12 +129,18 @@ struct EditorCommands: Commands {
             Button(L10n.string("disable_all_tests")) { workspace?.setAllTestsEnabled(false) }
                 .disabled(!canEditTests || workspace?.activeSession?.testCases.isEmpty != false)
             Divider()
-            Button(L10n.string("toolchain_settings")) { workspace?.runner.beginProfileEdit() }
-                .disabled(workspace == nil || workspace?.runner.isRunning != false || workspace?.runner.persistentChangesAllowed != true || workspace?.isLoading != false || workspace?.isClosing != false)
+            Button(L10n.string("toolchain_settings")) {
+                workspace?.runner.beginProfileEdit()
+                if workspace?.runner.configurationDraft != nil { openSettings() }
+            }
+            .disabled(workspace?.canConfigureRunner != true)
             Button(L10n.string("import_toolchain_profile")) { workspace?.runner.loadProfile() }
-                .disabled(workspace == nil || workspace?.runner.isRunning != false || workspace?.runner.persistentChangesAllowed != true || workspace?.isLoading != false || workspace?.isClosing != false)
-            Button(L10n.string("checker_settings")) { workspace?.runner.beginCheckerEdit() }
-                .disabled(workspace == nil || workspace?.runner.checkerPreferencesAreOpaque != false || workspace?.runner.checkerPreferenceStorageAvailable != true || workspace?.runner.isRunning != false || workspace?.runner.persistentChangesAllowed != true || workspace?.isLoading != false || workspace?.isClosing != false)
+                .disabled(workspace?.canConfigureRunner != true)
+            Button(L10n.string("checker_settings")) {
+                workspace?.runner.beginCheckerEdit()
+                if workspace?.runner.configurationDraft != nil { openSettings() }
+            }
+            .disabled(workspace?.canConfigureRunner != true || workspace?.runner.canConfigureChecker != true)
         }
 
         CommandMenu(L10n.string("companion_title")) {

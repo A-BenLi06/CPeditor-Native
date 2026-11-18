@@ -4,10 +4,11 @@ import NativeEditorModel
 import NativeCoreBridge
 
 struct WorkspaceView: View {
+    @Environment(\.openSettings) private var openSettings
     @State private var workspace: Workspace
     @State private var splitRatio: CGFloat = 0.57
 
-    init(workspace: Workspace = Workspace(arguments: Array(CommandLine.arguments.dropFirst()), automaticRecovery: true)) {
+    init(workspace: Workspace) {
         _workspace = State(initialValue: workspace)
     }
 
@@ -87,7 +88,7 @@ struct WorkspaceView: View {
                 Menu {
                     ForEach(workspace.runner.profiles) { profile in
                         Button {
-                            workspace.runner.selectedProfileID = profile.id
+                            workspace.selectToolchain(profile.id)
                         } label: {
                             if profile.id == workspace.runner.selectedProfileID {
                                 Label(profile.displayName, systemImage: "checkmark")
@@ -99,6 +100,7 @@ struct WorkspaceView: View {
                     Divider()
                     Button(L10n.string("toolchain_settings")) {
                         workspace.runner.beginProfileEdit()
+                        if workspace.runner.configurationDraft != nil { openSettings() }
                     }
                     Button(L10n.string("import_toolchain_profile")) {
                         workspace.runner.loadProfile()
@@ -111,7 +113,13 @@ struct WorkspaceView: View {
                     }
                 }
                 .help(L10n.string("help_toolchain_menu"))
-                .disabled(workspace.runner.isRunning || !workspace.runner.persistentChangesAllowed || workspace.isLoading || workspace.isClosing)
+                .disabled(!workspace.canConfigureRunner)
+
+                SettingsLink {
+                    Label(L10n.string("settings_title"), systemImage: "gearshape")
+                }
+                .labelStyle(.iconOnly)
+                .help(L10n.string("settings_title"))
 
                 if workspace.runner.isRunning {
                     Button { workspace.runner.cancel() } label: {
@@ -154,7 +162,7 @@ struct WorkspaceView: View {
                 .labelsHidden()
                 .fixedSize()
                 .help(L10n.string("help_layout_mode"))
-                .disabled(workspace.isLoading || workspace.isClosing)
+                .disabled(!workspace.canChangeLayout)
             }
         }
         .sheet(isPresented: Binding(
@@ -163,29 +171,23 @@ struct WorkspaceView: View {
         )) {
             CompanionInboxView(controller: workspace.companion)
         }
-        .sheet(item: Binding(
-            get: { workspace.runner.configurationDraft },
-            set: { workspace.runner.configurationDraft = $0 }
-        )) { draft in
-            ConfigurationSheet(draft: draft) { jsonText in
-                switch draft.kind {
-                case .toolchain: try workspace.runner.applyProfile(jsonText)
-                case .checker: try workspace.runner.applyChecker(jsonText)
-                }
-            }
-        }
         .focusedSceneValue(\.editorWorkspace, workspace)
         .task { await workspace.bootstrap() }
         .background(WindowCloseGuard(workspace: workspace).frame(width: 0, height: 0))
         .alert(L10n.string("error_title"), isPresented: Binding(
-            get: { workspace.errorMessage != nil },
-            set: { if !$0 { workspace.errorMessage = nil } }
+            get: { workspace.errorMessage != nil || workspace.runner.errorMessage != nil },
+            set: { if !$0 { dismissError() } }
         )) {
-            Button(L10n.string("ok"), role: .cancel) { workspace.errorMessage = nil }
+            Button(L10n.string("ok"), role: .cancel) {}
         } message: {
-            Text(workspace.errorMessage ?? "")
+            Text(workspace.errorMessage ?? workspace.runner.errorMessage ?? "")
         }
         .frame(minWidth: 740, minHeight: 480)
+    }
+
+    private func dismissError() {
+        if workspace.errorMessage != nil { workspace.errorMessage = nil }
+        else { workspace.runner.errorMessage = nil }
     }
 
     private var leftEditorPane: some View {
@@ -250,7 +252,7 @@ struct WorkspaceView: View {
     @ViewBuilder
     private var rightRunPane: some View {
         if let session = workspace.activeSession {
-            RunPanelView(session: session, runner: workspace.runner)
+            RunPanelView(session: session, runner: workspace.runner, canConfigureRunner: workspace.canConfigureRunner)
                 .disabled(workspace.isLoading || workspace.isClosing)
         } else {
             ContentUnavailableView(

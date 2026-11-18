@@ -39,7 +39,7 @@ import NativeCoreBridge
         #expect(throws: CheckerConfigurationError.self) { try runner.applyChecker(original + String(repeating: " ", count: 65536)) }
         #expect(runner.externalChecker == previous)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 500), styleMask: [.titled], backing: .buffered, defer: false)
-        let host = NSHostingView(rootView: RunPanelView(session: session, runner: runner))
+        let host = NSHostingView(rootView: RunPanelView(session: session, runner: runner, canConfigureRunner: true))
         window.contentView = host
         defer { window.contentView = nil; window.orderOut(nil) }
         runner.runAll(session)

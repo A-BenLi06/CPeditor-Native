@@ -7,6 +7,14 @@ enum WorkspaceLayoutMode: String, CaseIterable, Sendable {
     case editorOnly
     case split
     case ioOnly
+
+    var localizedTitle: String {
+        switch self {
+        case .editorOnly: L10n.string("layout_editor_only")
+        case .split: L10n.string("layout_split")
+        case .ioOnly: L10n.string("layout_io_only")
+        }
+    }
 }
 
 struct WorkspaceConfiguration: Decodable {
@@ -99,6 +107,10 @@ struct WorkspaceConfiguration: Decodable {
             || runner.pendingImportCount > 0 || recovery?.isChangingLocation == true || recovery?.isRestoring == true || companion.isOperating
     }
 
+    var canChangeLayout: Bool { !isLoading && !isClosing && !isShutDown }
+    var canChangeEditorSettings: Bool { canChangeLayout && !isBusy && persistentChangesAllowed }
+    var canConfigureRunner: Bool { canChangeEditorSettings && !runner.isRunning && !runner.isClosed }
+
     /// 测试默认不访问用户恢复目录；真实 Scene 显式启用 automaticRecovery。
     init(arguments: [String] = [], automaticRecovery: Bool = false, recoveryURL: URL? = nil) {
         runner = RunController(persistence: persistence)
@@ -149,6 +161,25 @@ struct WorkspaceConfiguration: Decodable {
         let files = startupFiles; startupFiles.removeAll()
         for file in files { await open(file) }
         if sessions.isEmpty { createDocument() }
+    }
+
+    func selectToolchain(_ id: RawIdentifier) {
+        guard canConfigureRunner, runner.profiles.contains(where: { $0.id == id }) else { return }
+        runner.selectedProfileID = id
+        if let session = activeSession, session.canMutatePersistence {
+            session.toolchainProfileID = id
+        }
+    }
+
+    func applyRunnerConfiguration(_ draft: ConfigurationJSONDraft, jsonText: String) throws {
+        guard persistentChangesAllowed else { throw DocumentError.revisionExhausted }
+        guard canConfigureRunner else { throw RunnerConfigurationBusy() }
+        switch draft.kind {
+        case .toolchain:
+            try runner.applyProfile(jsonText)
+        case .checker:
+            try runner.applyChecker(jsonText, enabled: draft.enableCheckerOnApply || runner.externalCheckerEnabled)
+        }
     }
 
     func companionProblemTitle(for session: NativeEditorSession) -> String? {

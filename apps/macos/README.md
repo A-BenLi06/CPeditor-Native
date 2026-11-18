@@ -56,6 +56,14 @@ flowchart TD
 
 ## 配置和本地化
 
+通过应用菜单的 Settings、`⌘,` 或工具栏齿轮打开原生设置窗口：
+
+- **General**：System、Light、Dark 立即应用到设置和工作区，并保存在应用偏好中；Layout 只切换当前窗口布局。
+- **Editor**：Wrap Lines 和 Show Minimap 使用现有工作区恢复文件；缩略图仅对支持此能力的编辑器生效。
+- **Run**：为当前标签选择工具链、导入 JSON 配置、编辑编译参数，以及管理输出比较与外部 checker。工具栏和 Run 菜单可直达同一配置表。保存 checker 配置不会打开开关；首次从开关进入配置时，只有确认应用才启用。
+
+设置复用当前工作区，无须打开第二份恢复文件。冻结工作区仍能调整非持久布局和应用外观，但不能改写持久工作区设置。
+
 应用默认语言为英文，产品文案放在 `Resources/en.lproj/Localizable.strings`，由 `Bundle.module` 加载。开发要求留在仓库文档，不作为产品提示。
 
 `Resources/workspace.json` 定义带版本的默认编辑器和语言集合；`NativeEditorModel/Resources/cpp.json` 定义 C++ 文件扩展名、建议文件名、关键字和词法规则。当前只提供 C++ 配置；未知扩展名使用配置中的默认语言。该高亮层不是完整 C++ 解析器，目前未实现 raw string、预处理器全部语义或 clangd/LSP。

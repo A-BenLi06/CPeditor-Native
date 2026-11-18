@@ -3,8 +3,10 @@ import NativeCoreBridge
 import NativeEditorModel
 
 struct RunPanelView: View {
+    @Environment(\.openSettings) private var openSettings
     @Bindable var session: NativeEditorSession
     @Bindable var runner: RunController
+    let canConfigureRunner: Bool
 
     private var enabledTestCount: Int {
         session.testCases.reduce(0) { $0 + ($1.enabled ? 1 : 0) }
@@ -110,14 +112,6 @@ struct RunPanelView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color(nsColor: .windowBackgroundColor))
-        .alert(L10n.string("error_title"), isPresented: Binding(
-            get: { runner.errorMessage != nil },
-            set: { if !$0 { runner.errorMessage = nil } }
-        )) {
-            Button(L10n.string("ok"), role: .cancel) { runner.errorMessage = nil }
-        } message: {
-            Text(runner.errorMessage ?? "")
-        }
     }
 
     private func headerBar(snapshot: SourceSnapshot) -> some View {
@@ -203,24 +197,16 @@ struct RunPanelView: View {
         .background(.bar)
     }
 
-    private var comparisonDisplayName: String {
-        switch runner.comparison {
-        case .trailing: return L10n.string("comparison_trailing")
-        case .strict: return L10n.string("comparison_strict")
-        case .byte: return L10n.string("comparison_byte")
-        }
-    }
-
     private var checkerModeSummary: String {
         if runner.externalCheckerEnabled {
             let name = runner.externalChecker.map { URL(fileURLWithPath: $0.executable).lastPathComponent } ?? L10n.string("external_checker")
             return String(format: L10n.string("checker_mode_external_format"), name)
         }
-        return comparisonDisplayName
+        return L10n.comparisonName(runner.comparison)
     }
 
     private var checkerControlsDisabled: Bool {
-        runner.checkerPreferencesAreOpaque || !runner.checkerPreferenceStorageAvailable || runner.isRunning || !runner.persistentChangesAllowed
+        !runner.canConfigureChecker || !canConfigureRunner
     }
 
     private var checkerControlBar: some View {
@@ -229,14 +215,17 @@ struct RunPanelView: View {
                 Toggle(L10n.string("use_external_checker"), isOn: Binding(
                     get: { runner.externalCheckerEnabled },
                     set: { enabled in
-                        if enabled, runner.externalChecker == nil { runner.beginCheckerEdit() }
-                        else { runner.externalCheckerEnabled = enabled }
+                        if enabled, runner.externalChecker == nil {
+                            runner.beginCheckerEdit(enableOnApply: true)
+                            if runner.configurationDraft != nil { openSettings() }
+                        } else { runner.externalCheckerEnabled = enabled }
                     }
                 ))
                 .disabled(checkerControlsDisabled)
 
                 Button(L10n.string("checker_settings")) {
                     runner.beginCheckerEdit()
+                    if runner.configurationDraft != nil { openSettings() }
                 }
                 .disabled(checkerControlsDisabled)
 
@@ -248,7 +237,7 @@ struct RunPanelView: View {
                     Text(L10n.string("comparison_byte")).tag(ComparisonPolicy.byte)
                 }
                 .pickerStyle(.inline)
-                .disabled(runner.externalCheckerEnabled || runner.isRunning || !runner.persistentChangesAllowed)
+                .disabled(runner.externalCheckerEnabled || !canConfigureRunner)
             } label: {
                 HStack(spacing: 5) {
                     Image(systemName: runner.externalCheckerEnabled ? "checkmark.shield" : "slider.horizontal.3")

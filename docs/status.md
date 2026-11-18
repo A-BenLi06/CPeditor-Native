@@ -1,6 +1,6 @@
 # 实施状态与证据
 
-更新时间：2026-11-18T14:51:32+08:00。目标仍为完成设计与实施，以下仅是当前进度，不代表全部里程碑已经通过。
+更新时间：2026-11-18T19:04:34+08:00。目标仍为完成设计与实施，以下仅是当前进度，不代表全部里程碑已经通过。
 
 | 阶段 | 状态 | 当前证据与剩余工作 |
 | --- | --- | --- |
@@ -16,6 +16,8 @@
 实际执行主机：macOS 27.0.1 arm64，Xcode 27.2，Swift 6.4.2，Apple Clang 21，CMake 4.4.3。Windows 10 22H2/PowerShell 7 目标验证待执行。
 
 ## 本轮可复核证据
+
+- macOS 原生 Settings（General／Editor／Run）已接入。最新完整复跑为 84 项 Swift 测试（16 套件）与 17/17 Core CTest；签名和隔离应用实测通过。验证范围及首轮失败见 [walkthrough](../walkthrough.md)。
 
 - `out/macos/build-verification.json` 与 `out/macos/cursor-position-perf/benchmark.json`：Xcode 27.2／SDK 27.2／macOS 26.0 下 15 个 Core 对象与最终可执行文件的 `LC_BUILD_VERSION` 核验、工具链环境 17/17 Core CTest、81 项 Swift 测试（15 套件）、状态栏稀疏位集索引局部基准、`out/macos/layout-audit/` 9 组浅色／深色／紧凑窗口真实界面渲染核验，以及 `./script/build_and_run.sh --verify` + `codesign --verify --strict` 打包启动核验。
 - `out/macos/session-resume-verification/verification.json`：前轮 70 项 Swift 测试、打包启动／严格签名、收件箱前台截图／AX与原字节／回执核对。当前 macOS 27.0.1 arm64，不替代最低系统／Intel／系统 IME 或整应用性能预算。

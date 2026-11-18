@@ -3,6 +3,10 @@ import Observation
 import NativeCoreBridge
 import NativeEditorModel
 
+struct RunnerConfigurationBusy: LocalizedError {
+    var errorDescription: String? { L10n.string("runner_configuration_busy") }
+}
+
 struct RunConfiguration: Decodable, Sendable {
     let schemaVersion: Int
     let profileResources: [String]
@@ -81,6 +85,7 @@ struct RunConfiguration: Decodable, Sendable {
     @ObservationIgnored private var task: Task<Void, Never>?
 
     var selectedProfile: ToolchainProfile? { profiles.first { $0.id == selectedProfileID } }
+    var canConfigureChecker: Bool { !checkerPreferencesAreOpaque && checkerPreferenceStorageAvailable }
     var retainedDocumentRunCount: Int { documentRuns.count }
     func result(for documentID: RawIdentifier) -> BatchResult? { documentRuns[documentID]?.result }
     func state(for documentID: RawIdentifier) -> JobState? { documentRuns[documentID]?.state }
@@ -90,12 +95,17 @@ struct RunConfiguration: Decodable, Sendable {
         return !isRunning && !isClosed && selectedProfile != nil && session.companionRunNotice == nil
     }
 
-    func beginCheckerEdit() {
-        do { configurationDraft = ConfigurationJSONDraft(kind: .checker, jsonText: try checkerDraft()) }
+    func beginCheckerEdit(enableOnApply: Bool = false) {
+        guard configurationDraft == nil, canConfigureChecker else { return }
+        do {
+            configurationDraft = ConfigurationJSONDraft(kind: .checker, jsonText: try checkerDraft(),
+                                                       enableCheckerOnApply: enableOnApply)
+        }
         catch { errorMessage = L10n.describe(error) }
     }
 
     func beginProfileEdit() {
+        guard configurationDraft == nil else { return }
         do {
             guard let profile = selectedProfile else { throw WireError.invalidProfile }
             configurationDraft = ConfigurationJSONDraft(kind: .toolchain, jsonText: try profile.jsonText())
@@ -239,8 +249,8 @@ struct RunConfiguration: Decodable, Sendable {
         selectedProfileID = profile.id
     }
 
-    func loadProfile() {
-        guard !isClosed, pendingImportCount == 0, let config = configuration else { return }
+    func loadProfile(onError: ((String) -> Void)? = nil) {
+        guard !isRunning, !isClosed, pendingImportCount == 0, let config = configuration else { return }
         guard let operation = try? persistence.beginOperation() else { return }
         let panel = NSOpenPanel(); panel.allowsMultipleSelection = false
         guard panel.runModal() == .OK, let url = panel.url else { persistence.endOperation(operation); return }
@@ -256,7 +266,11 @@ struct RunConfiguration: Decodable, Sendable {
                 }.value
                 guard !self.isClosed else { return }
                 try self.applyProfile(text)
-            } catch { if !self.isClosed { self.errorMessage = L10n.describe(error) } }
+            } catch {
+                guard !self.isClosed else { return }
+                let message = L10n.describe(error)
+                if let onError { onError(message) } else { self.errorMessage = message }
+            }
         }
     }
 

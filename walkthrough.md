@@ -525,3 +525,11 @@ Core 规则区分空输入、缺少预期输出与预期输出为空、checker �
 - **共享 Core CTest**：在 `script/macos_toolchain.sh` 环境下执行 `ctest --test-dir out/core/dev --output-on-failure`，17/17 项全部通过（Core C++ 代码未改）。
 - **Swift 单元测试与离屏界面审计**：执行 `CPN_CORE_PREBUILT=1 CPN_LAYOUT_AUDIT_DIR="$PWD/out/macos/layout-audit" ./script/test_macos.sh`，15 个套件共 81 项测试全部通过；导出并逐张视觉核查 `out/macos/layout-audit/` 下全部 9 张真实 AppKit／SwiftUI 渲染 PNG（覆盖 `CodeEditorView` 与 `STTextView` 浅色／深色、紧凑 `780×520`、`Tests & Output Only` 模式、CE 展开横幅、非 stdio 空状态、Companion 收件箱以及 Toolchain／Checker Visual 配置窗口），无黑底选中、无暗色白底、无按钮挤压与内部组件词汇泄露。
 - **真实应用打包、签名与启动**：执行 `./script/build_and_run.sh --verify` 与 `codesign --verify --strict "$PWD/out/macos/CPEditorNative.app"` 全部退出 0，15 个 Core 对象与最终二进制均通过 `LC_BUILD_VERSION`（`minos 26.0`、`sdk 27.2`）核验，应用已启动（PID 97045）并保持运行供检查；上游子模块 `references/cpeditor` 保持干净未修改。
+
+## 2026-11-18T19:04:34+08:00｜接手 Antigravity：macOS 原生设置
+
+- 接续 Antigravity macOS 会话 `a6a09159-88fc-44ba-a826-835df151018a` 的已提交基线 `5710608`。保留左编右测工作区和英文默认界面，新增可由应用菜单、`⌘,` 和齿轮打开的 Settings，分为 General、Editor、Run。
+- 设置和主窗口共用同一个 `Workspace`。应用外观通过系统偏好独立保存，布局只作用于当前窗口；换行、缩略图、工具链及判题继续使用版本化工作区恢复契约，不复制协议字段。冻结或忙碌时按原有持久化边界禁用设置修改。
+- 工具栏、Run 菜单与 checker 入口复用 Settings 中的 Visual／JSON 表单。选择工具链立即绑定当前可编辑文档，不必先运行；配置 checker 与启用 checker 分开处理，取消首次配置保持关闭。运行错误由工作区显示，不再依赖右侧测试面板是否可见。
+- 自动验证：macOS 27.0.1 arm64、Xcode 27.2、部署下限 macOS 26.0。完整 Swift 复跑 84/84，单独复跑 RunResultsTests 4/4；Swift 首轮有一个 RunResultsTests 失败，未保留断言，未确认原因。Core 在仓库指定工具链环境下 17/17；未加载工具链环境直接执行 CTest 时，真实编译测试失败。日志在 `out/macos/settings-audit/`。
+- 真实应用：打包、严格签名核验及启动通过。使用独立恢复文件验证 `⌘,`、齿轮、Run 菜单直达、三页显示、深浅色即时联动及重启恢复、换行恢复、首次 checker 配置取消及显式启用。未修改 Windows 或上游参考子模块；Windows 10 22H2 和 macOS 26 实机未验证。

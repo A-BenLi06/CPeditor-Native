@@ -287,3 +287,14 @@
 "checker_exit_codes_hint" = "Comma-separated integers (0–255). Unmapped exit codes report Checker Error.";
 "invalid_visual_form_number" = "Enter positive whole numbers for timeouts and valid comma-separated exit codes (0–255).";
 "ms_unit" = "ms";
+"settings_general" = "General";
+"settings_title" = "Settings";
+"runner_configuration_busy" = "Settings can’t be applied while a run or workspace operation is in progress.";
+"settings_editor" = "Editor";
+"settings_appearance" = "Appearance";
+"settings_appearance_system" = "System";
+"settings_appearance_light" = "Light";
+"settings_appearance_dark" = "Dark";
+"settings_toolchain_profile" = "Active Profile";
+"settings_no_toolchain" = "None";
+"settings_judging" = "Judging";

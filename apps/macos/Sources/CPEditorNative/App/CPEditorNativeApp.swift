@@ -3,12 +3,22 @@ import AppKit
 
 @main struct CPEditorNativeApp: App {
     @NSApplicationDelegateAdaptor(ApplicationDelegate.self) private var delegate
+    @AppStorage(WorkspaceAppearance.defaultsKey) private var appearance: WorkspaceAppearance = .system
+    @State private var workspace = Workspace(arguments: Array(CommandLine.arguments.dropFirst()), automaticRecovery: true)
 
     var body: some Scene {
-        Window(L10n.string("app_name"), id: "workspace") { WorkspaceView() }
-            .defaultSize(width: 1240, height: 780)
-            .windowToolbarStyle(.unifiedCompact)
-            .commands { EditorCommands() }
+        Window(L10n.string("app_name"), id: "workspace") {
+            WorkspaceView(workspace: workspace)
+                .preferredColorScheme(appearance.colorScheme)
+        }
+        .defaultSize(width: 1240, height: 780)
+        .windowToolbarStyle(.unifiedCompact)
+        .commands { EditorCommands() }
+
+        Settings {
+            SettingsView(workspace: workspace, appearance: $appearance)
+                .preferredColorScheme(appearance.colorScheme)
+        }
     }
 }
 
