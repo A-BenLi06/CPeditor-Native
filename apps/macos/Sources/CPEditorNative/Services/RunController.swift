@@ -43,6 +43,8 @@ struct RunConfiguration: Decodable, Sendable {
     var persistentChangesAllowed: Bool { persistence.canMutate }
     private var storedProfiles: [ToolchainProfile] = []
     @ObservationIgnored private(set) var bundledProfiles: [ToolchainProfile] = []
+    @ObservationIgnored private var discoveredTemplates: [ToolchainProfile] = []
+    @ObservationIgnored private var unavailableProfiles: [ToolchainProfile] = []
     private var storedProfileID = RawIdentifier("")
     private var storedComparison: ComparisonPolicy = .trailing
     private var storedCheckerEnabled = false
@@ -137,7 +139,12 @@ struct RunConfiguration: Decodable, Sendable {
 
     func canRun(_ session: NativeEditorSession?) -> Bool {
         guard let session else { return false }
-        return !isRunning && !isClosed && toolchain(for: session) != nil && session.companionRunNotice == nil
+        return !isRunning && !isClosed && toolchain(for: session) != nil && toolchainNotice(for: session) == nil && session.companionRunNotice == nil
+    }
+
+    func toolchainNotice(for session: NativeEditorSession) -> String? {
+        guard let profile = toolchain(for: session), unavailableProfiles.contains(profile) else { return nil }
+        return L10n.string("gnu_cpp_required")
     }
 
     func beginCheckerEdit(enableOnApply: Bool = false) {
@@ -157,7 +164,7 @@ struct RunConfiguration: Decodable, Sendable {
         } catch { errorMessage = L10n.describe(error) }
     }
 
-    init(persistence: PersistenceGate? = nil) {
+    init(persistence: PersistenceGate? = nil, discoverToolchains: () throws -> ToolchainDiscovery.Catalog = { try ToolchainDiscovery.load().discover() }) {
         self.persistence = persistence ?? PersistenceGate()
         do {
             let config = try RunConfiguration.load()
@@ -168,6 +175,10 @@ struct RunConfiguration: Decodable, Sendable {
                 guard let url = Bundle.module.url(forResource: resource, withExtension: "json") else { throw CocoaError(.fileNoSuchFile) }
                 return try ToolchainProfile(validating: Data(contentsOf: url))
             }
+            let discovered = try discoverToolchains()
+            discoveredTemplates = discovered.templates
+            unavailableProfiles = discovered.unavailable
+            bundledProfiles += discovered.profiles
             profiles = bundledProfiles
             selectedProfileID = RawIdentifier(config.defaultProfileID)
             guard selectedProfile != nil else { throw WireError.invalidProfile }
@@ -177,6 +188,7 @@ struct RunConfiguration: Decodable, Sendable {
 
     func runAll(_ session: NativeEditorSession) {
         guard !isRunning, !isClosed, let coordinator, let profile = toolchain(for: session) else { return }
+        if let notice = toolchainNotice(for: session) { errorMessage = notice; return }
         do {
             guard try CompanionProvenance.ordinaryStdioAllowed(documentID: session.document.id, preferences: session.preservedPreferences) else {
                 errorMessage = L10n.string("companion_run_incompatible"); return
@@ -313,13 +325,15 @@ struct RunConfiguration: Decodable, Sendable {
             do {
                 guard profile.id.rawValue.utf8.count <= SessionLimits.maximumIdentifierBytes else { throw WireError.invalidProfile }
                 try profile.validateForExecution()
+                if discoveredTemplates.contains(profile), let resolved = bundledProfiles.first(where: { $0.id == profile.id }) { return resolved }
                 return profile
             } catch {
                 repaired = true
                 return bundledProfiles.first { $0.id == profile.id }
             }
         }
-        if recovered.isEmpty { recovered = bundledProfiles }
+        // Newly discovered compilers must also appear in workspaces saved by older app versions.
+        for profile in bundledProfiles where !recovered.contains(where: { $0.id == profile.id }) { recovered.append(profile) }
         guard let first = recovered.first else { throw WireError.invalidProfile }
         let fallbackID = RawIdentifier(configuration?.defaultProfileID ?? "")
         let preferred = recovered.first { $0.id == selected } ?? recovered.first { $0.id == fallbackID } ?? first

@@ -244,6 +244,7 @@ struct CodeBlockBox: View {
     var borderColor: Color? = nil
     var isBinaryPreview = false
     var binaryPreviewShownBytes = 0
+    var contentHeight: CGFloat? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -271,20 +272,13 @@ struct CodeBlockBox: View {
                 }
             }
             Group {
-                if byteCount == 0 {
-                    Text(L10n.string("empty_bytes"))
-                        .font(.caption.italic())
-                        .foregroundStyle(.tertiary)
+                if let contentHeight {
+                    ScrollView { content }
+                        .frame(height: contentHeight)
                 } else {
-                    Text(displayText)
-                        .font(.system(.caption, design: .monospaced))
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
+                    content
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
             .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
             .overlay(
                 RoundedRectangle(cornerRadius: 6)
@@ -298,4 +292,23 @@ struct CodeBlockBox: View {
             }
         }
     }
+
+    private var content: some View {
+        Group {
+            if byteCount == 0 {
+                Text(L10n.string("empty_bytes"))
+                    .font(.caption.italic())
+                    .foregroundStyle(.tertiary)
+            } else {
+                Text(displayText)
+                    .font(.system(.callout, design: .monospaced))
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+    }
+
 }

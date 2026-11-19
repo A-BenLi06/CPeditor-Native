@@ -71,6 +71,7 @@ import NativeCoreBridge
                 ? nil : L10n.string("companion_run_incompatible")
         } catch { return L10n.string("companion_run_opaque") }
     }
+    @ObservationIgnored private(set) var inputController: EditorInputController?
     @ObservationIgnored private var codeState: CodeEditorState?
     @ObservationIgnored private var codeHost: NSHostingView<CodeEditorSurface>?
     @ObservationIgnored private weak var codeView: NSTextView?
@@ -134,10 +135,14 @@ import NativeCoreBridge
             container.install(scroll)
             highlight()
         }
+        inputController = EditorInputController(container: container, profile: profile)
+        inputController?.didEdit = { [weak self] in self?.capture() }
         container.history.removeAllActions()
     }
 
     func dispose() {
+        inputController?.dispose()
+        inputController = nil
         pendingCapture?.cancel()
         pendingCapture = nil
         container.onAppearanceChange = nil

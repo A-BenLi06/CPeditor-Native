@@ -162,5 +162,41 @@
     ":",
     ",",
     "."
-  ]
+  ],
+  "editing": {
+    "pairs": [
+      {
+        "open": "(",
+        "close": ")",
+        "quote": false,
+        "indents": false
+      },
+      {
+        "open": "[",
+        "close": "]",
+        "quote": false,
+        "indents": false
+      },
+      {
+        "open": "{",
+        "close": "}",
+        "quote": false,
+        "indents": true
+      },
+      {
+        "open": "\"",
+        "close": "\"",
+        "quote": true,
+        "indents": false
+      },
+      {
+        "open": "'",
+        "close": "'",
+        "quote": true,
+        "indents": false
+      }
+    ],
+    "indent": "    ",
+    "rawStringPrefix": "R\""
+  }
 }

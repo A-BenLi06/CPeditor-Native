@@ -18,6 +18,7 @@ public struct LanguageProfile: Decodable, Sendable {
     public let blockCommentClose: String
     public let keywords: [String]
     public let operators: [String]
+    public let editing: EditingConfiguration
 
     public static func load(id: String) throws -> Self {
         guard let url = Bundle.module.url(forResource: id, withExtension: "json") else {

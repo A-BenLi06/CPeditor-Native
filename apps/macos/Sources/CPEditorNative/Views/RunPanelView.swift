@@ -38,6 +38,9 @@ struct RunPanelView: View {
             checkerControlBar
             Divider()
 
+            if let notice = runner.toolchainNotice(for: session) {
+                NoticeBannerView(kind: .warning, message: notice)
+            }
             if let notice = session.persistenceNotice {
                 NoticeBannerView(kind: .warning, message: notice)
             }
@@ -463,12 +466,14 @@ private struct TestCaseCardView: View {
 
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .top, spacing: 8) {
-                    inputColumn.frame(minWidth: 135, maxWidth: .infinity)
-                    expectedColumn.frame(minWidth: 135, maxWidth: .infinity)
+                    inputColumn.frame(minWidth: 110, maxWidth: .infinity)
+                    expectedColumn.frame(minWidth: 110, maxWidth: .infinity)
+                    outputColumn.frame(minWidth: 110, maxWidth: .infinity)
                 }
                 VStack(alignment: .leading, spacing: 8) {
                     inputColumn
                     expectedColumn
+                    outputColumn
                 }
             }
             .opacity(test.enabled ? 1.0 : 0.65)
@@ -478,14 +483,6 @@ private struct TestCaseCardView: View {
                     .padding(.top, 2)
 
                 VStack(alignment: .leading, spacing: 6) {
-                    OutputBytesView(
-                        title: L10n.string("output_title"),
-                        bytes: matchingResult.process.stdout,
-                        binaryPreviewBytes: binaryPreviewBytes,
-                        trailingSubtitle: outputStatusSummary(for: matchingResult),
-                        borderColor: outputBorderColor
-                    )
-
                     if !matchingResult.process.stderr.data.isEmpty {
                         OutputBytesView(
                             title: L10n.string("stderr_title"),
@@ -519,7 +516,12 @@ private struct TestCaseCardView: View {
     }
 
     private var editorMinHeight: CGFloat { isExpandedHeight ? 132 : 68 }
-    private var editorMaxHeight: CGFloat { isExpandedHeight ? 200 : 96 }
+    private var outputColumn: some View {
+        OutputBytesView(title: L10n.string("output_title"), bytes: matchingResult?.process.stdout ?? WireBytes(""),
+                        binaryPreviewBytes: binaryPreviewBytes,
+                        trailingSubtitle: matchingResult.map(outputStatusSummary), borderColor: outputBorderColor,
+                        contentHeight: editorMinHeight)
+    }
 
     private var inputColumn: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -541,7 +543,7 @@ private struct TestCaseCardView: View {
             .font(.system(.callout, design: .monospaced))
             .scrollContentBackground(.hidden)
             .padding(4)
-            .frame(minHeight: editorMinHeight, maxHeight: editorMaxHeight)
+            .frame(height: editorMinHeight)
             .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
             .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(nsColor: .separatorColor).opacity(0.6), lineWidth: 1))
             .disabled(!canEdit)
@@ -584,45 +586,28 @@ private struct TestCaseCardView: View {
                 }
             }
 
-            if let expected = test.expected {
-                TextEditor(text: Binding(
-                    get: { test.expected?.text ?? "" },
-                    set: { test.expected = WireBytes($0) }
-                ))
-                .font(.system(.callout, design: .monospaced))
-                .scrollContentBackground(.hidden)
-                .padding(4)
-                .frame(minHeight: editorMinHeight, maxHeight: editorMaxHeight)
-                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
-                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(nsColor: .separatorColor).opacity(0.6), lineWidth: 1))
-                .disabled(!canEdit)
-                .accessibilityLabel(L10n.string("test_expected"))
+            TextEditor(text: Binding(
+                get: { test.expected?.text ?? "" },
+                set: { test.expected = WireBytes($0) }
+            ))
+            .font(.system(.callout, design: .monospaced))
+            .scrollContentBackground(.hidden)
+            .padding(4)
+            .frame(height: editorMinHeight)
+            .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(nsColor: .separatorColor).opacity(0.6), lineWidth: 1))
+            .disabled(!canEdit)
+            .accessibilityLabel(L10n.string("test_expected"))
 
-                if !expected.isUTF8 {
-                    Text(L10n.string("binary_data"))
-                        .font(.caption2)
-                        .foregroundStyle(.orange)
-                }
-            } else {
-                VStack(spacing: 6) {
-                    Text(L10n.string("expected_unchecked_hint"))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                    Button(L10n.string("enable_expected")) {
-                        test.expected = WireBytes("")
-                    }
-                    .controlSize(.mini)
-                    .disabled(!canEdit)
-                }
-                .padding(8)
-                .frame(maxWidth: .infinity, minHeight: editorMinHeight)
-                .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 6))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6)
-                        .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                        .foregroundStyle(Color(nsColor: .separatorColor).opacity(0.75))
-                )
+            if test.expected?.isUTF8 == false {
+                Text(L10n.string("binary_data"))
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+            }
+            if test.expected == nil {
+                Text(L10n.string("expected_unchecked_hint"))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -761,6 +746,7 @@ struct OutputBytesView: View {
     let binaryPreviewBytes: Int
     var trailingSubtitle: String? = nil
     var borderColor: Color? = nil
+    var contentHeight: CGFloat? = nil
 
     var body: some View {
         let canDisplay = bytes.canDisplayAsText
@@ -772,7 +758,8 @@ struct OutputBytesView: View {
             trailingSubtitle: trailingSubtitle,
             borderColor: borderColor,
             isBinaryPreview: !canDisplay,
-            binaryPreviewShownBytes: min(bytes.data.count, binaryPreviewBytes)
+            binaryPreviewShownBytes: min(bytes.data.count, binaryPreviewBytes),
+            contentHeight: contentHeight
         )
     }
 }

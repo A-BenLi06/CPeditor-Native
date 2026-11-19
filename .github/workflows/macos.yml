@@ -42,7 +42,11 @@ jobs:
           sw_vers
           xcodebuild -version
           mkdir -p out/macos
+      - name: 准备 GNU C++ 兼容性验证
+        run: brew list --versions gcc >/dev/null || brew install gcc
       - name: 运行 Swift／原生集成测试
+        env:
+          CPN_REQUIRE_GNU_CPP: "1"
         run: ./script/test_macos.sh 2>&1 | tee out/macos/swift-tests.log
       - name: 运行 Core 测试
         if: '!cancelled()'

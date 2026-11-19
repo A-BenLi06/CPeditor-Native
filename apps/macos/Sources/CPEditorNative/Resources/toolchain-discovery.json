@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "searchDirectories": [
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    "/opt/local/bin"
+  ],
+  "executablePattern": "^g\\+\\+-(\\d+)$",
+  "profileResources": [
+    "macos-gcc-cpp17",
+    "macos-gcc-cpp20"
+  ]
+}

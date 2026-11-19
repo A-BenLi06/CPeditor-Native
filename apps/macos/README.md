@@ -31,6 +31,13 @@
 
 脚本只向与本仓库产物绝对路径一致的旧实例请求退出，不按进程名终止其他程序。如果应用仍有保存提示或拒绝退出，脚本终止本次重新启动。打包采用本地临时签名；发布签名、Hardened Runtime 和公证不在此原型范围内。
 
+## 编译器与日常编辑
+
+- 应用按 `Resources/toolchain-discovery.json` 检查 Homebrew、MacPorts 和 `PATH` 中带版本号的 GNU `g++`，不把 Apple 的 `/usr/bin/g++` 别名当作 GCC。发现后提供 GNU C++17／20 配置，默认要求 GNU C++17；未安装时禁用默认运行并提示安装，不自动回退到 Apple Clang。Clang 仅供显式选择。编译器版本和安装路径不会写死在应用代码里。
+- `bits/stdc++.h` 是 GNU 标准库的扩展头文件。使用它的代码应选择工具栏中的 GCC 配置；应用不添加伪造头文件、不把 libstdc++ 头文件强行混入 libc++。旧工作区保留之前的工具链选择，新增发现的 GCC 会出现在菜单中。macOS CI 安装 Homebrew GCC，强制通过真实 Core 编译、运行该头文件样例。
+- 每个样例在运行前就显示 Input、Expected Output、Output。宽面板并列展示，窄面板纵向排列，Output 限高滚动；取消期望输出校验时编辑框仍可见，输入内容会重新启用校验。
+- 两种编辑器共用语言资源中的配对和缩进配置。支持 `()`、`[]`、`{}`、单双引号即时配对，选区包裹，已有闭合字符跳过，相邻空对删除，大括号内换行缩进和 Tab／Shift-Tab 多行缩进。注释、字符串、输入法 marked text、粘贴和多光标输入保留原生处理。变更通过原生文本接口和 UndoManager 完成，可撤销／重做；没有接入语义补全或 C++ language server。
+
 ## 模块边界
 
 ```mermaid

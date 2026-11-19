@@ -7,6 +7,57 @@ import NativeCoreBridge
 @testable import CPEditorNative
 
 @MainActor @Suite(.serialized) struct EditorTests {
+    @Test(arguments: EditorKind.allCases)
+    func pairedEditingUsesNativeUndoAndSkipsIME(kind: EditorKind) async throws {
+        _ = NSApplication.shared
+        let session = try NativeEditorSession(document: SourceDocument(text: "", editorKind: kind, languageID: "cpp"), profile: .load(id: "cpp"))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = session.container
+        window.layoutIfNeeded()
+        session.container.layoutSubtreeIfNeeded()
+        let view: NSView = try #require(session.stView ?? textView(in: session.container))
+        window.makeFirstResponder(view)
+        let input = try #require(session.inputController)
+        defer { window.contentView = nil; session.dispose() }
+        session.container.history.groupsByEvent = false
+        #expect(input.apply(.insert("("), to: view))
+        await Task.yield()
+        session.capture()
+        #expect(session.document.text == "()")
+        session.container.history.undo()
+        await Task.yield()
+        session.capture()
+        #expect(session.document.text == "")
+        session.container.history.redo()
+        await Task.yield()
+        try session.restoreSelection(NSRange(location: 1, length: 0))
+        #expect(input.apply(.insert(")"), to: view))
+        session.capture()
+        #expect(session.document.text == "()")
+        #expect(session.selection == NSRange(location: 2, length: 0))
+        try session.restoreSelection(NSRange(location: 1, length: 0))
+        #expect(input.apply(.backspace, to: view))
+        await Task.yield()
+        session.capture()
+        #expect(session.document.text == "")
+        #expect(input.apply(.insert("{"), to: view))
+        #expect(input.apply(.newline, to: view))
+        await Task.yield()
+        session.capture()
+        #expect(session.document.text == "{\n    \n}")
+        session.container.history.beginUndoGrouping()
+        if let st = view as? STTextView {
+            st.setMarkedText("zhong", selectedRange: NSRange(location: 5, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+        } else if let text = view as? NSTextView {
+            text.setMarkedText("zhong", selectedRange: NSRange(location: 5, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+        }
+        session.container.history.endUndoGrouping()
+        #expect(!input.apply(.insert("("), to: view))
+        session.capture()
+        #expect(session.isComposing)
+        #expect(session.document.text == "{\n    \n}")
+    }
+
     @Test func runnerCompilesUnsavedNativeBufferAndMarksEditedSourceOld() async throws {
         _ = NSApplication.shared
         let profile = try LanguageProfile.load(id: "cpp")

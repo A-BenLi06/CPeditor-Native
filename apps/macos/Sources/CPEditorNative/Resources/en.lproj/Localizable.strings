@@ -304,3 +304,5 @@
 "settings_toolchain_profile" = "Active Profile";
 "settings_no_toolchain" = "None";
 "settings_judging" = "Judging";
+
+"gnu_cpp_required" = "GNU G++ is required for the default C++ toolchain. Install GCC (for example: brew install gcc), then reopen the app. Apple’s /usr/bin/g++ is Clang and cannot be used as GNU G++.";
