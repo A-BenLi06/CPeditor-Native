@@ -48,6 +48,12 @@ import NativeCoreBridge
         #expect(!runner.isRunning)
         #expect(runner.result == nil)
         #expect(runner.errorMessage == L10n.string("gnu_cpp_required"))
+        let profile = try #require(runner.selectedProfile)
+        let edited = try profile.updating(buildExecutable: profile.buildExecutable, buildArguments: profile.buildArguments + ["-Wall"],
+                                         buildWallTimeoutMS: 40_000, runWallTimeoutMS: 3_000)
+        try runner.applyProfile(edited) { _, _ in }
+        #expect(!runner.canRun(session))
+        #expect(runner.toolchainNotice(for: session) == L10n.string("gnu_cpp_required"))
         let recovered = try runner.recoverToolchains(runner.profiles, selected: runner.selectedProfileID)
         #expect(recovered.selected == RawIdentifier("macos-gcc-cpp17"))
         #expect(recovered.profiles.contains { $0.id == recovered.selected })
@@ -59,6 +65,14 @@ import NativeCoreBridge
         let selected = RawIdentifier("macos-gcc-cpp17")
         let restored = try runner.recoverToolchains(templates, selected: selected)
         #expect(restored.profiles.first { $0.id == selected } == runner.profiles.first { $0.id == selected })
+        let template = try #require(templates.first { $0.id == selected })
+        let edited = try template.updating(buildExecutable: template.buildExecutable, buildArguments: template.buildArguments + ["-Wall"],
+                                          buildWallTimeoutMS: 40_000, runWallTimeoutMS: 3_000)
+        let custom = try runner.recoverToolchains([edited], selected: selected)
+        let resolved = try #require(custom.profiles.first { $0.id == selected })
+        #expect(resolved.buildExecutable == runner.selectedProfile?.buildExecutable)
+        #expect(resolved.buildArguments == edited.buildArguments)
+        #expect(resolved.buildWallTimeoutMS == 40_000)
     }
 
     @Test func installedGNUCompilerBuildsBitsHeaderThroughCore() async throws {

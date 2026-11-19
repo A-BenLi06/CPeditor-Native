@@ -143,7 +143,9 @@ struct RunConfiguration: Decodable, Sendable {
     }
 
     func toolchainNotice(for session: NativeEditorSession) -> String? {
-        guard let profile = toolchain(for: session), unavailableProfiles.contains(profile) else { return nil }
+        guard let profile = toolchain(for: session), unavailableProfiles.contains(where: {
+            $0.id == profile.id && $0.buildExecutable == profile.buildExecutable
+        }) else { return nil }
         return L10n.string("gnu_cpp_required")
     }
 
@@ -325,7 +327,15 @@ struct RunConfiguration: Decodable, Sendable {
             do {
                 guard profile.id.rawValue.utf8.count <= SessionLimits.maximumIdentifierBytes else { throw WireError.invalidProfile }
                 try profile.validateForExecution()
-                if discoveredTemplates.contains(profile), let resolved = bundledProfiles.first(where: { $0.id == profile.id }) { return resolved }
+                // Resolve a saved, not-yet-installed compiler without replacing user flags or limits.
+                if discoveredTemplates.contains(where: { $0.id == profile.id && $0.buildExecutable == profile.buildExecutable }),
+                   let resolved = bundledProfiles.first(where: { $0.id == profile.id }),
+                   let executable = resolved.buildExecutable,
+                   var root = profile.payload.object, var build = root[ToolchainProfile.Field.build.rawValue]?.object {
+                    build[ToolchainProfile.Field.executable.rawValue] = .string(executable)
+                    root[ToolchainProfile.Field.build.rawValue] = .object(build)
+                    return try ToolchainProfile(payload: .object(root))
+                }
                 return profile
             } catch {
                 repaired = true
