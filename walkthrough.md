@@ -570,3 +570,7 @@ Core 规则区分空输入、缺少预期输出与预期输出为空、checker �
 
 - 缺少 G++ 时按配置身份和编译器路径禁用运行，修改编译参数、超时不会解除缺失状态。安装后恢复待解析配置时只替换编译器路径，保留自定义参数和限制。
 - 本机 macOS G++ 专项 5/5 通过，包含修改参数后的禁止运行和安装后的参数保留，日志为 `out/macos/editing-audit/gcc-required.log`。
+
+## 2026-11-20T01:28:13+08:00 — G++ 与编辑体验持续集成通过
+
+- [Actions 44576315420](https://github.com/A-BenLi06/CPeditor-Native/actions/runs/44576315420) 对最终代码 `ac67d41` 验证通过，Swift 101/101、Core 17/17、应用打包及严格签名检查全部成功，G++ 必需模式实际编译了 `bits/stdc++.h` 用例。原功能提交 `bc39184` 的 [Actions 44575208398](https://github.com/A-BenLi06/CPeditor-Native/actions/runs/44575208398) 同样全绿。最终本地应用已构建并恢复原工作区，G++ 选择在重启后保留。
