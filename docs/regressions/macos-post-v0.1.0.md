@@ -20,3 +20,5 @@ Debug 完整 Swift 108 项与 Core 17 项通过。Release 专项 28/28 通过，
 日志位于 `out/macos/post-release-regression/`，包括 `editing-before.log`、`gcc-before.log`、`selection-before.log` 的原始失败，`swift-full.log`、`swift-release.log`、`core-tests.log` 和 `app-build.log` 的最终验证。一次原生测试夹具在视图尚未发出首次选区通知时设置了模型选区，造成测试并未真正选中原生文本；夹具改为操作已挂载文本视图，未在产品中增加等待或延时。
 
 本轮修改提交到后续开发分支历史，不移动 `v0.1.0` 标签或替换其下载文件。Windows 10、macOS 26 最低系统、Intel、发布签名／公证和整应用性能仍不属于已通过项。
+
+远端验证：[Actions 45160293245](https://github.com/A-BenLi06/CPeditor-Native/actions/runs/45160293245) 对提交 `84bdd71` 完成 Swift 108/108、Core 17/17、应用包构建与严格签名校验，全部通过。G++ 真实编译和旧版本路径移除恢复均在 CI 执行。核对时间为 2026-11-23T19:01:10+08:00。
