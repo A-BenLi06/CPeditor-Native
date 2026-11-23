@@ -44,6 +44,7 @@ struct RunConfiguration: Decodable, Sendable {
     private var storedProfiles: [ToolchainProfile] = []
     @ObservationIgnored private(set) var bundledProfiles: [ToolchainProfile] = []
     @ObservationIgnored private var discoveredTemplates: [ToolchainProfile] = []
+    @ObservationIgnored private var discoveredCatalog: ToolchainDiscovery.Catalog?
     @ObservationIgnored private var unavailableProfiles: [ToolchainProfile] = []
     private var storedProfileID = RawIdentifier("")
     private var storedComparison: ComparisonPolicy = .trailing
@@ -178,6 +179,7 @@ struct RunConfiguration: Decodable, Sendable {
                 return try ToolchainProfile(validating: Data(contentsOf: url))
             }
             let discovered = try discoverToolchains()
+            discoveredCatalog = discovered
             discoveredTemplates = discovered.templates
             unavailableProfiles = discovered.unavailable
             bundledProfiles += discovered.profiles
@@ -327,8 +329,12 @@ struct RunConfiguration: Decodable, Sendable {
             do {
                 guard profile.id.rawValue.utf8.count <= SessionLimits.maximumIdentifierBytes else { throw WireError.invalidProfile }
                 try profile.validateForExecution()
-                // Resolve a saved, not-yet-installed compiler without replacing user flags or limits.
-                if discoveredTemplates.contains(where: { $0.id == profile.id && $0.buildExecutable == profile.buildExecutable }),
+                // Resolve a placeholder or removed compiler in a managed install directory.
+                // Existing version pins and explicit paths elsewhere remain user-owned.
+                if discoveredTemplates.contains(where: { template in
+                    template.id == profile.id && (template.buildExecutable == profile.buildExecutable ||
+                        profile.buildExecutable.map { discoveredCatalog?.isMissingManagedCompiler($0) == true } == true)
+                }),
                    let resolved = bundledProfiles.first(where: { $0.id == profile.id }),
                    let executable = resolved.buildExecutable,
                    var root = profile.payload.object, var build = root[ToolchainProfile.Field.build.rawValue]?.object {

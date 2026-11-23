@@ -3,7 +3,7 @@ import Testing
 @testable import NativeEditorModel
 
 struct CodeEditingTests {
-    private func rules() throws -> CodeEditingRules { CodeEditingRules(profile: try .load(id: "cpp")) }
+    private func rules() throws -> CodeEditingRules { try CodeEditingRules(profile: .load(id: "cpp")) }
 
     @Test func wrapsUnicodeSelectionAndKeepsItSelected() throws {
         let text = "🙂变量"
@@ -48,5 +48,42 @@ struct CodeEditingTests {
         let indented = (block as NSString).replacingCharacters(in: indent.range, with: indent.replacement)
         let outdent = try #require(rules.edit(.outdent, text: indented, selection: indent.selection))
         #expect((indented as NSString).replacingCharacters(in: outdent.range, with: outdent.replacement) == block)
+    }
+
+    @Test func closingCharactersOnlySkipTheirMatchingOpeningContext() throws {
+        let rules = try rules()
+        #expect(rules.edit(.insert(")"), text: ")", selection: NSRange(location: 0, length: 0)) == nil)
+        #expect(rules.edit(.insert(")"), text: "([)", selection: NSRange(location: 2, length: 0)) == nil)
+        #expect(rules.edit(.insert("\""), text: "\"word\"", selection: NSRange(location: 0, length: 0))?.replacement == "\"\"")
+        #expect(rules.edit(.backspace, text: "\"\"\"\"", selection: NSRange(location: 2, length: 0)) == nil)
+    }
+
+    @Test func hexSeparatorsAndIncompleteStringsDoNotDisableLaterCodePairing() throws {
+        let rules = try rules()
+        for text in ["auto n = 0xAB'CD; f", "auto s = \"unfinished\ncall", "auto c = '\ncall"] {
+            #expect(rules.edit(.insert("("), text: text, selection: NSRange(location: text.utf16.count, length: 0))?.replacement == "()")
+        }
+        let continued = "\"text\\\ninside "
+        #expect(rules.edit(.insert("("), text: continued, selection: NSRange(location: continued.utf16.count, length: 0)) == nil)
+    }
+
+    @Test func indentingSingleLineSelectionPreservesCodeAndUndoableRange() throws {
+        let edit = try #require(try rules().edit(.indent, text: "  value", selection: NSRange(location: 2, length: 5)))
+        #expect(edit.range == NSRange(location: 0, length: 7))
+        #expect(edit.replacement == "      value")
+        #expect(edit.selection == NSRange(location: 6, length: 5))
+    }
+
+    @Test func newlineUsesLocalLineEndingIncludingCRFiles() throws {
+        let rules = try rules()
+        for (text, location, expected) in [("one\rtwo", 2, "\r"), ("one\r\ntwo\nthree", 8, "\n")] {
+            #expect(rules.edit(.newline, text: text, selection: NSRange(location: location, length: 0))?.replacement == expected)
+        }
+    }
+
+    @Test func outdentMapsSelectionEndingInsideRemovedWhitespace() throws {
+        let edit = try #require(try rules().edit(.outdent, text: "first\n    second", selection: NSRange(location: 0, length: 7)))
+        #expect(edit.replacement == "first\nsecond")
+        #expect(edit.selection == NSRange(location: 0, length: 6))
     }
 }

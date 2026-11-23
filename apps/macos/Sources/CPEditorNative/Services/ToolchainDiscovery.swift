@@ -19,7 +19,7 @@ struct ToolchainDiscovery: Decodable {
 
     func findCompiler(path: String = ProcessInfo.processInfo.environment["PATH"] ?? "") throws -> URL? {
         let expression = try NSRegularExpression(pattern: executablePattern)
-        let directories = searchDirectories + path.split(separator: ":").map(String.init)
+        let directories = directories(path: path)
         var candidates: [(version: Int, order: Int, url: URL)] = []
         for (order, directory) in directories.enumerated() where directory.hasPrefix("/") {
             let root = URL(fileURLWithPath: directory, isDirectory: true)
@@ -41,6 +41,23 @@ struct ToolchainDiscovery: Decodable {
         let templates: [ToolchainProfile]
         let profiles: [ToolchainProfile]
         let unavailable: [ToolchainProfile]
+        let managedDirectories: Set<String>
+        let executablePattern: NSRegularExpression
+
+        func isMissingManagedCompiler(_ executable: String) -> Bool {
+            guard executable.hasPrefix("/"), !FileManager.default.fileExists(atPath: executable) else { return false }
+            let url = URL(fileURLWithPath: executable).standardizedFileURL
+            let name = url.lastPathComponent
+            let range = NSRange(name.startIndex..., in: name)
+            return managedDirectories.contains(url.deletingLastPathComponent().path)
+                && executablePattern.firstMatch(in: name, range: range)?.range == range
+        }
+    }
+
+    private func directories(path: String) -> [String] {
+        (searchDirectories + path.split(separator: ":").map(String.init))
+            .filter { $0.hasPrefix("/") }
+            .map { URL(fileURLWithPath: $0, isDirectory: true).standardizedFileURL.path }
     }
 
     func discover(path: String = ProcessInfo.processInfo.environment["PATH"] ?? "") throws -> Catalog {
@@ -58,6 +75,8 @@ struct ToolchainDiscovery: Decodable {
             try profile.validateForExecution()
             return profile
         }
-        return Catalog(templates: templates, profiles: profiles, unavailable: compiler == nil ? profiles : [])
+        return Catalog(templates: templates, profiles: profiles, unavailable: compiler == nil ? profiles : [],
+                       managedDirectories: Set(directories(path: path)),
+                       executablePattern: try NSRegularExpression(pattern: executablePattern))
     }
 }

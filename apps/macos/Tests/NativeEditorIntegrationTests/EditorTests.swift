@@ -8,6 +8,50 @@ import NativeCoreBridge
 
 @MainActor @Suite(.serialized) struct EditorTests {
     @Test(arguments: EditorKind.allCases)
+    func selectedLineIndentationPreservesBufferThroughUndoAndRedo(kind: EditorKind) async throws {
+        _ = NSApplication.shared
+        let original = "  变量🙂"
+        let session = try NativeEditorSession(document: SourceDocument(text: original, editorKind: kind, languageID: "cpp"), profile: .load(id: "cpp"))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = session.container
+        window.layoutIfNeeded()
+        session.container.layoutSubtreeIfNeeded()
+        let view: NSView = try #require(session.stView ?? textView(in: session.container))
+        window.makeFirstResponder(view)
+        let input = try #require(session.inputController)
+        defer { window.contentView = nil; session.dispose() }
+        session.container.history.groupsByEvent = false
+        let selected = NSRange(location: 2, length: original.utf16.count - 2)
+        // Select the mounted native buffer as a mouse selection would. A newly mounted
+        // CodeEditorView has not necessarily sent its first selection notification yet.
+        if let text = view as? NSTextView { text.setSelectedRange(selected) }
+        else if let text = view as? STTextView { text.textSelection = selected }
+        session.capture()
+        let tab = try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                                              windowNumber: window.windowNumber, context: nil,
+                                              characters: "\t", charactersIgnoringModifiers: "\t", isARepeat: false, keyCode: 48))
+        #expect(input.handle(tab))
+        if let text = view as? NSTextView { #expect(text.selectedRange() == NSRange(location: 6, length: 4)) }
+        await Task.yield()
+        session.capture()
+        #expect(session.document.text == "      变量🙂")
+        #expect(session.selection == NSRange(location: 6, length: 4))
+        session.container.history.undo()
+        await Task.yield()
+        session.capture()
+        #expect(session.document.text == original)
+        session.container.history.redo()
+        await Task.yield()
+        session.capture()
+        #expect(session.document.text == "      变量🙂")
+        try session.restoreSelection(NSRange(location: 6, length: 4))
+        #expect(input.apply(.outdent, to: view))
+        await Task.yield()
+        session.capture()
+        #expect(session.document.text == original)
+    }
+
+    @Test(arguments: EditorKind.allCases)
     func pairedEditingUsesNativeUndoAndSkipsIME(kind: EditorKind) async throws {
         _ = NSApplication.shared
         let session = try NativeEditorSession(document: SourceDocument(text: "", editorKind: kind, languageID: "cpp"), profile: .load(id: "cpp"))

@@ -135,7 +135,7 @@ import NativeCoreBridge
             container.install(scroll)
             highlight()
         }
-        inputController = EditorInputController(container: container, profile: profile)
+        inputController = try EditorInputController(container: container, profile: profile)
         inputController?.didEdit = { [weak self] in self?.capture() }
         container.history.removeAllActions()
     }

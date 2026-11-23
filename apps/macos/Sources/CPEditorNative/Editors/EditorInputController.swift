@@ -9,9 +9,9 @@ import STTextView
     private var monitor: Any?
     var didEdit: (() -> Void)?
 
-    init(container: EditorContainer, profile: LanguageProfile) {
+    init(container: EditorContainer, profile: LanguageProfile) throws {
         self.container = container
-        rules = CodeEditingRules(profile: profile)
+        rules = try CodeEditingRules(profile: profile)
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             let handled = MainActor.assumeIsolated { self?.handle(event) == true }
             return handled ? nil : event

@@ -93,4 +93,49 @@ import NativeCoreBridge
         #expect(result.tests.first?.verdict == "AC")
         await runner.shutdown()
     }
+
+    @Test func recoveryFollowsRemovedManagedCompilerButKeepsExplicitPaths() throws {
+        _ = NSApplication.shared
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let managed = root.appendingPathComponent("compilers")
+        try FileManager.default.createDirectory(at: managed, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let bundled = try ToolchainDiscovery.load()
+        let discovery = ToolchainDiscovery(schemaVersion: 1, searchDirectories: [managed.path], executablePattern: bundled.executablePattern,
+                                          profileResources: bundled.profileResources)
+        func install(_ name: String) throws -> URL {
+            let url = managed.appendingPathComponent(name)
+            try Data("fixture".utf8).write(to: url)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+            return url
+        }
+        let old = try install("g++-14")
+        let initial = RunController(discoverToolchains: { try discovery.discover(path: "") })
+        let original = try #require(initial.selectedProfile)
+        let saved = try original.updating(buildExecutable: old.path, buildArguments: original.buildArguments + ["-Wall"],
+                                         buildWallTimeoutMS: 45_000, runWallTimeoutMS: 4_000)
+        let newer = try install("g++-15")
+        let beforeRemoval = RunController(discoverToolchains: { try discovery.discover(path: "") })
+        #expect(try beforeRemoval.recoverToolchains([saved], selected: saved.id).profiles.first { $0.id == saved.id } == saved)
+        try FileManager.default.removeItem(at: old)
+        let restarted = RunController(discoverToolchains: { try discovery.discover(path: "") })
+        let restored = try restarted.recoverToolchains([saved], selected: saved.id)
+        let resolved = try #require(restored.profiles.first { $0.id == saved.id })
+        #expect(resolved.buildExecutable == newer.path)
+        #expect(resolved.buildArguments == saved.buildArguments)
+        #expect(resolved.buildWallTimeoutMS == 45_000)
+        #expect(resolved.runWallTimeoutMS == 4_000)
+
+        let explicit = try saved.updating(buildExecutable: root.appendingPathComponent("g++-14").path, buildArguments: saved.buildArguments,
+                                         buildWallTimeoutMS: 45_000, runWallTimeoutMS: 4_000)
+        #expect(try restarted.recoverToolchains([explicit], selected: explicit.id).profiles.first { $0.id == explicit.id } == explicit)
+        try FileManager.default.removeItem(at: newer)
+        let uninstalled = RunController(discoverToolchains: { try discovery.discover(path: "") })
+        let unavailable = try uninstalled.recoverToolchains([saved], selected: saved.id)
+        uninstalled.profiles = unavailable.profiles
+        let session = try NativeEditorSession(document: SourceDocument(text: "", editorKind: .stTextView, languageID: "cpp"), profile: .load(id: "cpp"))
+        defer { session.dispose() }
+        #expect(!uninstalled.canRun(session))
+        #expect(uninstalled.toolchainNotice(for: session) == L10n.string("gnu_cpp_required"))
+    }
 }
