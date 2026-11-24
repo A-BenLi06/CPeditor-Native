@@ -79,4 +79,42 @@ import NativeEditorModel
             #expect(throws: CoreFailure.self) { try ToolchainProfile(validating: Data((prefix + version).utf8)) }
         }
     }
+
+    @Test func compileOnlyExportsArtifactAndRunOnlyReusesItWithoutRecompiling() async throws {
+        let coordinator = CoreCoordinator(pollingMilliseconds: 10, maximumBuffers: 1, maximumJobs: 1)
+        let stagingDir = FileManager.default.temporaryDirectory.appendingPathComponent("core-split-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: stagingDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: stagingDir) }
+
+        let artifactURL = stagingDir.appendingPathComponent("program")
+        let source = await snapshot("#include <iostream>\nint main(){long long a,b;if(std::cin>>a>>b)std::cout<<(a*b)<<'\\n';}\n")
+        let compileReq = BatchRequest(
+            snapshot: source,
+            originalPath: nil,
+            toolchain: try profile(),
+            tests: [],
+            mode: .compileOnly,
+            artifactPath: artifactURL.path
+        )
+        let compileResult = try await coordinator.run(compileReq)
+        #expect(compileResult.buildOutcome == "Succeeded")
+        #expect(compileResult.build != nil)
+        #expect(compileResult.tests.isEmpty)
+        #expect(FileManager.default.isExecutableFile(atPath: artifactURL.path))
+
+        let runReq = BatchRequest(
+            snapshot: source,
+            originalPath: nil,
+            toolchain: try profile(),
+            tests: [TestCaseInput(input: "6 7\n", expected: "42\n")],
+            mode: .runOnly,
+            artifactPath: artifactURL.path
+        )
+        let runResult = try await coordinator.run(runReq)
+        #expect(runResult.buildOutcome == "NotRequired")
+        #expect(runResult.build == nil)
+        #expect(runResult.tests.count == 1)
+        #expect(runResult.tests.first?.verdict == "AC")
+        await coordinator.shutdown()
+    }
 }

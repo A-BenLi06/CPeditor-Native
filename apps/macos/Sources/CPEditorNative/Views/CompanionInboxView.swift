@@ -57,6 +57,7 @@ struct CompanionInboxView: View {
                     Label(L10n.string("companion_import_json"), systemImage: "square.and.arrow.down")
                 }
                 .controlSize(.small)
+                .buttonBorderShape(.roundedRectangle(radius: 5))
                 .disabled(controller.isOperating || controller.paths == nil)
 
                 Button {
@@ -65,12 +66,14 @@ struct CompanionInboxView: View {
                     Label(L10n.string("companion_refresh"), systemImage: "arrow.clockwise")
                 }
                 .controlSize(.small)
+                .buttonBorderShape(.roundedRectangle(radius: 5))
                 .disabled(controller.isOperating || controller.paths == nil)
 
                 Button(L10n.string("done")) {
                     dismiss()
                 }
                 .controlSize(.small)
+                .buttonBorderShape(.roundedRectangle(radius: 5))
                 .keyboardShortcut(.cancelAction)
             }
             .padding(.horizontal, 16)
@@ -99,6 +102,7 @@ struct CompanionInboxView: View {
                                 }
                                 .buttonStyle(.borderedProminent)
                                 .controlSize(.small)
+                                .buttonBorderShape(.roundedRectangle(radius: 5))
                                 .disabled(controller.isOperating || controller.paths == nil)
                             }
                         }
@@ -129,6 +133,7 @@ struct CompanionInboxView: View {
                             Task { await controller.loadMore() }
                         }
                         .controlSize(.small)
+                        .buttonBorderShape(.roundedRectangle(radius: 5))
                         .disabled(controller.isOperating)
                         .padding(8)
                     }
@@ -285,6 +290,8 @@ private struct CompanionDetailPane: View {
                             Label(L10n.string("companion_apply"), systemImage: "square.and.arrow.down.on.square")
                         }
                         .buttonStyle(.borderedProminent)
+                        .controlSize(.regular)
+                        .buttonBorderShape(.roundedRectangle(radius: 6))
                         .disabled(controller.isOperating || controller.paths == nil)
                     } else {
                         Button {
@@ -293,6 +300,8 @@ private struct CompanionDetailPane: View {
                             Label(L10n.string("companion_apply"), systemImage: "checkmark.circle")
                         }
                         .buttonStyle(.bordered)
+                        .controlSize(.regular)
+                        .buttonBorderShape(.roundedRectangle(radius: 6))
                         .disabled(controller.isOperating || controller.paths == nil)
                         .help(L10n.string("companion_verify_receipt"))
                     }

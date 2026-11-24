@@ -62,11 +62,13 @@ sequenceDiagram
   "tests": [
     { "id": "sample-1", "input": "", "expected": "", "enabled": true }
   ],
-  "comparison": "trailing"
+  "comparison": "trailing",
+  "mode": "compile_and_run",
+  "artifact_path": null
 }
 ```
 
-`comparison` 支持 `strict`、`trailing` 和 `byte`；前两者采用已实现的 CP Editor 换行／行尾空白规则。`max_retained_output_bytes` 可降低本次预算，不能突破引擎限额。请求最多 4096 个测试，文档 ID 最多 4096 字节，测试 ID 最多 1024 字节，JSON 嵌套最多 64 层。重复字段／测试 ID、非整数版本或 revision、无效 UTF-8 和 NUL 路径被拒绝。
+`comparison` 支持 `strict`、`trailing` 和 `byte`；前两者采用已实现的 CP Editor 换行／行尾空白规则。可选 `mode` 支持 `compile_and_run`（默认）、`compile_only` 与 `run_only`；可选 `artifact_path` 为绝对路径，用于在编译阶段导出可执行产物或供 `run_only` 直接复用而跳过重新编译。`max_retained_output_bytes` 可降低本次预算，不能突破引擎限额。请求最多 4096 个测试，文档 ID 最多 4096 字节，测试 ID 最多 1024 字节，JSON 嵌套最多 64 层。重复字段／测试 ID、非整数版本或 revision、无效 UTF-8 和 NUL 路径被拒绝。
 
 工具链文档最多 1 MiB，严格拒绝重复／未知字段和数字截断。可选 `build_limits`、`run_limits`、`inherit_environment`、`environment`、`variables` 见 `resources/profiles`。`${source}`、`${artifact}`、`${source_dir}`、`${job_dir}` 及显式变量逐参数展开，执行器直接接收 executable 和 argv，不隐式拼接 shell。
 

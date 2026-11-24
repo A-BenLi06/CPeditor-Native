@@ -58,6 +58,7 @@ public struct ToolchainProfile: Codable, Sendable, Identifiable, Equatable {
         case id
         case languageID = "language_id"
         case schemaVersion = "schema_version"
+        case artifactName = "artifact_name"
         case build
         case run
         case executable
@@ -68,6 +69,7 @@ public struct ToolchainProfile: Codable, Sendable, Identifiable, Equatable {
     }
     public var id: RawIdentifier { RawIdentifier(payload[Field.id.rawValue]?.string ?? "") }
     public var languageID: String { payload[Field.languageID.rawValue]?.string ?? "" }
+    public var artifactName: String? { payload[Field.artifactName.rawValue]?.string }
     public var buildExecutable: String? { payload[Field.build.rawValue]?[Field.executable.rawValue]?.string }
     public var buildArguments: [String] {
         payload[Field.build.rawValue]?[Field.arguments.rawValue]?.array?.compactMap(\.string) ?? []
@@ -87,15 +89,6 @@ public struct ToolchainProfile: Codable, Sendable, Identifiable, Equatable {
         case "java": "Java"
         default: languageID.uppercased()
         }
-        let standardSuffix: String = {
-            for arg in buildArguments where arg.hasPrefix("-std=") {
-                let raw = String(arg.dropFirst(5)).lowercased()
-                if raw.hasPrefix("c++") { return String(raw.dropFirst(3)).uppercased() }
-                if raw.hasPrefix("gnu++") { return String(raw.dropFirst(5)).uppercased() + " (GNU)" }
-                return " " + raw.uppercased()
-            }
-            return ""
-        }()
         let compilerName: String? = buildExecutable.map { path in
             let name = URL(fileURLWithPath: path).lastPathComponent.lowercased()
             if name.contains("clang") { return "Clang" }
@@ -103,13 +96,25 @@ public struct ToolchainProfile: Codable, Sendable, Identifiable, Equatable {
             if name == "cl" || name == "cl.exe" { return "MSVC" }
             return URL(fileURLWithPath: path).lastPathComponent
         }
+        let standardSuffix: String = {
+            for arg in buildArguments where arg.hasPrefix("-std=") {
+                let raw = String(arg.dropFirst(5)).lowercased()
+                if raw.hasPrefix("c++") { return String(raw.dropFirst(3)).uppercased() }
+                if raw.hasPrefix("gnu++") {
+                    let version = String(raw.dropFirst(5)).uppercased()
+                    return compilerName == "GCC" ? version : version + " (GNU)"
+                }
+                return " " + raw.uppercased()
+            }
+            return ""
+        }()
         let coreTitle: String
         if let compilerName, !compilerName.isEmpty {
             coreTitle = "\(baseLanguage)\(standardSuffix) (\(compilerName))"
         } else {
             coreTitle = "\(baseLanguage)\(standardSuffix)"
         }
-        let builtinIDs = ["macos-clang-cpp17", "macos-clang-cpp20"]
+        let builtinIDs = ["macos-clang-cpp17", "macos-clang-cpp20", "macos-gcc-cpp17", "macos-gcc-cpp20"]
         if builtinIDs.contains(id.rawValue) { return coreTitle }
         return "\(coreTitle) · \(id.rawValue)"
     }
@@ -198,6 +203,11 @@ public struct TestCaseInput: Codable, Sendable, Equatable, Identifiable {
 }
 
 public enum ComparisonPolicy: String, Codable, CaseIterable, Sendable { case trailing, strict, byte }
+public enum BatchMode: String, Codable, Sendable {
+    case compileAndRun = "compile_and_run"
+    case compileOnly = "compile_only"
+    case runOnly = "run_only"
+}
 public struct BatchRequest: Encodable, Sendable {
     public struct Source: Encodable, Sendable {
         let documentID: RawIdentifier; let revision: UInt64; let text: String; let originalPath: String?
@@ -209,13 +219,21 @@ public struct BatchRequest: Encodable, Sendable {
     let tests: [TestCaseInput]
     let comparison: ComparisonPolicy
     let externalChecker: CheckerConfiguration?
-    enum CodingKeys: String, CodingKey { case schemaVersion = "schema_version", source, toolchain, tests, comparison, externalChecker = "external_checker" }
+    let mode: BatchMode
+    let artifactPath: String?
+    enum CodingKeys: String, CodingKey {
+        case schemaVersion = "schema_version", source, toolchain, tests, comparison
+        case externalChecker = "external_checker", mode, artifactPath = "artifact_path"
+    }
     public init(snapshot: SourceSnapshot, originalPath: String?, toolchain: ToolchainProfile,
-                tests: [TestCaseInput], comparison: ComparisonPolicy = .trailing, externalChecker: CheckerConfiguration? = nil) {
+                tests: [TestCaseInput], comparison: ComparisonPolicy = .trailing,
+                externalChecker: CheckerConfiguration? = nil,
+                mode: BatchMode = .compileAndRun, artifactPath: String? = nil) {
         source = Source(documentID: snapshot.documentID, revision: snapshot.revision,
                         text: snapshot.text, originalPath: originalPath)
         self.toolchain = toolchain; self.tests = tests; self.comparison = comparison
         self.externalChecker = externalChecker
+        self.mode = mode; self.artifactPath = artifactPath
     }
 }
 

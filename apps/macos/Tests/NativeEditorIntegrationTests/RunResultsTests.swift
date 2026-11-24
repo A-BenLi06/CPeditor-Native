@@ -283,4 +283,108 @@ import NativeCoreBridge
         await recovery.shutdown(); await workspace.runner.shutdown()
         #expect(workspace.runner.retainedDocumentRunCount == 0)
     }
+
+    @Test func compileAndRunOnlySeparationTracksArtifactsEditsAndCleanup() async throws {
+        _ = NSApplication.shared
+        let session = try session(id: "split-compile-run", source: source, testcaseID: "sample-1")
+        let runner = RunController()
+        defer {
+            session.dispose()
+            Task { await runner.shutdown() }
+        }
+
+        // Run Without Compiling before building is rejected cleanly.
+        #expect(runner.supportsCompile(for: session))
+        #expect(runner.canCompile(session))
+        #expect(!runner.hasReusableArtifact(for: session))
+        #expect(!runner.canRunOnly(session))
+        runner.runOnly(session)
+        #expect(!runner.isRunning)
+        #expect(runner.errorMessage == L10n.string("compile_before_run"))
+        runner.errorMessage = nil
+
+        // Compile succeeds even with zero test cases and produces a reusable artifact.
+        session.testCases = []
+        runner.compile(session)
+        await runner.waitForCurrentRun()
+        let compileResult = try #require(runner.result(for: session.document.id))
+        #expect(compileResult.buildOutcome == "Succeeded")
+        #expect(compileResult.build != nil)
+        #expect(compileResult.tests.isEmpty)
+        #expect(VerdictDescriptor.summary(for: compileResult).label == L10n.string("verdict_compiled"))
+        #expect(runner.resultIsCurrent(for: session))
+        #expect(runner.hasReusableArtifact(for: session))
+        #expect(runner.isArtifactCurrent(for: session))
+        #expect(runner.canRunOnly(session))
+        let compiledArtifact = try #require(runner.artifactURL(for: session.document.id))
+        #expect(FileManager.default.isExecutableFile(atPath: compiledArtifact.path))
+
+        // Adding/editing test cases and calling Run Only executes without recompiling and stays current.
+        session.testCases = [TestCaseInput(id: "run-only-1", input: "", expected: "A result\n")]
+        #expect(runner.resultIsCurrent(for: session))
+        runner.runOnly(session)
+        await runner.waitForCurrentRun()
+        let runOnlyResult = try #require(runner.result(for: session.document.id))
+        #expect(runOnlyResult.buildOutcome == "NotRequired")
+        #expect(runOnlyResult.build == nil)
+        #expect(runOnlyResult.tests.first?.verdict == "AC")
+        #expect(VerdictDescriptor.summary(for: runOnlyResult).label == "AC")
+        #expect(runner.resultIsCurrent(for: session))
+
+        // Editing source keeps Run Only usable against the previous build, marks result outdated, and blocks Use Output.
+        let stView = try #require(session.stView)
+        let currentLength = (stView.text ?? "").utf16.count
+        stView.textSelection = NSRange(location: 0, length: currentLength)
+        stView.insertText("#include <iostream>\nint main(){std::cout << \"Updated\\n\";}\n",
+                          replacementRange: NSRange(location: 0, length: currentLength))
+        session.capture()
+        #expect(runner.hasReusableArtifact(for: session))
+        #expect(!runner.isArtifactCurrent(for: session))
+        #expect(runner.canRunOnly(session))
+
+        session.testCases[0].expected = WireBytes("different\n")
+        runner.runOnly(session)
+        await runner.waitForCurrentRun()
+        let staleRunResult = try #require(runner.result(for: session.document.id))
+        #expect(staleRunResult.buildOutcome == "NotRequired")
+        #expect(staleRunResult.tests.first?.verdict == "WA")
+        #expect(staleRunResult.tests.first?.process.completeTextOutput == WireBytes("A result\n"))
+        #expect(!runner.resultIsCurrent(for: session))
+        runner.useOutputAsExpected(WireBytes("A result\n"), for: session, testcaseID: session.testCases[0].id)
+        #expect(session.testCases[0].expected == WireBytes("different\n"))
+
+        // Compile & Run updates the reusable artifact to the new source; immediate Run Only uses it.
+        session.testCases[0].expected = WireBytes("Updated\n")
+        runner.runAll(session)
+        await runner.waitForCurrentRun()
+        let compileAndRunResult = try #require(runner.result(for: session.document.id))
+        #expect(compileAndRunResult.buildOutcome == "Succeeded")
+        #expect(compileAndRunResult.tests.first?.verdict == "AC")
+        #expect(runner.isArtifactCurrent(for: session))
+        let refreshedArtifact = try #require(runner.artifactURL(for: session.document.id))
+        #expect(refreshedArtifact != compiledArtifact)
+        #expect(!FileManager.default.fileExists(atPath: compiledArtifact.path))
+        #expect(FileManager.default.isExecutableFile(atPath: refreshedArtifact.path))
+
+        runner.runOnly(session)
+        await runner.waitForCurrentRun()
+        let postCompileRunOnly = try #require(runner.result(for: session.document.id))
+        #expect(postCompileRunOnly.buildOutcome == "NotRequired")
+        #expect(postCompileRunOnly.tests.first?.verdict == "AC")
+        #expect(runner.resultIsCurrent(for: session))
+
+        // forget() deletes the document's artifact; shutdown() cleans up remaining staging directories.
+        runner.forget(documentID: session.document.id)
+        #expect(runner.artifactURL(for: session.document.id) == nil)
+        #expect(!FileManager.default.fileExists(atPath: refreshedArtifact.path))
+
+        let second = try self.session(id: "split-cleanup", source: source, testcaseID: "sample-2")
+        defer { second.dispose() }
+        runner.compile(second)
+        await runner.waitForCurrentRun()
+        let secondArtifact = try #require(runner.artifactURL(for: second.document.id))
+        #expect(FileManager.default.fileExists(atPath: secondArtifact.path))
+        await runner.shutdown()
+        #expect(!FileManager.default.fileExists(atPath: secondArtifact.path))
+    }
 }

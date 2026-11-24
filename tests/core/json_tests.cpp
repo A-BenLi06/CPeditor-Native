@@ -20,8 +20,25 @@ int main(){
             {"toolchain",toolchain},{"tests",Json::array({{{"id","empty"},{"input",""},{"expected",""}},
                  {{"id","absent"},{"input",{{"encoding","base64"},{"data","YQBi"}}}}})}};
         auto request=cpn::parse_batch_request(doc.dump());
+        expect(request.mode==cpn::BatchMode::compile_and_run && !request.artifact_path,"default mode and artifact path");
         expect(request.source.revision==17 && request.tests[0].expected=="" && !request.tests[1].expected,"empty/absent preserved");
         expect(request.tests[1].input==std::string("a\0b",3),"binary input");
+        auto mode_doc=doc;
+        mode_doc["mode"]="compile_only";
+#if defined(_WIN32)
+        mode_doc["artifact_path"]=R"(C:\temp\solution.exe)";
+#else
+        mode_doc["artifact_path"]="/tmp/solution";
+#endif
+        auto compile_request=cpn::parse_batch_request(mode_doc.dump());
+        expect(compile_request.mode==cpn::BatchMode::compile_only && compile_request.artifact_path.has_value(),"compile_only with absolute artifact path");
+        mode_doc["mode"]="run_only";
+        expect(cpn::parse_batch_request(mode_doc.dump()).mode==cpn::BatchMode::run_only,"run_only mode");
+        mode_doc["mode"]="unknown";rejected([&]{(void)cpn::parse_batch_request(mode_doc.dump());},"unknown batch mode rejected");
+        mode_doc["mode"]=1;rejected([&]{(void)cpn::parse_batch_request(mode_doc.dump());},"non-string batch mode rejected");
+        mode_doc["mode"]="run_only";
+        mode_doc["artifact_path"]="relative/program";rejected([&]{(void)cpn::parse_batch_request(mode_doc.dump());},"relative artifact path rejected");
+        mode_doc["artifact_path"]="";rejected([&]{(void)cpn::parse_batch_request(mode_doc.dump());},"empty artifact path rejected");
         doc["source"]["revision"]=1.5;rejected([&]{(void)cpn::parse_batch_request(doc.dump());},"fractional revision");
         doc["source"]["revision"]=-1;rejected([&]{(void)cpn::parse_batch_request(doc.dump());},"negative revision");
         doc["source"]["revision"]=17;doc["tests"][1]["id"]="empty";

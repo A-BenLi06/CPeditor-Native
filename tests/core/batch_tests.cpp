@@ -131,6 +131,55 @@ void compiled(const std::filesystem::path& profiles,const std::filesystem::path&
     expect(result.tests.size()==2 && result.tests[0].verdict==cpn::Verdict::not_run,"CE cases terminal");
     request.toolchain.build->executable="cpn-nonexistent-compiler";
     expect(cpn::BatchService().run(request).build_outcome==cpn::BuildOutcome::failed,"compiler infrastructure failure");
+
+    const auto staging=files->create_workspace();
+    struct Cleanup{const std::shared_ptr<cpn::FileStore> store;std::filesystem::path dir;~Cleanup(){store->remove_workspace(dir);}} cleanup{files,staging};
+    const auto exported=staging/
+#if defined(_WIN32)
+        "exported-solution.exe";
+#else
+        "exported-solution";
+#endif
+    cpn::BatchRequest compile_only_req;
+    compile_only_req.source={"doc-split",1,"#include <iostream>\nint main(){long a,b;if(std::cin>>a>>b)std::cout<<a*b;}\n",{}};
+    compile_only_req.toolchain=cpn::load_toolchain_profile(profiles/"cpp-clang.json",*files);
+    compile_only_req.toolchain.build->executable=cpn::path_to_utf8(compiler);
+#if defined(_WIN32)
+    compile_only_req.toolchain.artifact_name="solution.exe";
+#endif
+#if defined(_MSC_VER)
+    compile_only_req.toolchain.build->arguments={"/std:c++20","/EHsc","/I${source_dir}","${source}","/Fe${artifact}"};
+#endif
+    compile_only_req.mode=cpn::BatchMode::compile_only;
+    compile_only_req.artifact_path=exported;
+    compile_only_req.tests={{"ignored","2 3\n",std::string("6"),true}};
+    const auto compile_only_res=cpn::BatchService().run(compile_only_req);
+    expect(compile_only_res.build_outcome==cpn::BuildOutcome::succeeded && compile_only_res.build && compile_only_res.tests.empty(),"compile_only compiles with empty tests");
+    expect(std::filesystem::is_regular_file(exported),"compile_only exports artifact");
+
+    cpn::BatchRequest run_only_req=compile_only_req;
+    run_only_req.mode=cpn::BatchMode::run_only;
+    run_only_req.toolchain.build->executable="cpn-nonexistent-compiler";
+    run_only_req.tests={{"mul-1","3 4\n",std::string("12"),true},{"mul-2","5 6\n",std::string("30"),true}};
+    const auto run_only_res=cpn::BatchService().run(run_only_req);
+    expect(run_only_res.build_outcome==cpn::BuildOutcome::not_required && !run_only_res.build,"run_only skips compiler");
+    expect(run_only_res.tests.size()==2 && run_only_res.tests[0].verdict==cpn::Verdict::accepted && run_only_res.tests[1].verdict==cpn::Verdict::accepted,"run_only uses compiled artifact");
+
+    cpn::BatchRequest missing_artifact_req=run_only_req;
+    missing_artifact_req.artifact_path=staging/"does-not-exist";
+    const auto missing_res=cpn::BatchService().run(missing_artifact_req);
+    expect(missing_res.build_outcome==cpn::BuildOutcome::not_required && !missing_res.error.empty(),"run_only missing artifact preserves NotRequired");
+    expect(missing_res.tests.size()==2 && missing_res.tests[0].verdict==cpn::Verdict::not_run,"run_only missing artifact marks tests NotRun");
+
+    cpn::BatchRequest compile_and_run_req=compile_only_req;
+    compile_and_run_req.mode=cpn::BatchMode::compile_and_run;
+    compile_and_run_req.source.revision=2;
+    compile_and_run_req.source.text="#include <iostream>\nint main(){long a,b;if(std::cin>>a>>b)std::cout<<a+b+1;}\n";
+    compile_and_run_req.tests={{"add1","3 4\n",std::string("8"),true}};
+    const auto car_res=cpn::BatchService().run(compile_and_run_req);
+    expect(car_res.build_outcome==cpn::BuildOutcome::succeeded && car_res.tests.size()==1 && car_res.tests[0].verdict==cpn::Verdict::accepted,"compile_and_run succeeds and refreshes exported artifact");
+    run_only_req.tests={{"add1-reused","3 4\n",std::string("8"),true}};
+    expect(cpn::BatchService().run(run_only_req).tests[0].verdict==cpn::Verdict::accepted,"follow-up run_only uses updated exported artifact");
 }
 }
 #if defined(_WIN32)

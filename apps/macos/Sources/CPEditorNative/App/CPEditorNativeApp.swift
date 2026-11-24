@@ -12,7 +12,7 @@ import AppKit
                 .preferredColorScheme(appearance.colorScheme)
         }
         .defaultSize(width: 1240, height: 780)
-        .windowToolbarStyle(.unifiedCompact)
+        .windowToolbarStyle(.unified)
         .commands { EditorCommands() }
 
         Settings {

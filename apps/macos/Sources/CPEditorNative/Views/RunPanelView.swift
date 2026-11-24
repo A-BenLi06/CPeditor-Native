@@ -55,10 +55,11 @@ struct RunPanelView: View {
                     NoticeBannerView(kind: .error, message: result.error)
                 }
                 if let build = result.build,
-                   result.buildOutcome != "Succeeded" || !build.stderr.data.isEmpty || !build.stdout.data.isEmpty {
+                   (result.buildOutcome != "Succeeded" && result.buildOutcome != "NotRequired")
+                    || !build.stderr.data.isEmpty || !build.stdout.data.isEmpty {
                     CompilerOutputBanner(
                         build: build,
-                        buildSucceeded: result.buildOutcome == "Succeeded",
+                        buildSucceeded: result.buildOutcome == "Succeeded" || result.buildOutcome == "NotRequired",
                         binaryPreviewBytes: runner.binaryPreviewBytes
                     )
                 }
@@ -136,9 +137,13 @@ struct RunPanelView: View {
                 let descriptor = VerdictDescriptor.summary(for: result)
                 let passed = result.tests.reduce(0) { $0 + ($1.verdict == "AC" ? 1 : 0) }
                 VerdictBadge(descriptor: descriptor, compact: true, dimmed: resultIsStale)
-                if result.buildOutcome == "Succeeded" && !result.tests.isEmpty {
+                if (result.buildOutcome == "Succeeded" || result.buildOutcome == "NotRequired") && !result.tests.isEmpty {
                     Text("\(passed)/\(result.tests.count)")
                         .font(.caption.monospacedDigit().weight(.medium))
+                        .foregroundStyle(.secondary)
+                } else if result.buildOutcome == "Succeeded", result.tests.isEmpty, let build = result.build {
+                    Text(String(format: L10n.string("elapsed_format"), build.elapsedMS))
+                        .font(.caption2.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
                 if resultIsStale {
@@ -159,49 +164,54 @@ struct RunPanelView: View {
 
             Spacer(minLength: 4)
 
-            Button {
-                session.testCases.append(TestCaseInput())
-            } label: {
-                Label(L10n.string("add_short"), systemImage: "plus")
-            }
-            .controlSize(.small)
-            .fixedSize()
-            .disabled(!canEditTests)
-            .help(L10n.string("add_test"))
+            HStack(spacing: 2) {
+                PanelIconButton(
+                    systemImage: "plus",
+                    helpKey: "add_test",
+                    size: 24,
+                    font: .system(size: 12, weight: .medium),
+                    isDisabled: !canEditTests
+                ) {
+                    session.testCases.append(TestCaseInput())
+                }
 
-            Menu {
-                Button(L10n.string("import_tests")) {
-                    runner.importTests(into: session)
+                Menu {
+                    Button(L10n.string("import_tests")) {
+                        runner.importTests(into: session)
+                    }
+                    Divider()
+                    Button(L10n.string("enable_all_tests")) {
+                        for index in session.testCases.indices { session.testCases[index].enabled = true }
+                    }
+                    .disabled(session.testCases.isEmpty)
+                    Button(L10n.string("disable_all_tests")) {
+                        for index in session.testCases.indices { session.testCases[index].enabled = false }
+                    }
+                    .disabled(session.testCases.isEmpty)
+                    Button(L10n.string("remove_disabled_tests")) {
+                        session.testCases.removeAll { !$0.enabled }
+                    }
+                    .disabled(!session.testCases.contains { !$0.enabled })
+                    Button(L10n.string("clear_all_tests"), role: .destructive) {
+                        session.testCases.removeAll()
+                    }
+                    .disabled(session.testCases.isEmpty)
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(canEditTests ? AnyShapeStyle(.secondary) : AnyShapeStyle(.quaternary))
+                        .panelIconHoverChrome(size: 24, cornerRadius: 5, enabled: canEditTests)
                 }
-                Divider()
-                Button(L10n.string("enable_all_tests")) {
-                    for index in session.testCases.indices { session.testCases[index].enabled = true }
-                }
-                .disabled(session.testCases.isEmpty)
-                Button(L10n.string("disable_all_tests")) {
-                    for index in session.testCases.indices { session.testCases[index].enabled = false }
-                }
-                .disabled(session.testCases.isEmpty)
-                Button(L10n.string("remove_disabled_tests")) {
-                    session.testCases.removeAll { !$0.enabled }
-                }
-                .disabled(!session.testCases.contains { !$0.enabled })
-                Button(L10n.string("clear_all_tests"), role: .destructive) {
-                    session.testCases.removeAll()
-                }
-                .disabled(session.testCases.isEmpty)
-            } label: {
-                Label(L10n.string("more_actions"), systemImage: "ellipsis.circle")
-                    .labelStyle(.iconOnly)
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .disabled(!canEditTests)
+                .help(L10n.string("more_actions"))
+                .accessibilityLabel(L10n.string("more_actions"))
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .disabled(!canEditTests)
-            .help(L10n.string("more_actions"))
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.vertical, 7)
     }
 
     private var checkerModeSummary: String {
@@ -217,72 +227,128 @@ struct RunPanelView: View {
     }
 
     private var checkerControlBar: some View {
-        HStack(spacing: 8) {
-            Menu {
-                Toggle(L10n.string("use_external_checker"), isOn: Binding(
-                    get: { runner.externalCheckerEnabled },
-                    set: { enabled in
-                        if enabled, runner.externalChecker == nil {
-                            runner.beginCheckerEdit(enableOnApply: true)
-                            if runner.configurationDraft != nil { openSettings() }
-                        } else { runner.externalCheckerEnabled = enabled }
-                    }
-                ))
-                .disabled(checkerControlsDisabled)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                checkerMenu
+                Spacer(minLength: 4)
+                executionButtons
+            }
 
-                Button(L10n.string("checker_settings")) {
-                    runner.beginCheckerEdit()
-                    if runner.configurationDraft != nil { openSettings() }
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    checkerMenu
+                    Spacer(minLength: 4)
                 }
-                .disabled(checkerControlsDisabled)
-
-                Divider()
-
-                Picker(L10n.string("comparison"), selection: $runner.comparison) {
-                    Text(L10n.string("comparison_trailing")).tag(ComparisonPolicy.trailing)
-                    Text(L10n.string("comparison_strict")).tag(ComparisonPolicy.strict)
-                    Text(L10n.string("comparison_byte")).tag(ComparisonPolicy.byte)
-                }
-                .pickerStyle(.inline)
-                .disabled(runner.externalCheckerEnabled || !canConfigureRunner)
-            } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: runner.externalCheckerEnabled ? "checkmark.shield" : "slider.horizontal.3")
-                        .font(.caption)
-                        .foregroundStyle(runner.externalCheckerEnabled ? Color.accentColor : Color.secondary)
-                    Text("\(L10n.string("checker_mode_prefix")) \(checkerModeSummary)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                HStack {
+                    Spacer(minLength: 0)
+                    executionButtons
                 }
             }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
-            .disabled(runner.isRunning)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+    }
 
-            Spacer(minLength: 4)
+    private var checkerMenu: some View {
+        Menu {
+            Toggle(L10n.string("use_external_checker"), isOn: Binding(
+                get: { runner.externalCheckerEnabled },
+                set: { enabled in
+                    if enabled, runner.externalChecker == nil {
+                        runner.beginCheckerEdit(enableOnApply: true)
+                        if runner.configurationDraft != nil { openSettings() }
+                    } else { runner.externalCheckerEnabled = enabled }
+                }
+            ))
+            .disabled(checkerControlsDisabled)
 
+            Button(L10n.string("checker_settings")) {
+                runner.beginCheckerEdit()
+                if runner.configurationDraft != nil { openSettings() }
+            }
+            .disabled(checkerControlsDisabled)
+
+            Divider()
+
+            Picker(L10n.string("comparison"), selection: $runner.comparison) {
+                Text(L10n.string("comparison_trailing")).tag(ComparisonPolicy.trailing)
+                Text(L10n.string("comparison_strict")).tag(ComparisonPolicy.strict)
+                Text(L10n.string("comparison_byte")).tag(ComparisonPolicy.byte)
+            }
+            .pickerStyle(.inline)
+            .disabled(runner.externalCheckerEnabled || !canConfigureRunner)
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: runner.externalCheckerEnabled ? "checkmark.shield" : "slider.horizontal.3")
+                    .font(.caption)
+                    .foregroundStyle(runner.externalCheckerEnabled ? Color.accentColor : Color.secondary)
+                Text("\(L10n.string("checker_mode_prefix")) \(checkerModeSummary)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .disabled(runner.isRunning)
+    }
+
+    private var executionButtons: some View {
+        HStack(spacing: 6) {
             if runner.isRunning {
                 Button {
                     runner.cancel()
                 } label: {
-                    Label(L10n.string("stop_short"), systemImage: "stop.fill")
+                    Label {
+                        Text(L10n.string("stop_short"))
+                    } icon: {
+                        Image(systemName: "stop.fill")
+                            .foregroundStyle(.red)
+                    }
                 }
-                .controlSize(.small)
+                .buttonStyle(.bordered)
                 .help(L10n.string("help_cancel_run"))
+            } else if runner.supportsCompile(for: session) {
+                Button {
+                    runner.compile(session)
+                } label: {
+                    Label(L10n.string("compile_short"), systemImage: "hammer")
+                }
+                .buttonStyle(.bordered)
+                .disabled(!runner.canCompile(session))
+                .help(L10n.string("help_compile"))
+
+                Button {
+                    runner.runOnly(session)
+                } label: {
+                    Label(L10n.string("run_short"), systemImage: "play.rectangle")
+                }
+                .buttonStyle(.bordered)
+                .disabled(!runner.canRunOnly(session))
+                .help(runner.runOnlyHelpText(for: session))
+
+                Button {
+                    runner.runAll(session)
+                } label: {
+                    Label(L10n.string("compile_and_run_short"), systemImage: "play.fill")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!runner.canRun(session))
+                .help(L10n.string("help_compile_and_run"))
             } else {
                 Button {
                     runner.runAll(session)
                 } label: {
                     Label(L10n.string("run_short"), systemImage: "play.fill")
                 }
-                .controlSize(.small)
+                .buttonStyle(.borderedProminent)
                 .disabled(!runner.canRun(session))
-                .help(L10n.string("help_run_all"))
+                .help(L10n.string("help_run_interpreted"))
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .controlSize(.small)
+        .buttonBorderShape(.roundedRectangle(radius: 5))
+        .fixedSize()
     }
 
     private var emptyTestsPlaceholder: some View {
@@ -302,12 +368,12 @@ struct RunPanelView: View {
                 } label: {
                     Label(L10n.string("add_test"), systemImage: "plus")
                 }
-                .controlSize(.small)
                 Button(L10n.string("import_tests")) {
                     runner.importTests(into: session)
                 }
-                .controlSize(.small)
             }
+            .controlSize(.regular)
+            .buttonBorderShape(.roundedRectangle(radius: 6))
             .disabled(!canEditTests)
         }
         .padding(20)
@@ -438,46 +504,38 @@ private struct TestCaseSectionView: View {
 
                     Spacer(minLength: 4)
 
-                    if let output = replacementExpectedOutput {
-                        Button {
-                            useOutputAsExpected(output)
-                        } label: {
-                            Image(systemName: "arrow.uturn.up.square")
-                                .font(.caption)
-                                .foregroundStyle(Color.accentColor)
+                    HStack(spacing: 2) {
+                        if let output = replacementExpectedOutput {
+                            PanelIconButton(
+                                systemImage: "arrow.uturn.up.square",
+                                helpKey: "use_output_as_expected",
+                                tint: Color.accentColor
+                            ) {
+                                useOutputAsExpected(output)
+                            }
                         }
-                        .buttonStyle(.borderless)
-                        .help(L10n.string("use_output_as_expected"))
-                        .accessibilityLabel(L10n.string("use_output_as_expected"))
-                    }
 
-                    Button {
-                        isExpandedHeight.toggle()
-                    } label: {
-                        Image(systemName: isExpandedHeight ? "rectangle.compress.vertical" : "rectangle.expand.vertical")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.borderless)
-                    .help(L10n.string(isExpandedHeight ? "collapse_editor" : "expand_editor"))
+                        PanelIconButton(
+                            systemImage: isExpandedHeight ? "rectangle.compress.vertical" : "rectangle.expand.vertical",
+                            helpKey: isExpandedHeight ? "collapse_editor" : "expand_editor"
+                        ) {
+                            isExpandedHeight.toggle()
+                        }
 
-                    Button(action: duplicate) {
-                        Image(systemName: "plus.square.on.square")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.borderless)
-                    .disabled(!canEdit)
-                    .help(L10n.string("duplicate_test"))
+                        PanelIconButton(
+                            systemImage: "plus.square.on.square",
+                            helpKey: "duplicate_test",
+                            isDisabled: !canEdit,
+                            action: duplicate
+                        )
 
-                    Button(action: remove) {
-                        Image(systemName: "trash")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        PanelIconButton(
+                            systemImage: "trash",
+                            helpKey: "remove_test",
+                            isDisabled: !canEdit,
+                            action: remove
+                        )
                     }
-                    .buttonStyle(.borderless)
-                    .disabled(!canEdit)
-                    .help(L10n.string("remove_test"))
                 }
 
                 ViewThatFits(in: .horizontal) {
@@ -576,19 +634,21 @@ private struct TestCaseSectionView: View {
                 title: L10n.string("test_expected"),
                 byteCount: test.expected.map { UInt64($0.data.count) }
             ) {
-                Toggle("", isOn: Binding(
-                    get: { test.expected != nil },
-                    set: { test.expected = $0 ? WireBytes("") : nil }
-                ))
-                .toggleStyle(.checkbox)
-                .labelsHidden()
-                .controlSize(.mini)
-                .disabled(!canEdit)
-                .help(L10n.string("check_expected"))
-                .accessibilityLabel(L10n.string("check_expected"))
+                HStack(spacing: 2) {
+                    Toggle("", isOn: Binding(
+                        get: { test.expected != nil },
+                        set: { test.expected = $0 ? WireBytes("") : nil }
+                    ))
+                    .toggleStyle(.checkbox)
+                    .labelsHidden()
+                    .controlSize(.mini)
+                    .disabled(!canEdit)
+                    .help(L10n.string("check_expected"))
+                    .accessibilityLabel(L10n.string("check_expected"))
 
-                if let expected = test.expected {
-                    CopyTextButton(text: expected.text)
+                    if let expected = test.expected {
+                        CopyTextButton(text: expected.text)
+                    }
                 }
             }
 

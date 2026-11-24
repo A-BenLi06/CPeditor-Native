@@ -112,9 +112,16 @@ struct EditorCommands: Commands {
         }
 
         CommandMenu(L10n.string("run_menu")) {
+            let canOperateRunner = workspace != nil && workspace?.isLoading == false && workspace?.isClosing == false
+            Button(L10n.string("compile_short")) { workspace?.compileActiveDocument() }
+                .keyboardShortcut("b")
+                .disabled(!canOperateRunner || workspace?.runner.canCompile(workspace?.activeSession) != true)
+            Button(L10n.string("run_without_compiling")) { workspace?.runOnlyActiveDocument() }
+                .keyboardShortcut("r", modifiers: [.command, .control])
+                .disabled(!canOperateRunner || workspace?.runner.canRunOnly(workspace?.activeSession) != true)
             Button(L10n.string("compile_and_run")) { workspace?.runActiveDocument() }
                 .keyboardShortcut("r")
-                .disabled(workspace == nil || workspace?.isLoading == true || workspace?.isClosing == true || workspace?.runner.canRun(workspace?.activeSession) != true)
+                .disabled(!canOperateRunner || workspace?.runner.canRun(workspace?.activeSession) != true)
             Button(L10n.string("stop_short")) { workspace?.runner.cancel() }
                 .keyboardShortcut(".", modifiers: [.command])
                 .disabled(workspace?.runner.isRunning != true)

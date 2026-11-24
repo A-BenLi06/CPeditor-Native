@@ -181,6 +181,12 @@ import NativeCoreBridge
         let cpp20 = try #require(runner.profiles.first { $0.id == RawIdentifier("macos-clang-cpp20") })
         #expect(cpp17.displayName == "C++17 (Clang)")
         #expect(cpp20.displayName == "C++20 (Clang)")
+        if let gcc17 = runner.profiles.first(where: { $0.id == RawIdentifier("macos-gcc-cpp17") }) {
+            #expect(gcc17.displayName == "C++17 (GCC)")
+        }
+        if let gcc20 = runner.profiles.first(where: { $0.id == RawIdentifier("macos-gcc-cpp20") }) {
+            #expect(gcc20.displayName == "C++20 (GCC)")
+        }
 
         let rawWithExtra = """
         {"schema_version":1,"id":"custom-cpp","language_id":"cpp","source_filename":"main.cpp","artifact_name":"prog","build":{"executable":"/usr/bin/clang++","arguments":["-std=c++20","${source}","-o","${artifact}"]},"run":{"executable":"${artifact}","arguments":[]},"build_limits":{"wall_timeout_ms":30000},"run_limits":{"wall_timeout_ms":2000},"variables":[{"name":"custom_var","value":"42"}]}
@@ -217,20 +223,26 @@ import NativeCoreBridge
     }
 
     @Test func verdictSummaryPrioritizesBuildFailuresAndSevereVerdicts() throws {
-        func makeResult(buildOutcome: String = "Succeeded", verdicts: [String]) throws -> BatchResult {
+        func makeResult(buildOutcome: String = "Succeeded", includeBuild: Bool = false, verdicts: [String]) throws -> BatchResult {
             let testsJSON = verdicts.enumerated().map { index, verdict in
                 """
                 {"testcase_id":"t-\(index)","verdict":"\(verdict)","detail":"","process":{"termination":"Exited","elapsed_ms":12,"stdout":{"encoding":"base64","data":""},"stderr":{"encoding":"base64","data":""},"detail":"","exit_code":0,"stdout_truncated":false,"stderr_truncated":false,"native_error":0,"stdout_total_bytes":0,"stderr_total_bytes":0}}
                 """
             }.joined(separator: ",")
+            let buildField = includeBuild
+                ? ",\"build\":{\"termination\":\"Exited\",\"elapsed_ms\":48,\"stdout\":{\"encoding\":\"base64\",\"data\":\"\"},\"stderr\":{\"encoding\":\"base64\",\"data\":\"\"},\"detail\":\"\",\"exit_code\":0,\"stdout_truncated\":false,\"stderr_truncated\":false,\"native_error\":0,\"stdout_total_bytes\":0,\"stderr_total_bytes\":0}"
+                : ""
             let payload = """
-            {"schema_version":1,"document_id":"doc","revision":1,"profile_id":"macos-clang-cpp17","source_digest":"00","build_outcome":"\(buildOutcome)","error":"","tests":[\(testsJSON)]}
+            {"schema_version":1,"document_id":"doc","revision":1,"profile_id":"macos-clang-cpp17","source_digest":"00","build_outcome":"\(buildOutcome)","error":""\(buildField),"tests":[\(testsJSON)]}
             """
             return try JSONDecoder().decode(BatchResult.self, from: Data(payload.utf8))
         }
 
         #expect(VerdictDescriptor.summary(for: try makeResult(buildOutcome: "CompilationFailed", verdicts: [])).label == "CE")
         #expect(VerdictDescriptor.summary(for: try makeResult(buildOutcome: "Cancelled", verdicts: [])).label == "Cancelled")
+        #expect(VerdictDescriptor.summary(for: try makeResult(buildOutcome: "Succeeded", includeBuild: true, verdicts: [])).label == L10n.string("verdict_compiled"))
+        #expect(VerdictDescriptor.summary(for: try makeResult(buildOutcome: "NotRequired", verdicts: ["AC", "AC"])).label == "AC")
+        #expect(VerdictDescriptor.summary(for: try makeResult(buildOutcome: "NotRequired", verdicts: ["AC", "WA"])).label == "WA")
         #expect(VerdictDescriptor.summary(for: try makeResult(verdicts: ["AC", "AC"])).label == "AC")
         #expect(VerdictDescriptor.summary(for: try makeResult(verdicts: ["AC", "WA"])).label == "WA")
         #expect(VerdictDescriptor.summary(for: try makeResult(verdicts: ["WA", "TLE"])).label == "TLE")
@@ -382,6 +394,50 @@ import NativeCoreBridge
         workspace.runner.runAll(stderrDoc)
         await workspace.runner.waitForCurrentRun()
         try snapshot(WorkspaceView(workspace: workspace), size: NSSize(width: 1240, height: 780), appearanceName: .aqua, to: "10-cev-unchecked-stderr-light.png")
+
+        func windowSnapshot(
+            _ rootView: WorkspaceView,
+            size: NSSize,
+            appearanceName: NSAppearance.Name,
+            to filename: String
+        ) throws {
+            let controller = NSHostingController(rootView: rootView)
+            let window = NSWindow(contentViewController: controller)
+            window.setContentSize(size)
+            window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+            window.toolbarStyle = .unified
+            window.appearance = NSAppearance(named: appearanceName)
+            window.orderBack(nil)
+            defer {
+                window.orderOut(nil)
+                window.contentViewController = nil
+            }
+            window.layoutIfNeeded()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.15))
+            window.layoutIfNeeded()
+            guard let frameView = window.contentView?.superview else {
+                throw CocoaError(.coderInvalidValue)
+            }
+            frameView.layoutSubtreeIfNeeded()
+            guard let rep = frameView.bitmapImageRepForCachingDisplay(in: frameView.bounds) else {
+                throw CocoaError(.coderInvalidValue)
+            }
+            frameView.cacheDisplay(in: frameView.bounds, to: rep)
+            guard let png = rep.representation(using: .png, properties: [:]) else {
+                throw CocoaError(.coderInvalidValue)
+            }
+            try png.write(to: auditDir.appendingPathComponent(filename))
+        }
+
+        workspace.selection = sumSession.document.id
+        workspace.runner.compile(sumSession)
+        await workspace.runner.waitForCurrentRun()
+        try snapshot(WorkspaceView(workspace: workspace), size: NSSize(width: 1240, height: 780), appearanceName: .aqua, to: "13-cev-compile-only-light.png")
+
+        workspace.runner.runAll(sumSession)
+        await workspace.runner.waitForCurrentRun()
+        try windowSnapshot(WorkspaceView(workspace: workspace), size: NSSize(width: 1240, height: 780), appearanceName: .aqua, to: "11-window-toolbar-light.png")
+        try windowSnapshot(WorkspaceView(workspace: workspace), size: NSSize(width: 1240, height: 780), appearanceName: .darkAqua, to: "12-window-toolbar-dark.png")
 
         await dispose(workspace)
     }

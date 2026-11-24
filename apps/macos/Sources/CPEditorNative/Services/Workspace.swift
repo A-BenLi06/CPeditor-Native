@@ -260,6 +260,18 @@ struct WorkspaceConfiguration: Decodable {
         return languageDisplayName(for: session)
     }
 
+    func compileActiveDocument() {
+        guard let session = activeSession else { return }
+        if layoutMode == .editorOnly { layoutMode = .split }
+        runner.compile(session)
+    }
+
+    func runOnlyActiveDocument() {
+        guard let session = activeSession else { return }
+        if layoutMode == .editorOnly { layoutMode = .split }
+        runner.runOnly(session)
+    }
+
     func runActiveDocument() {
         guard let session = activeSession else { return }
         if layoutMode == .editorOnly { layoutMode = .split }

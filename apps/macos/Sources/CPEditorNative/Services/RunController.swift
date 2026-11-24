@@ -84,29 +84,46 @@ struct RunConfiguration: Decodable, Sendable {
         let tests: [TestCaseInput]
         let comparison: ComparisonPolicy
         let checker: CheckerConfiguration?
+        let mode: BatchMode
         var state: JobState
         var result: BatchResult?
         init(originalPath: String?, toolchain: ToolchainProfile, tests: [TestCaseInput],
-             comparison: ComparisonPolicy, checker: CheckerConfiguration?) {
+             comparison: ComparisonPolicy, checker: CheckerConfiguration?, mode: BatchMode) {
             self.originalPath = originalPath.map(RawIdentifier.init(_:))
             self.toolchain = toolchain
             self.tests = tests
             self.comparison = comparison
             self.checker = checker
+            self.mode = mode
             self.state = .queued
         }
     }
+    private struct CompiledArtifact {
+        let artifactURL: URL
+        let directoryURL: URL
+        let snapshot: SourceSnapshot
+        let originalPath: RawIdentifier?
+        let toolchain: ToolchainProfile
+    }
     private var documentRuns: [RawIdentifier: DocumentRun] = [:]
+    private var compiledArtifacts: [RawIdentifier: CompiledArtifact] = [:]
+    nonisolated private let artifactRootURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("cpn-artifacts-\(UUID().uuidString)", isDirectory: true)
     @ObservationIgnored private var configuration: RunConfiguration?
     @ObservationIgnored private var coordinator: CoreCoordinator?
     @ObservationIgnored private var task: Task<Void, Never>?
     @ObservationIgnored private var activeCancellation: CoreCoordinator.RunCancellation?
+
+    deinit {
+        try? FileManager.default.removeItem(at: artifactRootURL)
+    }
 
     var selectedProfile: ToolchainProfile? { profiles.first { $0.id == selectedProfileID } }
     var canConfigureChecker: Bool { !checkerPreferencesAreOpaque && checkerPreferenceStorageAvailable }
     var retainedDocumentRunCount: Int { documentRuns.count }
     func result(for documentID: RawIdentifier) -> BatchResult? { documentRuns[documentID]?.result }
     func state(for documentID: RawIdentifier) -> JobState? { documentRuns[documentID]?.state }
+    func artifactURL(for documentID: RawIdentifier) -> URL? { compiledArtifacts[documentID]?.artifactURL }
 
     private var effectiveChecker: CheckerConfiguration? { externalCheckerEnabled ? externalChecker : nil }
 
@@ -117,13 +134,58 @@ struct RunConfiguration: Decodable, Sendable {
         return selectedProfile
     }
 
+    func supportsCompile(for session: NativeEditorSession?) -> Bool {
+        guard let session else { return false }
+        return toolchain(for: session)?.buildExecutable != nil
+    }
+
+    func canCompile(_ session: NativeEditorSession?) -> Bool {
+        guard let session else { return false }
+        return !isRunning && !isClosed && supportsCompile(for: session) && toolchainNotice(for: session) == nil
+    }
+
+    func hasReusableArtifact(for session: NativeEditorSession?) -> Bool {
+        guard let session,
+              let profile = toolchain(for: session),
+              let artifact = compiledArtifacts[session.document.id] else { return false }
+        return artifact.toolchain == profile && FileManager.default.isReadableFile(atPath: artifact.artifactURL.path)
+    }
+
+    func isArtifactCurrent(for session: NativeEditorSession?) -> Bool {
+        guard let session,
+              let artifact = compiledArtifacts[session.document.id],
+              hasReusableArtifact(for: session) else { return false }
+        return artifact.snapshot.revision == session.document.revision
+            && artifact.snapshot.sourceDigest == session.document.sourceDigest
+            && artifact.originalPath == session.document.url.map({ RawIdentifier($0.path) })
+    }
+
+    func canRunOnly(_ session: NativeEditorSession?) -> Bool {
+        canRun(session) && (!supportsCompile(for: session) || hasReusableArtifact(for: session))
+    }
+
+    func runOnlyHelpText(for session: NativeEditorSession?) -> String {
+        if !hasReusableArtifact(for: session) {
+            return L10n.string("help_run_only_needs_compile")
+        }
+        if !isArtifactCurrent(for: session) {
+            return L10n.string("help_run_only_outdated")
+        }
+        return L10n.string("help_run_only")
+    }
+
     func resultIsCurrent(for session: NativeEditorSession) -> Bool {
         guard let run = documentRuns[session.document.id], let result = run.result,
               result.revision == session.document.revision, result.sourceDigest == session.document.sourceDigest,
-              !session.isComposing, session.captureFailure == nil, !externalCheckerEnabled || externalChecker != nil,
-              run.originalPath == session.document.url.map({ RawIdentifier($0.path) }) else { return false }
+              !session.isComposing, session.captureFailure == nil,
+              run.originalPath == session.document.url.map({ RawIdentifier($0.path) }),
+              run.toolchain == toolchain(for: session) else { return false }
+        if run.mode == .compileOnly {
+            return true
+        }
+        guard !externalCheckerEnabled || externalChecker != nil else { return false }
         // A background tab retains its own toolchain when another tab is selected.
-        return run.toolchain == toolchain(for: session) && run.tests == session.testCases && run.comparison == comparison &&
+        return run.tests == session.testCases && run.comparison == comparison &&
             run.checker.map { RawIdentifier($0.originalJSON) } == effectiveChecker.map { RawIdentifier($0.originalJSON) }
     }
 
@@ -190,47 +252,169 @@ struct RunConfiguration: Decodable, Sendable {
         } catch { errorMessage = L10n.describe(error) }
     }
 
+    func compile(_ session: NativeEditorSession) {
+        execute(session, mode: .compileOnly)
+    }
+
+    func runOnly(_ session: NativeEditorSession) {
+        execute(session, mode: .runOnly)
+    }
+
     func runAll(_ session: NativeEditorSession) {
+        execute(session, mode: .compileAndRun)
+    }
+
+    private func allocateArtifactStaging(documentID: RawIdentifier, profile: ToolchainProfile) throws -> (artifactURL: URL, directoryURL: URL) {
+        let attributes: [FileAttributeKey: Any] = [.posixPermissions: 0o700]
+        if !FileManager.default.fileExists(atPath: artifactRootURL.path) {
+            try FileManager.default.createDirectory(at: artifactRootURL, withIntermediateDirectories: true, attributes: attributes)
+        }
+        let directoryURL = artifactRootURL
+            .appendingPathComponent(documentID.rawValue, isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true, attributes: attributes)
+        let name = (profile.artifactName?.isEmpty == false ? profile.artifactName! : "program")
+        return (directoryURL.appendingPathComponent(name, isDirectory: false), directoryURL)
+    }
+
+    private func removeArtifact(for documentID: RawIdentifier) {
+        guard let existing = compiledArtifacts.removeValue(forKey: documentID) else { return }
+        try? FileManager.default.removeItem(at: existing.directoryURL)
+    }
+
+    private func execute(_ session: NativeEditorSession, mode: BatchMode) {
         guard !isRunning, !isClosed, let coordinator, let profile = toolchain(for: session) else { return }
         if let notice = toolchainNotice(for: session) { errorMessage = notice; return }
-        do {
-            guard try CompanionProvenance.ordinaryStdioAllowed(documentID: session.document.id, preferences: session.preservedPreferences) else {
-                errorMessage = L10n.string("companion_run_incompatible"); return
+
+        if mode == .compileOnly {
+            guard profile.buildExecutable != nil else {
+                errorMessage = L10n.string("toolchain_no_compile_step"); return
             }
-        } catch { errorMessage = L10n.string("companion_run_opaque"); return }
+        } else {
+            do {
+                guard try CompanionProvenance.ordinaryStdioAllowed(documentID: session.document.id, preferences: session.preservedPreferences) else {
+                    errorMessage = L10n.string("companion_run_incompatible"); return
+                }
+            } catch { errorMessage = L10n.string("companion_run_opaque"); return }
+        }
+
         session.capture()
         guard !session.isComposing else { errorMessage = L10n.string("finish_composition"); return }
         if let failure = session.captureFailure { errorMessage = L10n.describe(failure); return }
         guard profile.languageID.utf8.elementsEqual(session.document.languageID.utf8) else { errorMessage = L10n.string("toolchain_language_mismatch"); return }
-        guard session.testCases.contains(where: \.enabled) else { errorMessage = L10n.string("enable_testcase"); return }
-        guard !externalCheckerEnabled || externalChecker != nil else { errorMessage = L10n.string("checker_configuration_required"); return }
-        let snapshot = session.document.snapshot()
+
+        if mode != .compileOnly {
+            guard session.testCases.contains(where: \.enabled) else { errorMessage = L10n.string("enable_testcase"); return }
+            guard !externalCheckerEnabled || externalChecker != nil else { errorMessage = L10n.string("checker_configuration_required"); return }
+        }
+
+        let liveSnapshot = session.document.snapshot()
+        let liveOriginalPath = session.document.url?.path
+        let requestSnapshot: SourceSnapshot
+        let requestOriginalPath: String?
+        let requestTests: [TestCaseInput]
+        let stagingArtifact: (artifactURL: URL, directoryURL: URL)?
+        let requestArtifactPath: String?
+
+        switch mode {
+        case .compileOnly:
+            do {
+                let staging = try allocateArtifactStaging(documentID: liveSnapshot.documentID, profile: profile)
+                stagingArtifact = staging
+                requestArtifactPath = staging.artifactURL.path
+            } catch {
+                errorMessage = L10n.describe(error); return
+            }
+            requestSnapshot = liveSnapshot
+            requestOriginalPath = liveOriginalPath
+            requestTests = []
+        case .compileAndRun:
+            if profile.buildExecutable != nil {
+                do {
+                    let staging = try allocateArtifactStaging(documentID: liveSnapshot.documentID, profile: profile)
+                    stagingArtifact = staging
+                    requestArtifactPath = staging.artifactURL.path
+                } catch {
+                    errorMessage = L10n.describe(error); return
+                }
+            } else {
+                stagingArtifact = nil
+                requestArtifactPath = nil
+            }
+            requestSnapshot = liveSnapshot
+            requestOriginalPath = liveOriginalPath
+            requestTests = session.testCases
+        case .runOnly:
+            if profile.buildExecutable != nil {
+                guard hasReusableArtifact(for: session), let compiled = compiledArtifacts[session.document.id] else {
+                    errorMessage = L10n.string("compile_before_run"); return
+                }
+                requestSnapshot = compiled.snapshot
+                requestOriginalPath = compiled.originalPath?.rawValue
+                requestArtifactPath = compiled.artifactURL.path
+            } else {
+                requestSnapshot = liveSnapshot
+                requestOriginalPath = liveOriginalPath
+                requestArtifactPath = nil
+            }
+            stagingArtifact = nil
+            requestTests = session.testCases
+        }
+
         if persistence.canMutate && session.canMutatePersistence { session.toolchainProfileID = profile.id }
-        let run = DocumentRun(originalPath: session.document.url?.path, toolchain: profile,
-                              tests: session.testCases, comparison: comparison, checker: effectiveChecker)
-        let request = BatchRequest(snapshot: snapshot, originalPath: run.originalPath?.rawValue,
+        let run = DocumentRun(originalPath: requestOriginalPath, toolchain: profile,
+                              tests: requestTests, comparison: comparison,
+                              checker: mode == .compileOnly ? nil : effectiveChecker, mode: mode)
+        let request = BatchRequest(snapshot: requestSnapshot, originalPath: run.originalPath?.rawValue,
                                    toolchain: run.toolchain, tests: run.tests, comparison: run.comparison,
-                                   externalChecker: run.checker)
-        submitted = snapshot
+                                   externalChecker: run.checker, mode: mode, artifactPath: requestArtifactPath)
+        submitted = requestSnapshot
         result = nil
         state = .queued
         let cancellation = run.cancellation
         activeCancellation = cancellation
-        documentRuns[snapshot.documentID] = run
+        documentRuns[requestSnapshot.documentID] = run
         isRunning = true
         task = Task { @MainActor [weak self] in
             do {
                 let value = try await coordinator.run(request, cancellation: cancellation) { [weak self] event in
-                    await self?.receive(event, documentID: snapshot.documentID, cancellation: cancellation)
+                    await self?.receive(event, documentID: requestSnapshot.documentID, cancellation: cancellation)
                 }
-                guard value.documentID == snapshot.documentID, value.revision == snapshot.revision else { throw WireError.malformedTerminal }
-                if let self, let run = self.documentRuns[snapshot.documentID], run.cancellation === cancellation {
+                guard value.documentID == requestSnapshot.documentID, value.revision == requestSnapshot.revision else { throw WireError.malformedTerminal }
+                if let self, let run = self.documentRuns[requestSnapshot.documentID], run.cancellation === cancellation {
                     self.result = value
                     run.result = value
+                    if let staging = stagingArtifact {
+                        if value.buildOutcome == "Succeeded" && FileManager.default.fileExists(atPath: staging.artifactURL.path) {
+                            let previous = self.compiledArtifacts.updateValue(
+                                CompiledArtifact(
+                                    artifactURL: staging.artifactURL,
+                                    directoryURL: staging.directoryURL,
+                                    snapshot: requestSnapshot,
+                                    originalPath: run.originalPath,
+                                    toolchain: profile
+                                ),
+                                forKey: requestSnapshot.documentID
+                            )
+                            if let previous, previous.directoryURL != staging.directoryURL {
+                                try? FileManager.default.removeItem(at: previous.directoryURL)
+                            }
+                        } else {
+                            try? FileManager.default.removeItem(at: staging.directoryURL)
+                            if value.buildOutcome == "CompilationError" || value.buildOutcome == "Failed" {
+                                self.removeArtifact(for: requestSnapshot.documentID)
+                            }
+                        }
+                    }
+                } else if let staging = stagingArtifact {
+                    try? FileManager.default.removeItem(at: staging.directoryURL)
                 }
             } catch {
+                if let staging = stagingArtifact {
+                    try? FileManager.default.removeItem(at: staging.directoryURL)
+                }
                 self?.state = .failed
-                if let self, let run = self.documentRuns[snapshot.documentID], run.cancellation === cancellation {
+                if let self, let run = self.documentRuns[requestSnapshot.documentID], run.cancellation === cancellation {
                     run.state = .failed
                     if !self.isClosed { self.errorMessage = L10n.describe(error) }
                 }
@@ -262,6 +446,7 @@ struct RunConfiguration: Decodable, Sendable {
     func forget(documentID: RawIdentifier) {
         cancel(documentID: documentID)
         documentRuns.removeValue(forKey: documentID)
+        removeArtifact(for: documentID)
         if result?.documentID == documentID { result = nil }
     }
 
@@ -271,6 +456,8 @@ struct RunConfiguration: Decodable, Sendable {
         await coordinator?.shutdown()
         if let task { await task.value }
         documentRuns.removeAll()
+        compiledArtifacts.removeAll()
+        try? FileManager.default.removeItem(at: artifactRootURL)
         result = nil
         submitted = nil
         state = nil

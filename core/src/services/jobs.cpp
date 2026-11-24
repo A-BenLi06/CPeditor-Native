@@ -57,11 +57,13 @@ struct JobRegistry::Impl {
             emergency->revision = request.source.revision;
             emergency->source_digest = sha256(request.source.text);
             emergency->profile_id = request.toolchain.id;
-            emergency->build_outcome = BuildOutcome::failed;
+            emergency->build_outcome = request.mode == BatchMode::run_only ? BuildOutcome::not_required : BuildOutcome::failed;
             emergency->error = "Job worker failed before completing the batch";
-            for (const auto& test : request.tests) {
-                if (test.enabled) emergency->tests.push_back(
-                    TestResult{test.id, Verdict::infrastructure_error, {}, {}});
+            if (request.mode != BatchMode::compile_only) {
+                for (const auto& test : request.tests) {
+                    if (test.enabled) emergency->tests.push_back(
+                        TestResult{test.id, Verdict::infrastructure_error, {}, {}});
+                }
             }
         }
         const BatchRequest request;

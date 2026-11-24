@@ -55,10 +55,13 @@ struct VerdictDescriptor: Sendable {
         if result.buildOutcome == "Cancelled" {
             return .forVerdict("Cancelled")
         }
-        if result.buildOutcome != "Succeeded" {
+        if result.buildOutcome != "Succeeded" && result.buildOutcome != "NotRequired" {
             return .forVerdict("CE")
         }
-        guard !result.tests.isEmpty else {
+        if result.tests.isEmpty {
+            if result.buildOutcome == "Succeeded" && result.build != nil {
+                return Self(label: L10n.string("verdict_compiled"), symbol: "checkmark.circle.fill", tone: .passed)
+            }
             return .forVerdict("Unchecked")
         }
         if result.tests.allSatisfy({ $0.verdict == "AC" }) {
@@ -218,6 +221,56 @@ extension NoticeBannerView where Actions == EmptyView {
     }
 }
 
+struct PanelIconHoverChrome: ViewModifier {
+    let size: CGFloat
+    let cornerRadius: CGFloat
+    let isEnabled: Bool
+    @State private var isHovering = false
+
+    func body(content: Content) -> some View {
+        content
+            .frame(width: size, height: size)
+            .background {
+                if isHovering && isEnabled {
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .fill(Color.primary.opacity(0.08))
+                }
+            }
+            .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .onHover { isHovering = $0 }
+    }
+}
+
+extension View {
+    func panelIconHoverChrome(size: CGFloat = 24, cornerRadius: CGFloat = 5, enabled: Bool = true) -> some View {
+        modifier(PanelIconHoverChrome(size: size, cornerRadius: cornerRadius, isEnabled: enabled))
+    }
+}
+
+struct PanelIconButton: View {
+    let systemImage: String
+    let helpKey: String
+    var accessibilityKey: String? = nil
+    var tint: Color? = nil
+    var size: CGFloat = 22
+    var font: Font = .system(size: 11.5, weight: .medium)
+    var isDisabled = false
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(font)
+                .foregroundStyle(isDisabled ? AnyShapeStyle(.quaternary) : AnyShapeStyle(tint ?? .secondary))
+                .panelIconHoverChrome(size: size, cornerRadius: 5, enabled: !isDisabled)
+        }
+        .buttonStyle(.plain)
+        .disabled(isDisabled)
+        .help(L10n.string(helpKey))
+        .accessibilityLabel(L10n.string(accessibilityKey ?? helpKey))
+    }
+}
+
 struct CopyTextButton: View {
     let text: String
 
@@ -228,9 +281,10 @@ struct CopyTextButton: View {
         } label: {
             Image(systemName: "doc.on.doc")
                 .font(.caption2)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(text.isEmpty ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.secondary))
+                .panelIconHoverChrome(size: 16, cornerRadius: 4, enabled: !text.isEmpty)
         }
-        .buttonStyle(.borderless)
+        .buttonStyle(.plain)
         .disabled(text.isEmpty)
         .help(L10n.string("copy_clipboard"))
     }
@@ -276,7 +330,7 @@ struct PanelCellHeaderBar<Trailing: View>: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 5) {
+            HStack(spacing: 4) {
                 if let title {
                     Text(title)
                         .font(.caption.weight(.medium))
@@ -300,10 +354,10 @@ struct PanelCellHeaderBar<Trailing: View>: View {
                         .truncationMode(.tail)
                         .layoutPriority(-1)
                 }
-                Spacer(minLength: 4)
+                Spacer(minLength: 3)
                 trailing
             }
-            .padding(.horizontal, 8)
+            .padding(.horizontal, 7)
             .frame(height: PanelSurfaceStyle.cellHeaderHeight)
             .background(tint ?? PanelSurfaceStyle.cellHeaderBackground)
 

@@ -3,8 +3,10 @@
 #include "cpn/digest.hpp"
 #include "cpn/text.hpp"
 #include <algorithm>
+#include <atomic>
 #include <limits>
 #include <map>
+#include <random>
 #include <set>
 #include <stdexcept>
 namespace cpn {
@@ -80,6 +82,34 @@ void remaining(BatchResult& result,const BatchRequest& request,std::size_t start
     for(std::size_t i=start;i<request.tests.size();++i)
         if(request.tests[i].enabled) result.tests.push_back(TestResult{request.tests[i].id,verdict,{},result.error});
 }
+void validate_artifact_path(const std::optional<std::filesystem::path>& artifact_path){
+    if(!artifact_path) return;
+    const auto utf8=path_to_utf8(*artifact_path);
+    if(utf8.empty() || utf8.size()>32768 || utf8.find('\0')!=std::string::npos || decode_utf8(utf8).error_offset)
+        throw std::runtime_error("Invalid artifact path");
+    if(!artifact_path->is_absolute()) throw std::runtime_error("Artifact path must be absolute");
+}
+std::string unique_artifact_suffix(){
+    static std::atomic<std::uint64_t> counter{0};
+    std::random_device random;
+    return std::to_string(random())+"-"+std::to_string(random())+"-"+std::to_string(++counter);
+}
+void export_artifact(const std::filesystem::path& source_artifact,const std::filesystem::path& destination){
+    if(!std::filesystem::is_regular_file(source_artifact))
+        throw std::runtime_error("Compiled artifact was not produced");
+    const auto parent=destination.parent_path();
+    if(parent.empty() || !std::filesystem::is_directory(parent))
+        throw std::runtime_error("Artifact destination directory does not exist");
+    const auto temporary=parent/path_from_utf8(".cpn-artifact-"+unique_artifact_suffix()+".tmp");
+    try{
+        std::filesystem::copy_file(source_artifact,temporary,std::filesystem::copy_options::none);
+        std::filesystem::rename(temporary,destination);
+    }catch(...){
+        std::error_code ignored;
+        std::filesystem::remove(temporary,ignored);
+        throw;
+    }
+}
 }
 BatchService::BatchService(std::shared_ptr<FileStore> files,ProcessExecutor process):files_(std::move(files)),process_(std::move(process)){
     if(!files_ || !process_) throw std::invalid_argument("Missing service port");
@@ -92,13 +122,19 @@ BatchResult BatchService::run(const BatchRequest& request,std::stop_token stop,B
     try {
         validate_toolchain_profile(request.toolchain);
         if (request.external_checker) validate_external_checker(*request.external_checker);
+        validate_artifact_path(request.artifact_path);
         if(!request.max_retained_output_bytes) throw std::runtime_error("Invalid retained output budget");
         if(request.source.document_id.empty() || decode_utf8(request.source.text).error_offset)
             throw std::runtime_error("Invalid source snapshot");
         std::set<std::string> ids;
         for(const auto& test:request.tests)
             if(test.id.empty() || !ids.insert(test.id).second) throw std::runtime_error("Missing or duplicate testcase ID");
-        if(stop.stop_requested()){result.build_outcome=BuildOutcome::cancelled;remaining(result,request,0,Verdict::cancelled);return result;}
+        if(stop.stop_requested()){
+            result.build_outcome=request.mode==BatchMode::run_only && !request.tests.empty()
+                ?BuildOutcome::not_required:BuildOutcome::cancelled;
+            if(request.mode!=BatchMode::compile_only) remaining(result,request,0,Verdict::cancelled);
+            return result;
+        }
         Workspace workspace(files_);
         workspace.path=std::filesystem::absolute(workspace.path);
         const auto source=workspace.path/path_from_utf8(request.toolchain.source_filename);
@@ -113,7 +149,14 @@ BatchResult BatchService::run(const BatchRequest& request,std::stop_token stop,B
         for(const auto& [key,value]:request.toolchain.variables)
             if(!values.emplace(key,value).second) throw std::runtime_error("Duplicate or reserved profile variable");
         std::size_t retained=0;
-        if(request.toolchain.build) {
+        if(request.mode==BatchMode::run_only){
+            running_phase=true;
+            if(request.toolchain.build){
+                if(!request.artifact_path || !std::filesystem::is_regular_file(*request.artifact_path))
+                    throw std::runtime_error("Compiled artifact is missing; compile before running");
+                values["artifact"]=path_to_utf8(*request.artifact_path);
+            }
+        }else if(request.toolchain.build){
             if(observer) observer(BatchPhase::building,{});
             auto build_limits=request.toolchain.build_limits;
             build_limits.combined_bytes=std::min<std::uint64_t>(build_limits.combined_bytes,request.max_retained_output_bytes);
@@ -127,9 +170,22 @@ BatchResult BatchService::run(const BatchRequest& request,std::stop_token stop,B
             else result.build_outcome=BuildOutcome::succeeded;
             if(result.build_outcome!=BuildOutcome::succeeded) {
                 result.error=result.build->detail;
-                remaining(result,request,0,result.build_outcome==BuildOutcome::cancelled?Verdict::cancelled:Verdict::not_run);
+                if(request.mode!=BatchMode::compile_only)
+                    remaining(result,request,0,result.build_outcome==BuildOutcome::cancelled?Verdict::cancelled:Verdict::not_run);
                 return result;
             }
+            if(request.artifact_path){
+                if(!std::filesystem::is_regular_file(artifact)){
+                    result.build_outcome=BuildOutcome::failed;
+                    result.error="Compiled artifact was not produced";
+                    if(request.mode!=BatchMode::compile_only) remaining(result,request,0,Verdict::not_run);
+                    return result;
+                }
+                export_artifact(artifact,*request.artifact_path);
+            }
+            if(request.mode==BatchMode::compile_only) return result;
+        }else if(request.mode==BatchMode::compile_only){
+            return result;
         }
         running_phase=true;
         for(std::size_t i=0;i<request.tests.size();++i) {
@@ -183,9 +239,11 @@ BatchResult BatchService::run(const BatchRequest& request,std::stop_token stop,B
         }
         // Failure after partial execution keeps all produced stable-ID results.
         std::set<std::string> finished;for(const auto& test:result.tests) finished.insert(test.testcase_id);
-        for(const auto& test:request.tests) if(test.enabled && !finished.contains(test.id))
-            result.tests.push_back(TestResult{test.id,active_test && request.tests[*active_test].id==test.id?
-                Verdict::infrastructure_error:Verdict::not_run,{},result.error});
+        if(request.mode!=BatchMode::compile_only){
+            for(const auto& test:request.tests) if(test.enabled && !finished.contains(test.id))
+                result.tests.push_back(TestResult{test.id,active_test && request.tests[*active_test].id==test.id?
+                    Verdict::infrastructure_error:Verdict::not_run,{},result.error});
+        }
     }
     return result;
 }

@@ -48,6 +48,7 @@ struct WorkspaceView: View {
                         Button(L10n.string("retry_recovery")) { Task { await recovery.retry() } }
                     }
                     .controlSize(.small)
+                    .buttonBorderShape(.roundedRectangle(radius: 5))
                     .disabled(workspace.isBusy)
                 }
             }
@@ -65,26 +66,40 @@ struct WorkspaceView: View {
         .navigationSubtitle(workspace.activeSession.map(workspace.windowSubtitle(for:)) ?? "")
         .toolbar {
             ToolbarItemGroup(placement: .navigation) {
-                Button { workspace.createDocument() } label: {
-                    Label(L10n.string("new_file"), systemImage: "doc.badge.plus")
+                Button { workspace.runner.cancel() } label: {
+                    Label(L10n.string("stop_short"), systemImage: "stop.fill")
                 }
-                .help(L10n.string("help_new_document"))
-                .disabled(!canMutateWorkspace)
+                .help(L10n.string("help_cancel_run"))
+                .disabled(!workspace.runner.isRunning)
 
-                Button { Task { await workspace.openPanel() } } label: {
-                    Label(L10n.string("open_document"), systemImage: "folder")
-                }
-                .help(L10n.string("help_open_document"))
-                .disabled(!canMutateWorkspace)
+                if workspace.runner.supportsCompile(for: workspace.activeSession) {
+                    Button { workspace.compileActiveDocument() } label: {
+                        Label(L10n.string("compile_short"), systemImage: "hammer")
+                    }
+                    .help(L10n.string("help_compile"))
+                    .disabled(workspace.isLoading || workspace.isClosing || !workspace.runner.canCompile(workspace.activeSession))
 
-                Button { Task { await workspace.save() } } label: {
-                    Label(L10n.string("save"), systemImage: "square.and.arrow.down")
+                    Button { workspace.runOnlyActiveDocument() } label: {
+                        Label(L10n.string("run_without_compiling"), systemImage: "play.rectangle")
+                    }
+                    .help(workspace.runner.runOnlyHelpText(for: workspace.activeSession))
+                    .disabled(workspace.isLoading || workspace.isClosing || !workspace.runner.canRunOnly(workspace.activeSession))
+
+                    Button { workspace.runActiveDocument() } label: {
+                        Label(L10n.string("compile_and_run_short"), systemImage: "play.fill")
+                    }
+                    .help(L10n.string("help_compile_and_run"))
+                    .disabled(workspace.isLoading || workspace.isClosing || !workspace.runner.canRun(workspace.activeSession))
+                } else {
+                    Button { workspace.runActiveDocument() } label: {
+                        Label(L10n.string("run_short"), systemImage: "play.fill")
+                    }
+                    .help(L10n.string("help_run_interpreted"))
+                    .disabled(workspace.isLoading || workspace.isClosing || !workspace.runner.canRun(workspace.activeSession))
                 }
-                .help(L10n.string("help_save_document"))
-                .disabled(workspace.activeSession?.canMutatePersistence != true || !canMutateWorkspace)
             }
 
-            ToolbarItemGroup(placement: .primaryAction) {
+            ToolbarItem(placement: .principal) {
                 Menu {
                     ForEach(workspace.runner.profiles) { profile in
                         Button {
@@ -106,44 +121,64 @@ struct WorkspaceView: View {
                         workspace.importToolchain()
                     }
                 } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "hammer")
+                    HStack(spacing: 5) {
+                        Image(systemName: "wrench.and.screwdriver")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                         Text(workspace.runner.selectedProfile?.displayName ?? L10n.string("toolchain"))
                             .lineLimit(1)
                     }
                 }
                 .help(L10n.string("help_toolchain_menu"))
                 .disabled(!workspace.canConfigureRunner)
+            }
+
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button { workspace.createDocument() } label: {
+                    Label(L10n.string("new_file"), systemImage: "doc.badge.plus")
+                }
+                .help(L10n.string("help_new_document"))
+                .disabled(!canMutateWorkspace)
+
+                Button { Task { await workspace.openPanel() } } label: {
+                    Label(L10n.string("open_document"), systemImage: "folder")
+                }
+                .help(L10n.string("help_open_document"))
+                .disabled(!canMutateWorkspace)
+
+                Button { Task { await workspace.save() } } label: {
+                    Label(L10n.string("save"), systemImage: "square.and.arrow.down")
+                }
+                .help(L10n.string("help_save_document"))
+                .disabled(workspace.activeSession?.canMutatePersistence != true || !canMutateWorkspace)
+            }
+
+            ToolbarSpacer(.fixed, placement: .primaryAction)
+
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button { workspace.companion.isPresented = true } label: {
+                    if workspace.companion.pendingCount > 0 {
+                        Label("\(workspace.companion.pendingCount)", systemImage: "tray.full.fill")
+                            .labelStyle(.titleAndIcon)
+                    } else {
+                        Label(L10n.string("open_companion_short"), systemImage: "tray.and.arrow.down")
+                            .labelStyle(.iconOnly)
+                    }
+                }
+                .accessibilityLabel(companionToolbarTitle)
+                .help(companionToolbarHelp)
+                .disabled(workspace.isLoading || workspace.isClosing)
 
                 SettingsLink {
                     Label(L10n.string("settings_title"), systemImage: "gearshape")
                 }
                 .labelStyle(.iconOnly)
                 .help(L10n.string("settings_title"))
+            }
 
-                if workspace.runner.isRunning {
-                    Button { workspace.runner.cancel() } label: {
-                        Label(L10n.string("stop_short"), systemImage: "stop.fill")
-                    }
-                    .help(L10n.string("help_cancel_run"))
-                } else {
-                    Button { workspace.runActiveDocument() } label: {
-                        Label(L10n.string("run_short"), systemImage: "play.fill")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .help(L10n.string("help_run_all"))
-                    .disabled(workspace.isLoading || workspace.isClosing || !workspace.runner.canRun(workspace.activeSession))
-                }
+            ToolbarSpacer(.fixed, placement: .primaryAction)
 
-                Button { workspace.companion.isPresented = true } label: {
-                    Label(
-                        companionToolbarTitle,
-                        systemImage: workspace.companion.pendingCount > 0 ? "tray.full.fill" : "tray.and.arrow.down"
-                    )
-                }
-                .help(companionToolbarHelp)
-                .disabled(workspace.isLoading || workspace.isClosing)
-
+            ToolbarItem(placement: .primaryAction) {
                 Picker(L10n.string("layout_mode"), selection: $workspace.layoutMode) {
                     Image(systemName: "doc.text")
                         .help(L10n.string("layout_editor_only"))
@@ -228,6 +263,8 @@ struct WorkspaceView: View {
                             }
                             .disabled(workspace.isLoading || workspace.isClosing)
                         }
+                        .controlSize(.regular)
+                        .buttonBorderShape(.roundedRectangle(radius: 6))
                     }
                 }
                 if workspace.isLoading {

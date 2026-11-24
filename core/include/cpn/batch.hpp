@@ -38,6 +38,7 @@ struct TestCase {
     std::optional<std::string> expected;
     bool enabled{true};
 };
+enum class BatchMode { compile_and_run, compile_only, run_only };
 struct BatchRequest {
     SourceSnapshot source;
     ToolchainProfile toolchain;
@@ -45,6 +46,8 @@ struct BatchRequest {
     ComparisonMode comparison{ComparisonMode::cp_editor_ignore_trailing_spaces};
     std::size_t max_retained_output_bytes{64 * 1024 * 1024};
     std::optional<ExternalCheckerSpec> external_checker;
+    BatchMode mode{BatchMode::compile_and_run};
+    std::optional<std::filesystem::path> artifact_path;
 };
 enum class Verdict { accepted, wrong_answer, time_limit, runtime_error, output_limit,
                      unchecked, cancelled, not_run, checker_error, infrastructure_error };

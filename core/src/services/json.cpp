@@ -179,8 +179,25 @@ BatchRequest parse_batch_request(std::string_view text,RequestBounds bounds){
     });
     if(!json.is_object() || integer(json.at("schema_version"),1,"schema_version")!=1)
         throw std::invalid_argument("Unsupported batch schema version");
-    fields(json,{"schema_version","source","toolchain","tests","comparison","max_retained_output_bytes","external_checker"});
+    fields(json,{"schema_version","source","toolchain","tests","comparison","max_retained_output_bytes","external_checker","mode","artifact_path"});
     BatchRequest request;
+    if (const auto mode = json.find("mode"); mode != json.end()) {
+        if (!mode->is_string()) throw std::invalid_argument("Batch mode must be a string");
+        const auto value = mode->get<std::string>();
+        if (value == "compile_and_run") request.mode = BatchMode::compile_and_run;
+        else if (value == "compile_only") request.mode = BatchMode::compile_only;
+        else if (value == "run_only") request.mode = BatchMode::run_only;
+        else throw std::invalid_argument("Unknown batch mode");
+    }
+    if (const auto artifact = json.find("artifact_path"); artifact != json.end() && !artifact->is_null()) {
+        if (!artifact->is_string()) throw std::invalid_argument("Artifact path must be a string");
+        const auto raw_path = artifact->get<std::string>();
+        if (raw_path.empty() || raw_path.size() > 32768 || raw_path.find('\0') != std::string::npos || decode_utf8(raw_path).error_offset)
+            throw std::invalid_argument("Invalid artifact path");
+        auto parsed = path_from_utf8(raw_path);
+        if (!parsed.is_absolute()) throw std::invalid_argument("Artifact path must be absolute");
+        request.artifact_path = std::move(parsed);
+    }
     const auto& source=json.at("source");
     fields(source,{"document_id","revision","text","original_path"});
     request.source.document_id=source.at("document_id").get<std::string>();
