@@ -236,64 +236,88 @@ struct CopyTextButton: View {
     }
 }
 
-struct CodeBlockBox: View {
+enum PanelSurfaceStyle {
+    static let cornerRadius: CGFloat = 6
+    static let cellHeaderHeight: CGFloat = 24
+    static let cellHeaderBackground = Color.primary.opacity(0.035)
+    static let hairlineBorder = Color(nsColor: .separatorColor).opacity(0.55)
+}
+
+extension View {
+    func panelSurfaceWell(borderColor: Color? = nil) -> some View {
+        let shape = RoundedRectangle(cornerRadius: PanelSurfaceStyle.cornerRadius, style: .continuous)
+        return self
+            .background(Color(nsColor: .textBackgroundColor))
+            .clipShape(shape)
+            .overlay(shape.strokeBorder(borderColor ?? PanelSurfaceStyle.hairlineBorder, lineWidth: 1))
+    }
+}
+
+struct PanelCellHeaderBar<Trailing: View>: View {
     let title: String?
-    let displayText: String
-    let byteCount: UInt64
+    let byteCount: UInt64?
     var trailingSubtitle: String? = nil
-    var borderColor: Color? = nil
-    var isBinaryPreview = false
-    var binaryPreviewShownBytes = 0
-    var contentHeight: CGFloat? = nil
+    var tint: Color? = nil
+    private let trailing: Trailing
+
+    init(
+        title: String?,
+        byteCount: UInt64? = nil,
+        trailingSubtitle: String? = nil,
+        tint: Color? = nil,
+        @ViewBuilder trailing: () -> Trailing
+    ) {
+        self.title = title
+        self.byteCount = byteCount
+        self.trailingSubtitle = trailingSubtitle
+        self.tint = tint
+        self.trailing = trailing()
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            if title != nil || trailingSubtitle != nil {
-                HStack(spacing: 6) {
-                    if let title {
-                        Text(title)
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(.secondary)
-                    }
+        VStack(spacing: 0) {
+            HStack(spacing: 5) {
+                if let title {
+                    Text(title)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                if let byteCount {
                     Text(String(format: L10n.string("bytes_count_format"), byteCount))
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(.tertiary)
-                    if let trailingSubtitle, !trailingSubtitle.isEmpty {
-                        Text("·")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                        Text(trailingSubtitle)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                    Spacer(minLength: 4)
-                    CopyTextButton(text: displayText)
+                        .fixedSize()
                 }
-            }
-            Group {
-                if let contentHeight {
-                    ScrollView { content }
-                        .frame(height: contentHeight)
-                } else {
-                    content
+                if let trailingSubtitle, !trailingSubtitle.isEmpty {
+                    Text("·")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                    Text(trailingSubtitle)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .layoutPriority(-1)
                 }
+                Spacer(minLength: 4)
+                trailing
             }
-            .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
-            .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(borderColor ?? Color(nsColor: .separatorColor).opacity(0.6), lineWidth: 1)
-            )
+            .padding(.horizontal, 8)
+            .frame(height: PanelSurfaceStyle.cellHeaderHeight)
+            .background(tint ?? PanelSurfaceStyle.cellHeaderBackground)
 
-            if isBinaryPreview {
-                Text(String(format: L10n.string("output_binary_preview"), binaryPreviewShownBytes, byteCount))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
+            Divider().opacity(0.6)
         }
     }
+}
 
-    private var content: some View {
+struct PanelBytesContent: View {
+    let displayText: String
+    let byteCount: UInt64
+    var verticalPadding: CGFloat = 5
+
+    var body: some View {
         Group {
             if byteCount == 0 {
                 Text(L10n.string("empty_bytes"))
@@ -308,7 +332,57 @@ struct CodeBlockBox: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 8)
-        .padding(.vertical, 6)
+        .padding(.vertical, verticalPadding)
+    }
+}
+
+struct CodeBlockBox: View {
+    let title: String?
+    let displayText: String
+    let byteCount: UInt64
+    var trailingSubtitle: String? = nil
+    var borderColor: Color? = nil
+    var isBinaryPreview = false
+    var binaryPreviewShownBytes = 0
+    var contentHeight: CGFloat? = nil
+    var headerTint: Color? = nil
+    var bodyTint: Color? = nil
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 0) {
+                if title != nil || trailingSubtitle != nil {
+                    PanelCellHeaderBar(
+                        title: title,
+                        byteCount: byteCount,
+                        trailingSubtitle: trailingSubtitle,
+                        tint: headerTint
+                    ) {
+                        CopyTextButton(text: displayText)
+                    }
+                }
+                Group {
+                    if let contentHeight {
+                        ScrollView { content }
+                            .frame(height: contentHeight)
+                    } else {
+                        content
+                    }
+                }
+                .background(bodyTint ?? Color.clear)
+            }
+            .panelSurfaceWell(borderColor: borderColor)
+
+            if isBinaryPreview {
+                Text(String(format: L10n.string("output_binary_preview"), binaryPreviewShownBytes, byteCount))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var content: some View {
+        PanelBytesContent(displayText: displayText, byteCount: byteCount, verticalPadding: 6)
     }
 
 }

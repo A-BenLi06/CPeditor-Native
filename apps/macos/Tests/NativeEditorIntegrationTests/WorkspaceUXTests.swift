@@ -315,23 +315,27 @@ import NativeCoreBridge
         let interactiveSession = try #require(workspace.sessions.first { $0.document.id == secondItem.documentID })
         workspace.selection = sumSession.document.id
 
+        func populateCodeEditor(_ session: NativeEditorSession, source: String) async throws {
+            let warmupHost = NSHostingView(rootView: WorkspaceView(workspace: workspace).frame(width: 1240, height: 780))
+            let warmupWindow = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1240, height: 780), styleMask: [.titled], backing: .buffered, defer: false)
+            warmupWindow.contentView = warmupHost
+            warmupWindow.orderBack(nil)
+            warmupHost.layoutSubtreeIfNeeded()
+            try await Task.sleep(for: .milliseconds(50))
+            warmupHost.layoutSubtreeIfNeeded()
+            let textView = try #require(editableTextView(in: session.container))
+            textView.insertText(source, replacementRange: NSRange(location: 0, length: 0))
+            await Task.yield()
+            session.capture()
+            warmupWindow.orderOut(nil)
+            warmupWindow.contentView = nil
+        }
+
         // 渲染前先向默认 CodeEditorView 注入完整 C++ 代码并执行一次真实编译判题。
-        let cevHost = NSHostingView(rootView: WorkspaceView(workspace: workspace).frame(width: 1240, height: 780))
-        let warmupWindow = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1240, height: 780), styleMask: [.titled], backing: .buffered, defer: false)
-        warmupWindow.contentView = cevHost
-        warmupWindow.orderBack(nil)
-        cevHost.layoutSubtreeIfNeeded()
-        try await Task.sleep(for: .milliseconds(50))
-        cevHost.layoutSubtreeIfNeeded()
-        let cevText = try #require(editableTextView(in: sumSession.container))
-        cevText.insertText(
-            "#include <iostream>\n\nint main() {\n    long long a, b;\n    if (std::cin >> a >> b) {\n        std::cout << (a + b) << '\\n';\n    }\n    return 0;\n}\n",
-            replacementRange: NSRange(location: 0, length: 0)
+        try await populateCodeEditor(
+            sumSession,
+            source: "#include <iostream>\n\nint main() {\n    long long a, b;\n    if (std::cin >> a >> b) {\n        std::cout << (a + b) << '\\n';\n    }\n    return 0;\n}\n"
         )
-        await Task.yield()
-        sumSession.capture()
-        warmupWindow.orderOut(nil)
-        warmupWindow.contentView = nil
 
         workspace.runner.runAll(sumSession)
         await workspace.runner.waitForCurrentRun()
@@ -364,6 +368,20 @@ import NativeCoreBridge
 
         let checkerDraft = ConfigurationJSONDraft(kind: .checker, jsonText: try workspace.runner.checkerDraft())
         try snapshot(ConfigurationSheet(draft: checkerDraft) { _ in }, size: NSSize(width: 640, height: 500), appearanceName: .aqua, to: "09-checker-config-visual-light.png")
+
+        // 验证带标准错误输出和 Unchecked 样例的扁平诊断渲染。
+        let stderrDoc = try #require(workspace.createDocument(text: "", editor: .codeEditorView))
+        try await populateCodeEditor(
+            stderrDoc,
+            source: "#include <iostream>\n\nint main() {\n    long long x;\n    if (std::cin >> x) {\n        std::cerr << \"debug: x=\" << x << '\\n';\n        std::cout << (x * 2) << '\\n';\n    }\n    return 0;\n}\n"
+        )
+        stderrDoc.testCases = [
+            TestCaseInput(id: "stderr-ac", input: "21\n", expected: "42\n"),
+            TestCaseInput(id: "stderr-unchecked", input: "9\n", expected: nil),
+        ]
+        workspace.runner.runAll(stderrDoc)
+        await workspace.runner.waitForCurrentRun()
+        try snapshot(WorkspaceView(workspace: workspace), size: NSSize(width: 1240, height: 780), appearanceName: .aqua, to: "10-cev-unchecked-stderr-light.png")
 
         await dispose(workspace)
     }

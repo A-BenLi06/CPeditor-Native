@@ -592,3 +592,10 @@ Core 规则区分空输入、缺少预期输出与预期输出为空、checker �
 ## 2026-11-23T19:01:10+08:00 — 补录发布后回归 CI 通过证据
 
 - [Actions 45160293245](https://github.com/A-BenLi06/CPeditor-Native/actions/runs/45160293245) 对 `84bdd71` 验证 Swift 108/108、Core 17/17、应用包与严格签名全部成功，核对远端完整日志确认真实 G++ 和升级路径恢复用例均执行通过。更新回归矩阵和实施状态，未移动发布标签。
+
+## 2026-11-24T12:38:23+08:00 — 扁平化 macOS 右侧测试与详情面板，消除卡片嵌套
+
+- 移除外层圆角卡片套内层三栏圆角框的双重容器嵌套：在 `WorkspaceComponents.swift` 抽离共享视觉规范 `PanelSurfaceStyle`、`panelSurfaceWell`、`PanelCellHeaderBar` 与 `PanelBytesContent`，并将 `CodeBlockBox` 标题与操作栏整合进单一容器顶部的 24 pt 细灰条内，消除外部漂浮标题与重复描边。
+- 扁平化 `RunPanelView`：将顶部标题栏与判题模式栏合并为统一 `.bar` 顶部工具区，移除未运行计数胶囊底色与冗余灰色下拉底框，对 `more_actions` 隐藏冗余菜单指示器并保留判题模式菜单原生单一展开箭头；将 `TestCaseCardView` 与 `RemovedTestResultCard` 改为全宽贴边分段（`TestCaseSectionView` 与 `RemovedTestResultRow`），仅在已判题时于左侧显示 3 pt 状态色条，内部 Input／Expected Output／Output 合并为单层细线分隔的等高网格（窄窗口通过 `ViewThatFits` 自动退回竖排堆叠），并保留 Expected Output 为空时直接输入即启用的交互。
+- 修复此前已判题样例即使无 `stderr`、截断或诊断信息仍渲染底部多余空分割线的问题（通过 `hasDiagnostics` 门控），并将 `CheckerDiagnosticsView` 由灰底卡片改为 2 pt 左侧导引线；同步扁平化 `CompanionInboxView` 右侧详情栏样例区为贴边分段与单层双栏网格。
+- 实际执行主机：macOS 27.0.1（26A434）arm64、Xcode 27.2（27B52）、Swift 6.4.2（本次未在 Windows 主机执行或验证）。最终代码后运行 `./script/test_macos.sh` 全量 18 个套件共 108 项测试全部通过；通过 `WorkspaceUXTests.renderLayoutAuditSnapshotsWhenRequested`（含新增的 `10-cev-unchecked-stderr-light.png`）导出并逐张人工核验浅色／深色、CE 编译错、780×520 窄屏、仅 IO 视图、空状态、Companion 详情与 stderr／Unchecked 渲染快照（位于 `out/macos/right-panel-audit/`）；执行 `./script/build_and_run.sh --verify` 打包真实应用并通过 `codesign --verify --strict` 与 `AppLifecycle quit` 退出校验。`references/cpeditor` 子模块保持未修改。

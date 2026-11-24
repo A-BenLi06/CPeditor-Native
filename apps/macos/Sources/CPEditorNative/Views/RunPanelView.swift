@@ -33,9 +33,12 @@ struct RunPanelView: View {
     var body: some View {
         let resultIsStale = latestResult != nil && !runner.resultIsCurrent(for: session)
         VStack(alignment: .leading, spacing: 0) {
-            headerBar(resultIsStale: resultIsStale)
-            Divider()
-            checkerControlBar
+            VStack(spacing: 0) {
+                headerBar(resultIsStale: resultIsStale)
+                Divider().opacity(0.45)
+                checkerControlBar
+            }
+            .background(.bar)
             Divider()
 
             if let notice = runner.toolchainNotice(for: session) {
@@ -65,7 +68,7 @@ struct RunPanelView: View {
                 emptyTestsPlaceholder
             } else {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 10) {
+                    LazyVStack(alignment: .leading, spacing: 0) {
                         if session.testCases.isEmpty {
                             emptyTestsPlaceholder
                                 .frame(minHeight: 140)
@@ -74,7 +77,7 @@ struct RunPanelView: View {
                                 let id = test.id
                                 let index = session.testCases.firstIndex(where: { $0.id == id }) ?? 0
                                 let matchingResult = latestResult?.tests.first(where: { RawIdentifier($0.testcaseID) == id })
-                                TestCaseCardView(
+                                TestCaseSectionView(
                                     test: $test,
                                     number: index + 1,
                                     canEdit: canEditTests,
@@ -96,21 +99,24 @@ struct RunPanelView: View {
                         }
 
                         if !removedTestResults.isEmpty {
-                            VStack(alignment: .leading, spacing: 6) {
+                            VStack(alignment: .leading, spacing: 0) {
                                 Text(L10n.string("removed_test_results_title"))
                                     .font(.caption.weight(.semibold))
                                     .foregroundStyle(.secondary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .background(Color.primary.opacity(0.03))
+                                Divider()
                                 ForEach(removedTestResults) { test in
-                                    RemovedTestResultCard(
+                                    RemovedTestResultRow(
                                         test: test,
                                         binaryPreviewBytes: runner.binaryPreviewBytes
                                     )
                                 }
                             }
-                            .padding(.top, 4)
                         }
                     }
-                    .padding(12)
                 }
             }
         }
@@ -146,11 +152,8 @@ struct RunPanelView: View {
                 }
             } else {
                 Text("\(enabledTestCount)/\(session.testCases.count)")
-                    .font(.caption2.monospacedDigit())
+                    .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(.quaternary.opacity(0.5), in: Capsule())
                     .help(String(format: L10n.string("tests_count_format"), enabledTestCount, session.testCases.count))
             }
 
@@ -192,13 +195,13 @@ struct RunPanelView: View {
                     .labelStyle(.iconOnly)
             }
             .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
             .fixedSize()
             .disabled(!canEditTests)
             .help(L10n.string("more_actions"))
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(.bar)
     }
 
     private var checkerModeSummary: String {
@@ -251,13 +254,7 @@ struct RunPanelView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 8, weight: .semibold))
-                        .foregroundStyle(.tertiary)
                 }
-                .padding(.horizontal, 6)
-                .padding(.vertical, 3)
-                .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 5))
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
@@ -361,7 +358,7 @@ private struct CompilerOutputBanner: View {
     }
 }
 
-private struct TestCaseCardView: View {
+private struct TestCaseSectionView: View {
     @Binding var test: TestCaseInput
     let number: Int
     let canEdit: Bool
@@ -380,17 +377,29 @@ private struct TestCaseCardView: View {
         return output
     }
 
-    private var cardBorderColor: Color {
-        guard let matchingResult, !resultIsStale else {
-            return Color(nsColor: .separatorColor).opacity(0.75)
-        }
-        return VerdictDescriptor.forVerdict(matchingResult.verdict).tone.color.opacity(0.40)
+    private var verdictColor: Color? {
+        matchingResult.map { VerdictDescriptor.forVerdict($0.verdict).tone.color }
     }
 
-    private var outputBorderColor: Color? {
-        guard let matchingResult else { return nil }
-        return VerdictDescriptor.forVerdict(matchingResult.verdict).tone.color.opacity(resultIsStale ? 0.25 : 0.45)
+    private var outputHeaderBackground: Color {
+        verdictColor.map { $0.opacity(resultIsStale ? 0.03 : 0.09) } ?? PanelSurfaceStyle.cellHeaderBackground
     }
+
+    private var outputBodyBackground: Color {
+        verdictColor.map { $0.opacity(resultIsStale ? 0.0 : 0.035) } ?? Color.clear
+    }
+
+    private var hasDiagnostics: Bool {
+        guard let matchingResult else { return false }
+        return !matchingResult.process.stderr.data.isEmpty
+            || matchingResult.process.stdoutTruncated
+            || matchingResult.process.stderrTruncated
+            || !matchingResult.detail.isEmpty
+            || matchingResult.checker != nil
+    }
+
+    private var editorMinHeight: CGFloat { isExpandedHeight ? 132 : 68 }
+    private var ioPaneHeight: CGFloat { PanelSurfaceStyle.cellHeaderHeight + 1 + editorMinHeight }
 
     private func outputStatusSummary(for result: TestResult) -> String {
         var parts = [result.process.termination]
@@ -404,172 +413,169 @@ private struct TestCaseCardView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Toggle(isOn: $test.enabled) {
-                    Text(String(format: L10n.string("test_number"), number))
-                        .font(.subheadline.weight(.semibold))
-                }
-                .toggleStyle(.checkbox)
-                .disabled(!canEdit)
+        let outputBytes = matchingResult?.process.stdout ?? WireBytes("")
+        let outputCanDisplay = outputBytes.canDisplayAsText
+        let outputDisplayText = outputCanDisplay
+            ? outputBytes.text
+            : outputBytes.hexPreview(maximumBytes: binaryPreviewBytes)
 
-                if let matchingResult {
-                    VerdictBadge(verdict: matchingResult.verdict, compact: true, dimmed: resultIsStale)
-                    Text(String(format: L10n.string("elapsed_format"), matchingResult.process.elapsedMS))
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Toggle(isOn: $test.enabled) {
+                        Text(String(format: L10n.string("test_number"), number))
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .toggleStyle(.checkbox)
+                    .disabled(!canEdit)
 
-                Spacer(minLength: 4)
+                    if let matchingResult {
+                        VerdictBadge(verdict: matchingResult.verdict, compact: true, dimmed: resultIsStale)
+                        Text(String(format: L10n.string("elapsed_format"), matchingResult.process.elapsedMS))
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
 
-                if let output = replacementExpectedOutput {
+                    Spacer(minLength: 4)
+
+                    if let output = replacementExpectedOutput {
+                        Button {
+                            useOutputAsExpected(output)
+                        } label: {
+                            Image(systemName: "arrow.uturn.up.square")
+                                .font(.caption)
+                                .foregroundStyle(Color.accentColor)
+                        }
+                        .buttonStyle(.borderless)
+                        .help(L10n.string("use_output_as_expected"))
+                        .accessibilityLabel(L10n.string("use_output_as_expected"))
+                    }
+
                     Button {
-                        useOutputAsExpected(output)
+                        isExpandedHeight.toggle()
                     } label: {
-                        Image(systemName: "arrow.uturn.up.square")
+                        Image(systemName: isExpandedHeight ? "rectangle.compress.vertical" : "rectangle.expand.vertical")
                             .font(.caption)
-                            .foregroundStyle(Color.accentColor)
+                            .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.borderless)
-                    .help(L10n.string("use_output_as_expected"))
-                    .accessibilityLabel(L10n.string("use_output_as_expected"))
-                }
+                    .help(L10n.string(isExpandedHeight ? "collapse_editor" : "expand_editor"))
 
-                Button {
-                    isExpandedHeight.toggle()
-                } label: {
-                    Image(systemName: isExpandedHeight ? "rectangle.compress.vertical" : "rectangle.expand.vertical")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.borderless)
-                .help(L10n.string(isExpandedHeight ? "collapse_editor" : "expand_editor"))
-
-                Button(action: duplicate) {
-                    Image(systemName: "plus.square.on.square")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.borderless)
-                .disabled(!canEdit)
-                .help(L10n.string("duplicate_test"))
-
-                Button(action: remove) {
-                    Image(systemName: "trash")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.borderless)
-                .disabled(!canEdit)
-                .help(L10n.string("remove_test"))
-            }
-
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .top, spacing: 8) {
-                    inputColumn.frame(minWidth: 110, maxWidth: .infinity)
-                    expectedColumn.frame(minWidth: 110, maxWidth: .infinity)
-                    outputColumn.frame(minWidth: 110, maxWidth: .infinity)
-                }
-                VStack(alignment: .leading, spacing: 8) {
-                    inputColumn
-                    expectedColumn
-                    outputColumn
-                }
-            }
-            .opacity(test.enabled ? 1.0 : 0.65)
-
-            if let matchingResult {
-                Divider()
-                    .padding(.top, 2)
-
-                VStack(alignment: .leading, spacing: 6) {
-                    if !matchingResult.process.stderr.data.isEmpty {
-                        OutputBytesView(
-                            title: L10n.string("stderr_title"),
-                            bytes: matchingResult.process.stderr,
-                            binaryPreviewBytes: binaryPreviewBytes
-                        )
-                    }
-
-                    if matchingResult.process.stdoutTruncated || matchingResult.process.stderrTruncated {
-                        Label(L10n.string("output_truncated"), systemImage: "scissors")
-                            .font(.caption2)
-                            .foregroundStyle(.orange)
-                    }
-
-                    if !matchingResult.detail.isEmpty {
-                        Text(matchingResult.detail)
-                            .font(.caption2)
+                    Button(action: duplicate) {
+                        Image(systemName: "plus.square.on.square")
+                            .font(.caption)
                             .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
                     }
+                    .buttonStyle(.borderless)
+                    .disabled(!canEdit)
+                    .help(L10n.string("duplicate_test"))
 
-                    if let checker = matchingResult.checker {
-                        CheckerDiagnosticsView(report: checker, binaryPreviewBytes: binaryPreviewBytes)
+                    Button(action: remove) {
+                        Image(systemName: "trash")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(!canEdit)
+                    .help(L10n.string("remove_test"))
+                }
+
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .top, spacing: 0) {
+                        inputPane.frame(minWidth: 120, idealWidth: 120, maxWidth: .infinity)
+                        Divider()
+                        expectedPane.frame(minWidth: 120, idealWidth: 120, maxWidth: .infinity)
+                        Divider()
+                        outputPane(
+                            bytes: outputBytes,
+                            displayText: outputDisplayText
+                        )
+                        .frame(minWidth: 120, idealWidth: 120, maxWidth: .infinity)
+                    }
+                    .frame(height: ioPaneHeight)
+
+                    VStack(alignment: .leading, spacing: 0) {
+                        inputPane
+                        Divider()
+                        expectedPane
+                        Divider()
+                        outputPane(bytes: outputBytes, displayText: outputDisplayText)
+                    }
+                }
+                .panelSurfaceWell()
+                .opacity(test.enabled ? 1.0 : 0.55)
+
+                footnotes(outputBytes: outputBytes, outputCanDisplay: outputCanDisplay)
+
+                if hasDiagnostics, let matchingResult {
+                    VStack(alignment: .leading, spacing: 6) {
+                        if !matchingResult.process.stderr.data.isEmpty {
+                            OutputBytesView(
+                                title: L10n.string("stderr_title"),
+                                bytes: matchingResult.process.stderr,
+                                binaryPreviewBytes: binaryPreviewBytes
+                            )
+                        }
+
+                        if matchingResult.process.stdoutTruncated || matchingResult.process.stderrTruncated {
+                            Label(L10n.string("output_truncated"), systemImage: "scissors")
+                                .font(.caption2)
+                                .foregroundStyle(.orange)
+                        }
+
+                        if !matchingResult.detail.isEmpty {
+                            Text(matchingResult.detail)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+
+                        if let checker = matchingResult.checker {
+                            CheckerDiagnosticsView(report: checker, binaryPreviewBytes: binaryPreviewBytes)
+                        }
                     }
                 }
             }
+            .padding(.leading, 14)
+            .padding(.trailing, 12)
+            .padding(.vertical, 10)
+            .overlay(alignment: .leading) {
+                if let verdictColor {
+                    Rectangle()
+                        .fill(verdictColor.opacity(resultIsStale ? 0.25 : 0.78))
+                        .frame(width: 3)
+                }
+            }
+
+            Divider()
         }
-        .padding(10)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.65), in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(cardBorderColor, lineWidth: 1))
     }
 
-    private var editorMinHeight: CGFloat { isExpandedHeight ? 132 : 68 }
-    private var outputColumn: some View {
-        OutputBytesView(title: L10n.string("output_title"), bytes: matchingResult?.process.stdout ?? WireBytes(""),
-                        binaryPreviewBytes: binaryPreviewBytes,
-                        trailingSubtitle: matchingResult.map(outputStatusSummary), borderColor: outputBorderColor,
-                        contentHeight: editorMinHeight)
-    }
-
-    private var inputColumn: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 5) {
-                Text(L10n.string("test_input"))
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
-                Text(String(format: L10n.string("bytes_count_format"), UInt64(test.input.data.count)))
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.tertiary)
-                Spacer(minLength: 4)
+    private var inputPane: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            PanelCellHeaderBar(
+                title: L10n.string("test_input"),
+                byteCount: UInt64(test.input.data.count)
+            ) {
                 CopyTextButton(text: test.input.text)
             }
 
-            TextEditor(text: Binding(
-                get: { test.input.text },
-                set: { test.input = WireBytes($0) }
-            ))
-            .font(.system(.callout, design: .monospaced))
-            .scrollContentBackground(.hidden)
-            .padding(4)
-            .frame(height: editorMinHeight)
-            .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(nsColor: .separatorColor).opacity(0.6), lineWidth: 1))
-            .disabled(!canEdit)
-            .accessibilityLabel(L10n.string("test_input"))
-
-            if !test.input.isUTF8 {
-                Text(L10n.string("binary_data"))
-                    .font(.caption2)
-                    .foregroundStyle(.orange)
-            }
+            ioTextEditor(
+                text: Binding(
+                    get: { test.input.text },
+                    set: { test.input = WireBytes($0) }
+                ),
+                accessibilityLabel: L10n.string("test_input")
+            )
         }
     }
 
-    @ViewBuilder
-    private var expectedColumn: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 5) {
-                Text(L10n.string("test_expected"))
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
-                if let expected = test.expected {
-                    Text(String(format: L10n.string("bytes_count_format"), UInt64(expected.data.count)))
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.tertiary)
-                }
-                Spacer(minLength: 4)
+    private var expectedPane: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            PanelCellHeaderBar(
+                title: L10n.string("test_expected"),
+                byteCount: test.expected.map { UInt64($0.data.count) }
+            ) {
                 Toggle("", isOn: Binding(
                     get: { test.expected != nil },
                     set: { test.expected = $0 ? WireBytes("") : nil }
@@ -586,59 +592,129 @@ private struct TestCaseCardView: View {
                 }
             }
 
-            TextEditor(text: Binding(
-                get: { test.expected?.text ?? "" },
-                set: { test.expected = WireBytes($0) }
-            ))
+            ioTextEditor(
+                text: Binding(
+                    get: { test.expected?.text ?? "" },
+                    set: { test.expected = WireBytes($0) }
+                ),
+                accessibilityLabel: L10n.string("test_expected"),
+                background: test.expected == nil ? Color.primary.opacity(0.015) : Color.clear
+            )
+        }
+    }
+
+    private func outputPane(bytes: WireBytes, displayText: String) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            PanelCellHeaderBar(
+                title: L10n.string("output_title"),
+                byteCount: UInt64(bytes.data.count),
+                trailingSubtitle: matchingResult.map(outputStatusSummary),
+                tint: outputHeaderBackground
+            ) {
+                CopyTextButton(text: displayText)
+            }
+
+            ScrollView {
+                PanelBytesContent(
+                    displayText: displayText,
+                    byteCount: UInt64(bytes.data.count),
+                    verticalPadding: 5
+                )
+            }
+            .frame(height: editorMinHeight)
+            .background(outputBodyBackground)
+        }
+    }
+
+    private func ioTextEditor(
+        text: Binding<String>,
+        accessibilityLabel: String,
+        background: Color = .clear
+    ) -> some View {
+        TextEditor(text: text)
             .font(.system(.callout, design: .monospaced))
             .scrollContentBackground(.hidden)
-            .padding(4)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 5)
             .frame(height: editorMinHeight)
-            .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(nsColor: .separatorColor).opacity(0.6), lineWidth: 1))
+            .background(background)
             .disabled(!canEdit)
-            .accessibilityLabel(L10n.string("test_expected"))
+            .accessibilityLabel(accessibilityLabel)
+    }
 
-            if test.expected?.isUTF8 == false {
-                Text(L10n.string("binary_data"))
-                    .font(.caption2)
-                    .foregroundStyle(.orange)
-            }
-            if test.expected == nil {
-                Text(L10n.string("expected_unchecked_hint"))
+    @ViewBuilder
+    private func footnotes(outputBytes: WireBytes, outputCanDisplay: Bool) -> some View {
+        let hasBinaryInput = !test.input.isUTF8
+        let hasBinaryExpected = test.expected?.isUTF8 == false
+        let isUnchecked = test.expected == nil
+        let hasBinaryOutput = !outputCanDisplay
+
+        if hasBinaryInput || hasBinaryExpected || isUnchecked || hasBinaryOutput {
+            VStack(alignment: .leading, spacing: 2) {
+                if hasBinaryInput {
+                    Text("\(L10n.string("test_input")): \(L10n.string("binary_data"))")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                }
+                if hasBinaryExpected {
+                    Text("\(L10n.string("test_expected")): \(L10n.string("binary_data"))")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                }
+                if isUnchecked {
+                    Text(L10n.string("expected_unchecked_hint"))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                if hasBinaryOutput {
+                    Text(String(
+                        format: L10n.string("output_binary_preview"),
+                        min(outputBytes.data.count, binaryPreviewBytes),
+                        UInt64(outputBytes.data.count)
+                    ))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+                }
             }
         }
     }
 }
 
-private struct RemovedTestResultCard: View {
+private struct RemovedTestResultRow: View {
     let test: TestResult
     let binaryPreviewBytes: Int
 
     var body: some View {
         let descriptor = VerdictDescriptor.forVerdict(test.verdict)
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                VerdictBadge(descriptor: descriptor, compact: true)
-                Text(test.testcaseID)
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                Spacer(minLength: 4)
-                Text(String(format: L10n.string("elapsed_format"), test.process.elapsedMS))
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    VerdictBadge(descriptor: descriptor, compact: true)
+                    Text(test.testcaseID)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    Text(String(format: L10n.string("elapsed_format"), test.process.elapsedMS))
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                ProcessOutputView(report: test.process, binaryPreviewBytes: binaryPreviewBytes)
+                if let checker = test.checker {
+                    CheckerDiagnosticsView(report: checker, binaryPreviewBytes: binaryPreviewBytes)
+                }
             }
-            ProcessOutputView(report: test.process, binaryPreviewBytes: binaryPreviewBytes)
-            if let checker = test.checker {
-                CheckerDiagnosticsView(report: checker, binaryPreviewBytes: binaryPreviewBytes)
+            .padding(.leading, 14)
+            .padding(.trailing, 12)
+            .padding(.vertical, 10)
+            .overlay(alignment: .leading) {
+                Rectangle()
+                    .fill(descriptor.tone.color.opacity(0.78))
+                    .frame(width: 3)
             }
+
+            Divider()
         }
-        .padding(9)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(descriptor.tone.color.opacity(0.3), lineWidth: 1))
     }
 }
 
@@ -705,8 +781,13 @@ struct CheckerDiagnosticsView: View {
                 ProcessOutputView(report: report.process, binaryPreviewBytes: binaryPreviewBytes)
             }
         }
-        .padding(8)
-        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 6))
+        .padding(.leading, 10)
+        .padding(.vertical, 2)
+        .overlay(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 1)
+                .fill(Color(nsColor: .separatorColor).opacity(0.8))
+                .frame(width: 2)
+        }
     }
 }
 

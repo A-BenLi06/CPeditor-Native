@@ -345,62 +345,114 @@ private struct CompanionDetailPane: View {
             Divider()
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    if preview.tests.isEmpty {
-                        Text(L10n.string("companion_no_samples"))
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                            .padding(.vertical, 12)
-                    } else {
+                if preview.tests.isEmpty {
+                    Text(L10n.string("companion_no_samples"))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .padding(14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(preview.tests.indices, id: \.self) { index in
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text(String(format: L10n.string("companion_sample"), index + 1))
-                                    .font(.subheadline.weight(.semibold))
+                            let inputData = samplePreviewData(preview.tests[index].input)
+                            let expectedData = samplePreviewData(preview.tests[index].output)
 
-                                ViewThatFits(in: .horizontal) {
-                                    HStack(alignment: .top, spacing: 10) {
-                                        sampleBlock(preview.tests[index].input, labelKey: "test_input")
-                                            .frame(minWidth: 160, maxWidth: .infinity)
-                                        sampleBlock(preview.tests[index].output, labelKey: "test_expected")
-                                            .frame(minWidth: 160, maxWidth: .infinity)
+                            VStack(alignment: .leading, spacing: 0) {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text(String(format: L10n.string("companion_sample"), index + 1))
+                                        .font(.subheadline.weight(.semibold))
+
+                                    ViewThatFits(in: .horizontal) {
+                                        HStack(alignment: .top, spacing: 0) {
+                                            samplePane(inputData, labelKey: "test_input")
+                                                .frame(minWidth: 160, idealWidth: 160, maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                                            Divider()
+                                            samplePane(expectedData, labelKey: "test_expected")
+                                                .frame(minWidth: 160, idealWidth: 160, maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                                        }
+                                        .fixedSize(horizontal: false, vertical: true)
+
+                                        VStack(alignment: .leading, spacing: 0) {
+                                            samplePane(inputData, labelKey: "test_input")
+                                            Divider()
+                                            samplePane(expectedData, labelKey: "test_expected")
+                                        }
                                     }
-                                    VStack(alignment: .leading, spacing: 8) {
-                                        sampleBlock(preview.tests[index].input, labelKey: "test_input")
-                                        sampleBlock(preview.tests[index].output, labelKey: "test_expected")
-                                    }
+                                    .panelSurfaceWell()
+
+                                    sampleFootnotes(input: inputData, expected: expectedData)
                                 }
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 10)
+
+                                Divider()
                             }
-                            .padding(10)
-                            .background(Color(nsColor: .controlBackgroundColor).opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
-                            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color(nsColor: .separatorColor).opacity(0.75), lineWidth: 1))
                         }
                     }
                 }
-                .padding(14)
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
 
-    @ViewBuilder
-    private func sampleBlock(_ text: String, labelKey: String) -> some View {
+    private struct SamplePreviewData {
+        let displayText: String
+        let byteCount: UInt64
+        let isBinaryPreview: Bool
+        let shownBytes: Int
+        let isTruncated: Bool
+    }
+
+    private func samplePreviewData(_ text: String) -> SamplePreviewData {
         let bytes = WireBytes(text)
         let limit = controller.configuration?.previewBytes ?? 0
-        let display = bytes.canDisplayAsText
+        let canDisplay = bytes.canDisplayAsText
+        let display = canDisplay
             ? String(decoding: bytes.data.prefix(limit), as: UTF8.self)
             : bytes.hexPreview(maximumBytes: limit)
-        VStack(alignment: .leading, spacing: 3) {
-            CodeBlockBox(
+        return SamplePreviewData(
+            displayText: display,
+            byteCount: UInt64(bytes.data.count),
+            isBinaryPreview: !canDisplay,
+            shownBytes: min(bytes.data.count, limit),
+            isTruncated: bytes.data.count > limit
+        )
+    }
+
+    private func samplePane(_ data: SamplePreviewData, labelKey: String) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            PanelCellHeaderBar(
                 title: L10n.string(labelKey),
-                displayText: display,
-                byteCount: UInt64(bytes.data.count),
-                isBinaryPreview: !bytes.canDisplayAsText,
-                binaryPreviewShownBytes: min(bytes.data.count, limit)
+                byteCount: data.byteCount
+            ) {
+                CopyTextButton(text: data.displayText)
+            }
+            PanelBytesContent(
+                displayText: data.displayText,
+                byteCount: data.byteCount,
+                verticalPadding: 6
             )
-            if bytes.data.count > limit {
-                Text(L10n.string("companion_preview_truncated"))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private func sampleFootnotes(input: SamplePreviewData, expected: SamplePreviewData) -> some View {
+        if input.isBinaryPreview || expected.isBinaryPreview || input.isTruncated || expected.isTruncated {
+            VStack(alignment: .leading, spacing: 2) {
+                if input.isBinaryPreview {
+                    Text("\(L10n.string("test_input")): \(String(format: L10n.string("output_binary_preview"), input.shownBytes, input.byteCount))")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                if expected.isBinaryPreview {
+                    Text("\(L10n.string("test_expected")): \(String(format: L10n.string("output_binary_preview"), expected.shownBytes, expected.byteCount))")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                if input.isTruncated || expected.isTruncated {
+                    Text(L10n.string("companion_preview_truncated"))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
     }
