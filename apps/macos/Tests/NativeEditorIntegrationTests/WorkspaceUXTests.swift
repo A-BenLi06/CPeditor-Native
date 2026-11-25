@@ -250,6 +250,27 @@ import NativeCoreBridge
         #expect(VerdictDescriptor.summary(for: try makeResult(verdicts: ["RE", "CheckerError"])).label == "CheckerError")
     }
 
+    @Test func testCaseGridOrderAndHorizontalScrollMetrics() {
+        #expect(TestCaseGridMetrics.columnOrder == [.input, .output, .expected])
+
+        for viewport in [CGFloat(325), CGFloat(507)] {
+            let narrow = TestCaseGridMetrics(viewportWidth: viewport)
+            #expect(narrow.columnWidth == 220)
+            #expect(narrow.contentWidth == 662)
+            #expect(narrow.needsHorizontalScroll)
+        }
+
+        let exactThreshold = TestCaseGridMetrics(viewportWidth: 662)
+        #expect(exactThreshold.columnWidth == 220)
+        #expect(exactThreshold.contentWidth == 662)
+        #expect(!exactThreshold.needsHorizontalScroll)
+
+        let ioOnly = TestCaseGridMetrics(viewportWidth: 1214)
+        #expect(ioOnly.columnWidth == 404)
+        #expect(ioOnly.contentWidth == 1214)
+        #expect(!ioOnly.needsHorizontalScroll)
+    }
+
     @Test func renderLayoutAuditSnapshotsWhenRequested() async throws {
         guard let outputPath = ProcessInfo.processInfo.environment["CPN_LAYOUT_AUDIT_DIR"], !outputPath.isEmpty else { return }
         _ = NSApplication.shared

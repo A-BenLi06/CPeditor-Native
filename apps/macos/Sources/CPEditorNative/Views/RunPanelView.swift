@@ -2,6 +2,35 @@ import SwiftUI
 import NativeCoreBridge
 import NativeEditorModel
 
+enum TestCaseColumn: Hashable, CaseIterable {
+    case input
+    case output
+    case expected
+}
+
+struct TestCaseGridMetrics: Equatable {
+    static let minimumColumnWidth: CGFloat = 220
+    static let dividerWidth: CGFloat = 1
+    static let columnOrder: [TestCaseColumn] = [.input, .output, .expected]
+
+    let viewportWidth: CGFloat
+    let columnWidth: CGFloat
+    let contentWidth: CGFloat
+    let needsHorizontalScroll: Bool
+
+    init(viewportWidth: CGFloat) {
+        let clampedViewport = max(0, viewportWidth)
+        let columnCount = Self.columnOrder.count
+        let totalDividerWidth = Self.dividerWidth * CGFloat(max(0, columnCount - 1))
+        let minimumContentWidth = Self.minimumColumnWidth * CGFloat(columnCount) + totalDividerWidth
+        let resolvedContentWidth = max(clampedViewport, minimumContentWidth)
+        self.viewportWidth = clampedViewport
+        self.contentWidth = resolvedContentWidth
+        self.columnWidth = (resolvedContentWidth - totalDividerWidth) / CGFloat(columnCount)
+        self.needsHorizontalScroll = clampedViewport > 0 && resolvedContentWidth > clampedViewport + 0.5
+    }
+}
+
 struct RunPanelView: View {
     @Environment(\.openSettings) private var openSettings
     @Bindable var session: NativeEditorSession
@@ -68,52 +97,55 @@ struct RunPanelView: View {
             if session.testCases.isEmpty && removedTestResults.isEmpty {
                 emptyTestsPlaceholder
             } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        if session.testCases.isEmpty {
-                            emptyTestsPlaceholder
-                                .frame(minHeight: 140)
-                        } else {
-                            ForEach($session.testCases) { $test in
-                                let id = test.id
-                                let index = session.testCases.firstIndex(where: { $0.id == id }) ?? 0
-                                let matchingResult = latestResult?.tests.first(where: { RawIdentifier($0.testcaseID) == id })
-                                TestCaseSectionView(
-                                    test: $test,
-                                    number: index + 1,
-                                    canEdit: canEditTests,
-                                    matchingResult: matchingResult,
-                                    resultIsStale: resultIsStale,
-                                    binaryPreviewBytes: runner.binaryPreviewBytes,
-                                    useOutputAsExpected: { runner.useOutputAsExpected($0, for: session, testcaseID: id) },
-                                    duplicate: {
-                                        var copy = TestCaseInput(enabled: test.enabled)
-                                        copy.input = test.input
-                                        copy.expected = test.expected
-                                        session.testCases.insert(copy, at: min(index + 1, session.testCases.count))
-                                    },
-                                    remove: {
-                                        session.testCases.removeAll { $0.id == test.id }
-                                    }
-                                )
-                            }
-                        }
-
-                        if !removedTestResults.isEmpty {
-                            VStack(alignment: .leading, spacing: 0) {
-                                Text(L10n.string("removed_test_results_title"))
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 6)
-                                    .background(Color.primary.opacity(0.03))
-                                Divider()
-                                ForEach(removedTestResults) { test in
-                                    RemovedTestResultRow(
-                                        test: test,
-                                        binaryPreviewBytes: runner.binaryPreviewBytes
+                GeometryReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            if session.testCases.isEmpty {
+                                emptyTestsPlaceholder
+                                    .frame(minHeight: 140)
+                            } else {
+                                ForEach($session.testCases) { $test in
+                                    let id = test.id
+                                    let index = session.testCases.firstIndex(where: { $0.id == id }) ?? 0
+                                    let matchingResult = latestResult?.tests.first(where: { RawIdentifier($0.testcaseID) == id })
+                                    TestCaseSectionView(
+                                        test: $test,
+                                        number: index + 1,
+                                        availableWidth: proxy.size.width,
+                                        canEdit: canEditTests,
+                                        matchingResult: matchingResult,
+                                        resultIsStale: resultIsStale,
+                                        binaryPreviewBytes: runner.binaryPreviewBytes,
+                                        useOutputAsExpected: { runner.useOutputAsExpected($0, for: session, testcaseID: id) },
+                                        duplicate: {
+                                            var copy = TestCaseInput(enabled: test.enabled)
+                                            copy.input = test.input
+                                            copy.expected = test.expected
+                                            session.testCases.insert(copy, at: min(index + 1, session.testCases.count))
+                                        },
+                                        remove: {
+                                            session.testCases.removeAll { $0.id == test.id }
+                                        }
                                     )
+                                }
+                            }
+
+                            if !removedTestResults.isEmpty {
+                                VStack(alignment: .leading, spacing: 0) {
+                                    Text(L10n.string("removed_test_results_title"))
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 6)
+                                        .background(Color.primary.opacity(0.03))
+                                    Divider()
+                                    ForEach(removedTestResults) { test in
+                                        RemovedTestResultRow(
+                                            test: test,
+                                            binaryPreviewBytes: runner.binaryPreviewBytes
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -427,6 +459,7 @@ private struct CompilerOutputBanner: View {
 private struct TestCaseSectionView: View {
     @Binding var test: TestCaseInput
     let number: Int
+    let availableWidth: CGFloat
     let canEdit: Bool
     let matchingResult: TestResult?
     let resultIsStale: Bool
@@ -436,6 +469,7 @@ private struct TestCaseSectionView: View {
     let remove: () -> Void
 
     @State private var isExpandedHeight = false
+    @State private var wellWidth: CGFloat = 0
 
     private var replacementExpectedOutput: WireBytes? {
         guard canEdit, !resultIsStale, let output = matchingResult?.process.completeTextOutput,
@@ -464,7 +498,7 @@ private struct TestCaseSectionView: View {
             || matchingResult.checker != nil
     }
 
-    private var editorMinHeight: CGFloat { isExpandedHeight ? 132 : 68 }
+    private var editorMinHeight: CGFloat { isExpandedHeight ? 224 : 112 }
     private var ioPaneHeight: CGFloat { PanelSurfaceStyle.cellHeaderHeight + 1 + editorMinHeight }
 
     private func outputStatusSummary(for result: TestResult) -> String {
@@ -484,9 +518,10 @@ private struct TestCaseSectionView: View {
         let outputDisplayText = outputCanDisplay
             ? outputBytes.text
             : outputBytes.hexPreview(maximumBytes: binaryPreviewBytes)
+        let metrics = TestCaseGridMetrics(viewportWidth: wellWidth > 0 ? wellWidth : max(0, availableWidth - 26))
 
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
                     Toggle(isOn: $test.enabled) {
                         Text(String(format: L10n.string("test_number"), number))
@@ -538,28 +573,22 @@ private struct TestCaseSectionView: View {
                     }
                 }
 
-                ViewThatFits(in: .horizontal) {
+                ScrollView(.horizontal) {
                     HStack(alignment: .top, spacing: 0) {
-                        inputPane.frame(minWidth: 120, idealWidth: 120, maxWidth: .infinity)
-                        Divider()
-                        expectedPane.frame(minWidth: 120, idealWidth: 120, maxWidth: .infinity)
-                        Divider()
-                        outputPane(
-                            bytes: outputBytes,
-                            displayText: outputDisplayText
-                        )
-                        .frame(minWidth: 120, idealWidth: 120, maxWidth: .infinity)
+                        ForEach(TestCaseGridMetrics.columnOrder, id: \.self) { column in
+                            if column != TestCaseGridMetrics.columnOrder.first {
+                                Divider()
+                            }
+                            columnPane(column, outputBytes: outputBytes, outputDisplayText: outputDisplayText)
+                                .frame(width: metrics.columnWidth)
+                        }
                     }
-                    .frame(height: ioPaneHeight)
-
-                    VStack(alignment: .leading, spacing: 0) {
-                        inputPane
-                        Divider()
-                        expectedPane
-                        Divider()
-                        outputPane(bytes: outputBytes, displayText: outputDisplayText)
-                    }
+                    .frame(width: metrics.contentWidth, height: ioPaneHeight, alignment: .topLeading)
                 }
+                .frame(height: ioPaneHeight)
+                .scrollIndicators(metrics.needsHorizontalScroll ? .visible : .hidden, axes: .horizontal)
+                .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+                .onGeometryChange(for: CGFloat.self, of: \.size.width) { wellWidth = $0 }
                 .panelSurfaceWell()
                 .opacity(test.enabled ? 1.0 : 0.55)
 
@@ -596,7 +625,7 @@ private struct TestCaseSectionView: View {
             }
             .padding(.leading, 14)
             .padding(.trailing, 12)
-            .padding(.vertical, 10)
+            .padding(.vertical, 12)
             .overlay(alignment: .leading) {
                 if let verdictColor {
                     Rectangle()
@@ -606,6 +635,18 @@ private struct TestCaseSectionView: View {
             }
 
             Divider()
+        }
+    }
+
+    @ViewBuilder
+    private func columnPane(_ column: TestCaseColumn, outputBytes: WireBytes, outputDisplayText: String) -> some View {
+        switch column {
+        case .input:
+            inputPane
+        case .output:
+            outputPane(bytes: outputBytes, displayText: outputDisplayText)
+        case .expected:
+            expectedPane
         }
     }
 
@@ -634,7 +675,7 @@ private struct TestCaseSectionView: View {
                 title: L10n.string("test_expected"),
                 byteCount: test.expected.map { UInt64($0.data.count) }
             ) {
-                HStack(spacing: 2) {
+                HStack(spacing: 4) {
                     Toggle("", isOn: Binding(
                         get: { test.expected != nil },
                         set: { test.expected = $0 ? WireBytes("") : nil }
@@ -674,11 +715,11 @@ private struct TestCaseSectionView: View {
                 CopyTextButton(text: displayText)
             }
 
-            ScrollView {
+            ScrollView(.vertical) {
                 PanelBytesContent(
                     displayText: displayText,
                     byteCount: UInt64(bytes.data.count),
-                    verticalPadding: 5
+                    verticalPadding: 6
                 )
             }
             .frame(height: editorMinHeight)
@@ -694,8 +735,8 @@ private struct TestCaseSectionView: View {
         TextEditor(text: text)
             .font(.system(.callout, design: .monospaced))
             .scrollContentBackground(.hidden)
-            .padding(.horizontal, 4)
-            .padding(.vertical, 5)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 6)
             .frame(height: editorMinHeight)
             .background(background)
             .disabled(!canEdit)

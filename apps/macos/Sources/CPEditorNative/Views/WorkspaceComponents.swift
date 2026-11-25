@@ -282,7 +282,7 @@ struct CopyTextButton: View {
             Image(systemName: "doc.on.doc")
                 .font(.caption2)
                 .foregroundStyle(text.isEmpty ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.secondary))
-                .panelIconHoverChrome(size: 16, cornerRadius: 4, enabled: !text.isEmpty)
+                .panelIconHoverChrome(size: 18, cornerRadius: 4, enabled: !text.isEmpty)
         }
         .buttonStyle(.plain)
         .disabled(text.isEmpty)
@@ -292,7 +292,7 @@ struct CopyTextButton: View {
 
 enum PanelSurfaceStyle {
     static let cornerRadius: CGFloat = 6
-    static let cellHeaderHeight: CGFloat = 24
+    static let cellHeaderHeight: CGFloat = 26
     static let cellHeaderBackground = Color.primary.opacity(0.035)
     static let hairlineBorder = Color(nsColor: .separatorColor).opacity(0.55)
 }
@@ -330,7 +330,7 @@ struct PanelCellHeaderBar<Trailing: View>: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 4) {
+            HStack(spacing: 5) {
                 if let title {
                     Text(title)
                         .font(.caption.weight(.medium))
@@ -354,10 +354,10 @@ struct PanelCellHeaderBar<Trailing: View>: View {
                         .truncationMode(.tail)
                         .layoutPriority(-1)
                 }
-                Spacer(minLength: 3)
+                Spacer(minLength: 4)
                 trailing
             }
-            .padding(.horizontal, 7)
+            .padding(.horizontal, 9)
             .frame(height: PanelSurfaceStyle.cellHeaderHeight)
             .background(tint ?? PanelSurfaceStyle.cellHeaderBackground)
 
@@ -369,7 +369,7 @@ struct PanelCellHeaderBar<Trailing: View>: View {
 struct PanelBytesContent: View {
     let displayText: String
     let byteCount: UInt64
-    var verticalPadding: CGFloat = 5
+    var verticalPadding: CGFloat = 6
 
     var body: some View {
         Group {
@@ -385,7 +385,7 @@ struct PanelBytesContent: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 8)
+        .padding(.horizontal, 10)
         .padding(.vertical, verticalPadding)
     }
 }
