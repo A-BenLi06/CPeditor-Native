@@ -638,3 +638,16 @@ Core 规则区分空输入、缺少预期输出与预期输出为空、checker �
 - x64 Debug 构建并执行 Core CTest 17/17，committed 状态、Runner、Session 与 Companion 桥接测试通过。普通 PowerShell 使用捕获本机编译器及环境的配置调用 cpn-cli，仓库 unicode.cpp 的三个样例均为 AC。初测出现代码页 936 的 C4819；MSVC 配置显式采用 UTF-8 后编译警告消失，另用含空格与中文的路径验证中文和 emoji 字符串逐字节比较为 AC。
 - WinUIEdit 锁定的源码、补丁与 NuGet 还原通过。正式入口在 editor-output-properties 得到只有目录的 TargetPath，断言阻止继续；单独执行 Build 在 CppWinRTVerifyKitVersion 复现 MSB8036。实测 WindowsTargetPlatformVersion 为 10.0.26100.0，TargetPlatformVersion 却为 7.0，当前 VS 实例缺少 Windows Store 10.0 项目目标。已在实施计划和 Windows 构建说明补充组件名、复验顺序和签名分发前的工具链跨机检查。
 - 本轮机器证据位于 out/windows/x64/Debug/build-result.json、ctest.log、各桥接日志，以及 out/editor-probe-build.log、out/vs-ucrt-domain.log、out/cli-result-utf8.json 和 out/cli-literal-result.json。宿主部署、窗口激活和窗口内 Run All／取消／恢复待补齐主机组件后验收。
+
+## 2026-11-26T16:56:38+08:00 — 优化 macOS 标签栏 UI，强化当前标签与当前页面的视觉对应
+
+- **设计思路与连接式标签栏重构**：
+  - 在 `CodeEditorSurface.swift` 新增 `CodeEditorSurface.canvasBackgroundColor(for:)` 作为 `CodeEditorView` 深／浅色画布背景与当前标签表面色的单一真源，并同步更新 `WorkspaceView.leftEditorPane` 背景，消除接缝色差。
+  - 在 `WorkspaceView.swift` 新增 `DocumentTabBarMetrics`（`36 pt` 轨道高度、`5 pt` 顶部留白、`31 pt` 选中标签高度、`7 pt` 顶部圆角、`2 pt` 顶部强调条、`96 pt` 最小标签宽度）与 `OpenBottomTabBorderShape`（仅绘左、上圆角与右边，底部完全开放形成 90° T 型衔接）。
+  - 重构 `DocumentTabBar` 与 `DocumentTabItem`：采用下沉式凹槽轨道（浅色 `RGB(0.925, 0.925, 0.935)`／深色 `RGB(0.11, 0.11, 0.125)`）配合顶部与底部 `1 pt` 分割线；当前选中标签贴底不透明填充与当前页面同源的背景色（在 `STTextView` 分栏下为 `.textBackgroundColor`，其余情况及仅测试输出视图为 `canvasBackgroundColor`），直接覆盖其正下方底线并在顶部绘制 `2 pt` 系统强调色指示条（浅色模式叠加轻微上浮阴影），以强调色图标与 `.semibold` `.primary` 标题拉开与非当前标签的层级；非当前标签底部保留 `1 pt` 间隙使轨道底线连续穿过，由 `hoveredTabID` 统一控制相邻非选中、非悬停标签间的 `1 pt × 14 pt` 竖向分隔线；标签内关闭按钮复用 `panelIconHoverChrome(size: 16, cornerRadius: 4)`，右侧新建 `+` 按钮统一替换为 `PanelIconButton`，同时在 `DocumentTabItem` 保留 `.isButton`/`.isSelected` 无障碍特征并保持内部关闭按钮可独立访问。
+- **测试与验证**：
+  - 实际执行主机为 `macOS 27.0.1（26A434）arm64`、`Xcode 27.2（27B52）`、`Swift 6.4.2`（本次未在 Windows 主机执行或验证，`references/cpeditor` 子模块保持未修改）。
+  - 在 `WorkspaceUXTests.swift` 新增 `tabBarMetricsAndSeparatorVisibility()` 单元测试，验证几何常量、分隔线在选中与悬停相邻态的隐藏规则以及各编辑器／布局模式下的表面色一致性。
+  - 布局快照检查：通过 `CPN_LAYOUT_AUDIT_DIR="$PWD/out/macos/tabbar-audit"` 运行 `WorkspaceUXTests/renderLayoutAuditSnapshotsWhenRequested`，逐张人工核验 `01`/`02`（`CodeEditorView` 明暗色分栏）、`03`（`STTextView` 深色模式）、`05`（仅测试与输出视图）、`06`（空编辑与提示横幅）及 `11`/`12`（含工具栏整窗明暗色），确认当前标签与编辑器画布无缝融为一体、底线干净断开、顶部强调条与分隔线清晰且无双线或裁剪伪影。
+  - 最终代码后运行全量 `CPN_REQUIRE_GNU_CPP=1 ./script/test_macos.sh`：**18 个套件共 112 项测试全部通过**（32.113s）。
+  - 执行 `./script/build_and_run.sh --build-only` 时，因本机已运行的 `out/macos/CPEditorNative.app`（PID 85132）处于中文输入法组合态，脚本内 `AppLifecycle quit` 按设计保护返回退出码 75（未强杀用户实例）；随后在隔离路径 `out/macos/tabbar-audit/CPEditorNative.app` 完成完整 Debug `.app` 组装、Mach-O 校验（`script/verify_macos_build.py` 核对 15 个 Core 对象、`minos 26.0`、`sdk 27.2`）、`plutil -lint`、`codesign --verify --strict`，以及 `--recovery-file out/macos/tabbar-audit/workspace.json` 独立启动（`AppLifecycle verify`）与干净退出（`AppLifecycle quit`）校验，全部通过。

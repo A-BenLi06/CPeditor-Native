@@ -271,6 +271,38 @@ import NativeCoreBridge
         #expect(!ioOnly.needsHorizontalScroll)
     }
 
+    @Test func tabBarMetricsAndSeparatorVisibility() {
+        #expect(DocumentTabBarMetrics.barHeight == 36)
+        #expect(DocumentTabBarMetrics.topInset == 5)
+        #expect(DocumentTabBarMetrics.activeTabHeight == 31)
+        #expect(DocumentTabBarMetrics.topInset + DocumentTabBarMetrics.activeTabHeight == DocumentTabBarMetrics.barHeight)
+        #expect(DocumentTabBarMetrics.tabCornerRadius == 7)
+        #expect(DocumentTabBarMetrics.topAccentHeight == 2)
+        #expect(DocumentTabBarMetrics.minimumTabWidth == 96)
+
+        let ids = [RawIdentifier("doc-1"), RawIdentifier("doc-2"), RawIdentifier("doc-3"), RawIdentifier("doc-4")]
+        // 选中 doc-2 时，doc-1|doc-2 与 doc-2|doc-3 隐藏分隔线，仅 doc-3|doc-4 显示。
+        #expect(!DocumentTabBarMetrics.shouldShowTrailingSeparator(at: 0, documentIDs: ids, selectedID: ids[1], hoveredID: nil))
+        #expect(!DocumentTabBarMetrics.shouldShowTrailingSeparator(at: 1, documentIDs: ids, selectedID: ids[1], hoveredID: nil))
+        #expect(DocumentTabBarMetrics.shouldShowTrailingSeparator(at: 2, documentIDs: ids, selectedID: ids[1], hoveredID: nil))
+        #expect(!DocumentTabBarMetrics.shouldShowTrailingSeparator(at: 3, documentIDs: ids, selectedID: ids[1], hoveredID: nil))
+        #expect(!DocumentTabBarMetrics.shouldShowTrailingSeparator(at: -1, documentIDs: ids, selectedID: ids[1], hoveredID: nil))
+
+        // 悬停相邻标签时同样隐藏分隔线。
+        #expect(!DocumentTabBarMetrics.shouldShowTrailingSeparator(at: 2, documentIDs: ids, selectedID: ids[0], hoveredID: ids[3]))
+        #expect(!DocumentTabBarMetrics.shouldShowTrailingSeparator(at: 2, documentIDs: ids, selectedID: ids[0], hoveredID: ids[2]))
+        #expect(DocumentTabBarMetrics.shouldShowTrailingSeparator(at: 1, documentIDs: ids, selectedID: ids[0], hoveredID: ids[3]))
+
+        for scheme in [ColorScheme.light, .dark] {
+            let expectedCanvas = CodeEditorSurface.canvasBackgroundColor(for: scheme)
+            #expect(DocumentTabBarMetrics.activeTabSurfaceColor(editorKind: .codeEditorView, layoutMode: .split, colorScheme: scheme) == expectedCanvas)
+            #expect(DocumentTabBarMetrics.activeTabSurfaceColor(editorKind: .codeEditorView, layoutMode: .editorOnly, colorScheme: scheme) == expectedCanvas)
+            #expect(DocumentTabBarMetrics.activeTabSurfaceColor(editorKind: nil, layoutMode: .split, colorScheme: scheme) == expectedCanvas)
+            #expect(DocumentTabBarMetrics.activeTabSurfaceColor(editorKind: .stTextView, layoutMode: .ioOnly, colorScheme: scheme) == expectedCanvas)
+            #expect(DocumentTabBarMetrics.activeTabSurfaceColor(editorKind: .stTextView, layoutMode: .split, colorScheme: scheme) == Color(nsColor: .textBackgroundColor))
+        }
+    }
+
     @Test func renderLayoutAuditSnapshotsWhenRequested() async throws {
         guard let outputPath = ProcessInfo.processInfo.environment["CPN_LAYOUT_AUDIT_DIR"], !outputPath.isEmpty else { return }
         _ = NSApplication.shared

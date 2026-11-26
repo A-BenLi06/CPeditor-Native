@@ -81,6 +81,10 @@ struct CodeEditorSurface: View {
         invisiblesColour: NSColor(red: 0.84, green: 0.84, blue: 0.84, alpha: 1.0)
     )
 
+    @MainActor static func canvasBackgroundColor(for colorScheme: ColorScheme) -> Color {
+        Color(nsColor: colorScheme == .dark ? darkTheme.backgroundColour : lightTheme.backgroundColour)
+    }
+
     var body: some View {
         CodeEditor(text: $state.text, position: $state.position,
                    messages: $state.messages, language: state.language)

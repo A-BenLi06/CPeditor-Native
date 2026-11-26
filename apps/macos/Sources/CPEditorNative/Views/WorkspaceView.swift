@@ -5,6 +5,7 @@ import NativeCoreBridge
 
 struct WorkspaceView: View {
     @Environment(\.openSettings) private var openSettings
+    @Environment(\.colorScheme) private var colorScheme
     @State private var workspace: Workspace
     @State private var splitRatio: CGFloat = 0.57
 
@@ -283,7 +284,11 @@ struct WorkspaceView: View {
                 )
             }
         }
-        .background(Color(nsColor: .textBackgroundColor))
+        .background(
+            workspace.activeSession?.document.editorKind == .codeEditorView
+                ? CodeEditorSurface.canvasBackgroundColor(for: colorScheme)
+                : Color(nsColor: .textBackgroundColor)
+        )
     }
 
     @ViewBuilder
@@ -415,70 +420,185 @@ private struct SplitResizeHandle: View {
     }
 }
 
+internal enum DocumentTabBarMetrics {
+    static let barHeight: CGFloat = 36
+    static let topInset: CGFloat = 5
+    static let activeTabHeight: CGFloat = 31
+    static let tabCornerRadius: CGFloat = 7
+    static let topAccentHeight: CGFloat = 2
+    static let minimumTabWidth: CGFloat = 96
+
+    @MainActor static func activeTabSurfaceColor(
+        editorKind: EditorKind?,
+        layoutMode: WorkspaceLayoutMode,
+        colorScheme: ColorScheme
+    ) -> Color {
+        if layoutMode != .ioOnly && editorKind == .stTextView {
+            return Color(nsColor: .textBackgroundColor)
+        }
+        return CodeEditorSurface.canvasBackgroundColor(for: colorScheme)
+    }
+
+    static func trackBackgroundColor(for colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark
+            ? Color(red: 0.11, green: 0.11, blue: 0.125)
+            : Color(red: 0.925, green: 0.925, blue: 0.935)
+    }
+
+    static func shouldShowTrailingSeparator(
+        at index: Int,
+        documentIDs: [RawIdentifier],
+        selectedID: RawIdentifier?,
+        hoveredID: RawIdentifier?
+    ) -> Bool {
+        guard index >= 0, index + 1 < documentIDs.count else { return false }
+        let current = documentIDs[index]
+        let next = documentIDs[index + 1]
+        return current != selectedID
+            && next != selectedID
+            && current != hoveredID
+            && next != hoveredID
+    }
+}
+
+private struct OpenBottomTabBorderShape: Shape {
+    let cornerRadius: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let clampedRadius = min(cornerRadius, rect.width / 2, max(0, rect.height - 1))
+        let leftX = rect.minX + 0.5
+        let rightX = rect.maxX - 0.5
+        let topY = rect.minY + 0.5
+        let bottomY = rect.maxY
+
+        path.move(to: CGPoint(x: leftX, y: bottomY))
+        path.addArc(
+            tangent1End: CGPoint(x: leftX, y: topY),
+            tangent2End: CGPoint(x: rect.midX, y: topY),
+            radius: clampedRadius
+        )
+        path.addArc(
+            tangent1End: CGPoint(x: rightX, y: topY),
+            tangent2End: CGPoint(x: rightX, y: bottomY),
+            radius: clampedRadius
+        )
+        path.addLine(to: CGPoint(x: rightX, y: bottomY))
+        return path
+    }
+}
+
 private struct DocumentTabBar: View {
+    @Environment(\.colorScheme) private var colorScheme
     @Bindable var workspace: Workspace
+    @State private var hoveredTabID: RawIdentifier?
 
     private var canMutateWorkspace: Bool {
         !workspace.isBusy && workspace.persistentChangesAllowed
     }
 
+    private var activeTabSurfaceColor: Color {
+        DocumentTabBarMetrics.activeTabSurfaceColor(
+            editorKind: workspace.activeSession?.document.editorKind,
+            layoutMode: workspace.layoutMode,
+            colorScheme: colorScheme
+        )
+    }
+
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                ScrollViewReader { proxy in
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 4) {
-                            ForEach(workspace.sessions, id: \.document.id) { session in
-                                DocumentTabItem(
-                                    workspace: workspace,
-                                    session: session,
-                                    isSelected: workspace.selection == session.document.id
-                                )
-                                .id(session.document.id)
+        let documentIDs = workspace.sessions.map(\.document.id)
+        let separatorColor = Color(nsColor: .separatorColor).opacity(colorScheme == .dark ? 0.75 : 0.65)
+
+        HStack(spacing: 0) {
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 0) {
+                        ForEach(Array(workspace.sessions.enumerated()), id: \.element.document.id) { index, session in
+                            let id = session.document.id
+                            DocumentTabItem(
+                                workspace: workspace,
+                                session: session,
+                                isSelected: workspace.selection == id,
+                                isHovered: hoveredTabID == id,
+                                activeSurfaceColor: activeTabSurfaceColor,
+                                onHoverChanged: { hovering in
+                                    if hovering {
+                                        hoveredTabID = id
+                                    } else if hoveredTabID == id {
+                                        hoveredTabID = nil
+                                    }
+                                }
+                            )
+                            .id(id)
+
+                            if DocumentTabBarMetrics.shouldShowTrailingSeparator(
+                                at: index,
+                                documentIDs: documentIDs,
+                                selectedID: workspace.selection,
+                                hoveredID: hoveredTabID
+                            ) {
+                                Rectangle()
+                                    .fill(separatorColor)
+                                    .frame(width: 1, height: 14)
+                                    .padding(.top, DocumentTabBarMetrics.topInset)
+                                    .padding(.bottom, 1)
                             }
                         }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
                     }
-                    .onChange(of: workspace.selection) { _, newID in
-                        guard let newID else { return }
-                        withAnimation(.easeOut(duration: 0.15)) {
-                            proxy.scrollTo(newID)
-                        }
+                    .padding(.horizontal, 8)
+                    .frame(height: DocumentTabBarMetrics.barHeight, alignment: .bottom)
+                }
+                .onChange(of: workspace.selection) { _, newID in
+                    guard let newID else { return }
+                    withAnimation(.easeOut(duration: 0.15)) {
+                        proxy.scrollTo(newID)
                     }
                 }
-
-                Divider()
-                    .frame(height: 16)
-                    .padding(.horizontal, 4)
-
-                Button {
-                    workspace.createDocument()
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.caption.weight(.semibold))
-                        .frame(width: 24, height: 24)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.borderless)
-                .disabled(!canMutateWorkspace)
-                .help(L10n.string("help_new_document"))
-                .padding(.trailing, 8)
             }
-            .frame(height: 34)
-            .background(.bar)
-            .disabled(workspace.isLoading || workspace.isClosing || workspace.closingDocumentID != nil || workspace.decidingCloseID != nil)
 
-            Divider()
+            Rectangle()
+                .fill(separatorColor)
+                .frame(width: 1, height: 16)
+                .padding(.horizontal, 6)
+
+            PanelIconButton(
+                systemImage: "plus",
+                helpKey: "help_new_document",
+                accessibilityKey: "new_file",
+                size: 24,
+                font: .system(size: 12, weight: .semibold),
+                isDisabled: !canMutateWorkspace
+            ) {
+                workspace.createDocument()
+            }
+            .padding(.trailing, 8)
         }
+        .frame(height: DocumentTabBarMetrics.barHeight)
+        .background {
+            DocumentTabBarMetrics.trackBackgroundColor(for: colorScheme)
+                .overlay(alignment: .top) {
+                    Rectangle()
+                        .fill(separatorColor)
+                        .frame(height: 1)
+                }
+                .overlay(alignment: .bottom) {
+                    Rectangle()
+                        .fill(separatorColor)
+                        .frame(height: 1)
+                }
+        }
+        .disabled(workspace.isLoading || workspace.isClosing || workspace.closingDocumentID != nil || workspace.decidingCloseID != nil)
     }
 }
 
 private struct DocumentTabItem: View {
+    @Environment(\.colorScheme) private var colorScheme
     let workspace: Workspace
     let session: NativeEditorSession
     let isSelected: Bool
-    @State private var isHovering = false
+    let isHovered: Bool
+    let activeSurfaceColor: Color
+    let onHoverChanged: (Bool) -> Void
 
     private var iconName: String {
         if workspace.companionProblemTitle(for: session) != nil {
@@ -502,14 +622,28 @@ private struct DocumentTabItem: View {
         !workspace.isBusy && workspace.persistentChangesAllowed
     }
 
+    private var activeShape: UnevenRoundedRectangle {
+        UnevenRoundedRectangle(
+            topLeadingRadius: DocumentTabBarMetrics.tabCornerRadius,
+            bottomLeadingRadius: 0,
+            bottomTrailingRadius: 0,
+            topTrailingRadius: DocumentTabBarMetrics.tabCornerRadius,
+            style: .continuous
+        )
+    }
+
     var body: some View {
+        let bodyHeight = isSelected
+            ? DocumentTabBarMetrics.activeTabHeight
+            : DocumentTabBarMetrics.activeTabHeight - 1
+
         HStack(spacing: 6) {
             Image(systemName: iconName)
-                .font(.caption)
-                .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+                .font(.caption.weight(isSelected ? .semibold : .regular))
+                .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
 
             Text(workspace.title(for: session))
-                .font(.callout.weight(isSelected ? .medium : .regular))
+                .font(.callout.weight(isSelected ? .semibold : .regular))
                 .foregroundStyle(isSelected ? Color.primary : Color.secondary)
                 .lineLimit(1)
 
@@ -527,15 +661,14 @@ private struct DocumentTabItem: View {
             }
 
             ZStack {
-                if isHovering && canCloseTab {
+                if isHovered && canCloseTab {
                     Button {
                         Task { await workspace.closeDocument(session) }
                     } label: {
                         Image(systemName: "xmark")
                             .font(.system(size: 9, weight: .bold))
                             .foregroundStyle(.secondary)
-                            .frame(width: 14, height: 14)
-                            .contentShape(Rectangle())
+                            .panelIconHoverChrome(size: 16, cornerRadius: 4, enabled: canCloseTab)
                     }
                     .buttonStyle(.borderless)
                     .help(L10n.string("close_tab"))
@@ -551,31 +684,50 @@ private struct DocumentTabItem: View {
                         .accessibilityLabel(L10n.string("unsaved_changes"))
                 }
             }
-            .frame(width: 14, height: 14)
+            .frame(width: 16, height: 16)
         }
-        .padding(.horizontal, 9)
-        .padding(.vertical, 4)
-        .frame(height: 26)
+        .padding(.horizontal, 10)
+        .frame(minWidth: DocumentTabBarMetrics.minimumTabWidth, minHeight: bodyHeight, maxHeight: bodyHeight)
         .background {
             if isSelected {
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(Color(nsColor: .controlBackgroundColor))
-            } else if isHovering {
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(.quaternary.opacity(0.6))
+                activeShape
+                    .fill(activeSurfaceColor)
+                    .overlay(alignment: .top) {
+                        Rectangle()
+                            .fill(Color.accentColor)
+                            .frame(height: DocumentTabBarMetrics.topAccentHeight)
+                    }
+                    .clipShape(activeShape)
+                    .shadow(
+                        color: colorScheme == .light ? Color.black.opacity(0.06) : .clear,
+                        radius: 2,
+                        x: 0,
+                        y: -1
+                    )
+            } else if isHovered {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color.primary.opacity(colorScheme == .dark ? 0.08 : 0.06))
+                    .padding(.horizontal, 2)
+                    .padding(.vertical, 2)
             }
         }
         .overlay {
             if isSelected {
-                RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(Color(nsColor: .separatorColor).opacity(0.75), lineWidth: 1)
+                OpenBottomTabBorderShape(cornerRadius: DocumentTabBarMetrics.tabCornerRadius)
+                    .stroke(
+                        Color(nsColor: .separatorColor).opacity(colorScheme == .dark ? 0.9 : 0.8),
+                        lineWidth: 1
+                    )
             }
         }
-        .contentShape(RoundedRectangle(cornerRadius: 6))
+        .padding(.top, DocumentTabBarMetrics.topInset)
+        .padding(.bottom, isSelected ? 0 : 1)
+        .contentShape(Rectangle())
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : [.isButton])
         .onTapGesture {
             workspace.selection = session.document.id
         }
-        .onHover { isHovering = $0 }
+        .onHover(perform: onHoverChanged)
         .contextMenu {
             Button(L10n.string("save")) {
                 Task { await workspace.save(session) }
