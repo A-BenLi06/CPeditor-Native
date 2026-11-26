@@ -612,3 +612,21 @@ Core 规则区分空输入、缺少预期输出与预期输出为空、checker �
 - **设计思路与排版重构**：针对分屏模式下三栏均分过挤且先 Expected 后 Output 不便于及时核对实际输出的问题，在 `RunPanelView.swift` 中新增 `TestCaseColumn` 与 `TestCaseGridMetrics`，将列序固定为 **`Input → Output → Expected Output`**（贴合原版 CP Editor 对照顺序与用户要求），并以最低 `220 pt` 列宽构建可横向滚动的等高三栏对照网格（窄屏下保持 220 pt 列宽横向滚动，不在窄宽窗口塌缩成竖排堆叠；宽于 `662 pt` 的仅 IO 视图自动按视口等宽铺满三栏并隐藏横向滚动条）。
 - **空间留白与基线对齐**：在 `WorkspaceComponents.swift` 将 `PanelSurfaceStyle.cellHeaderHeight` 从 `24 pt` 调整为 `26 pt`、`CopyTextButton` 尺寸增至 `18×18`，加大 `PanelCellHeaderBar` 与 `PanelBytesContent` 水平/垂直内边距；在 `RunPanelView.swift` 将 `TestCaseSectionView` 的常规/展开编辑高度由 `68/132 pt` 提高到 `112/224 pt`、调整 `ioTextEditor` 内边距使 `Input`/`Output`/`Expected Output` 首行字符对齐同一视觉基线，并将 `outputPane` 明确设为 `ScrollView(.vertical)` 避免截获横向触控板/滚轮滚动。
 - **验证与范围**：实际执行主机为 `macOS 27.0.1（26A434）arm64`、`Xcode 27.2（27B52）`、`Swift 6.4.2`（本次未在 Windows 主机执行或验证；未改动 C++ Core 代码）。最终代码后运行 `./script/test_macos.sh` 全量 18 个套件共 111 项测试全部通过（含 `WorkspaceUXTests.testCaseGridOrderAndHorizontalScrollMetrics` 对列序与 `325`/`507`/`662`/`1214 pt` 视口计算边界的断言）；通过 `WorkspaceUXTests.renderLayoutAuditSnapshotsWhenRequested` 导出 `out/macos/testcase-scroll-audit/` 快照并人工核验 `01`/`02`（分屏明暗色 `Input → Output` 舒展且右侧自然露出 `Expected Output` 滚动提示）、`03`（CE 深色）、`04`（780×520 窄屏不塌缩）、`05`（仅 IO 视图三栏等宽铺满）、`07`（Companion 详情未受回归）与 `10`（stderr/Unchecked 诊断与基线对齐）；执行 `./script/build_and_run.sh --verify` 打包真实 `.app` 并通过 `codesign --verify --strict` 与 `AppLifecycle quit` 退出校验。`references/cpeditor` 子模块保持未修改。
+
+
+## 2026-11-26T16:02:26+08:00 — 重构中文 README、采集真机与运行截图并重建 v0.1.0 预览发布
+
+- **版本策略与协作规则固化**：按用户要求在 `AGENTS.md`、`README.md`、`docs/releases/v0.1.0.md` 与 Release 说明中明确后续版本按 **`0.1.x` 补丁号持续递增**（`v0.1.0` → `v0.1.1` → `v0.1.2`…），未收到明确升级指令前不提升前两位版本号；本轮保持应用版本号 `0.1.0`（`CMakeLists.txt`、`apps/macos/AppMetadata.plist`、`apps/windows/CPEditorNativeWindows/Package.appxmanifest`），基于最新 `main`（包含 `84bdd71`–`8ddde4f` 修复与界面迭代）重建并替换 `v0.1.0` 标签及 GitHub Pre-release 产物与说明。
+- **v0.1.0 macOS arm64 Release 构建、测试与打包**：在隔离目录 `out/releases/v0.1.0/` 执行 `./out/releases/v0.1.0/build.sh` 与 `./out/releases/v0.1.0/package.sh`：
+  - 实际构建与测试主机：`macOS 27.0.1（26A434）arm64`、`Xcode 27.2（27B52）`、`SDK 27.2`、`Swift 6.4.2`、`Apple Clang 21`、`Homebrew GCC 15.2.0_1`（`/opt/homebrew/bin/g++-15`）。本次未在 Windows 主机执行或验证。
+  - CMake `Release` 共享 Core 全部通过 `ctest` **17/17**（4.09s）；`CPN_REQUIRE_GNU_CPP=1` 条件下 SwiftPM `release` 全量测试 **18 个套件 111/111** 全部通过（14.103s），包含真实 `g++-15` 编译运行 `bits/stdc++.h` 用例。
+  - `script/verify_macos_build.py` 核对 15 个 Core Mach-O 对象与 `CPEditorNative` 最终可执行文件均为 `arm64`、`minos 26.0`、`sdk 27.2`，`otool -L` 确认仅链接 `/usr/lib/*` 与 `/System/Library/Frameworks/*` 系统库；`plutil -lint`、打包前与解压后 `codesign --verify --strict` 全部通过；生成 `CPEditor-Native-v0.1.0-macos-arm64.zip` 与 `SHA256SUMS.txt`（`bd8d1627a1f1d352a5ccddcbd8ac95cf596f70368008e94bbc69f917030ef8b6`）。
+- **真机启动解压包运行与 6 场景窗口截图采集**：在隔离恢复路径 `out/releases/v0.1.0/showcase/workspace.json` 使用共享 Core C ABI 生成纯洁竞赛演示工作区（不触碰用户默认恢复目录，不含本地用户名路径），实际启动解压版 `CPEditorNative.app` 并由 `g++-15` 执行真实编译与运行，通过 `CGWindowListCopyWindowInfo` + `screencapture -l` 采集并逐张视觉核验 6 张原生窗口截图至 `docs/screenshots/`：
+  1. `docs/screenshots/macos-light-run-split.png`：浅色分栏主窗口与 `#include <bits/stdc++.h>` 真实 `AC`（30 ms）／`WA`（19 ms）横向对照。
+  2. `docs/screenshots/macos-run-io-only.png`：`⌃⌘3` 仅测试与输出视图三栏完整展开（`Input`、`Output`、`Expected Output`）。
+  3. `docs/screenshots/macos-companion-inbox.png`：Companion 收件箱（`All (3)` / `Pending (1)` / `Applied (2)`、`Special I/O` 与来源限制元数据）。
+  4. `docs/screenshots/macos-settings-toolchain.png`：原生 Settings → Run → Visual 工具链配置弹窗（`macos-gcc-cpp17` 与发现的 `/opt/homebrew/bin/g++-15`）。
+  5. `docs/screenshots/macos-dark-run-split.png`：正常退出后以深色外观重启恢复工作区并再次通过 `g++-15` 复跑得到 `AC`（24 ms）／`WA`（7 ms）。
+  6. `docs/screenshots/macos-compile-error-dark.png`：深色模式真实 `g++-15` 编译错误诊断（`Compiler Output` `CE` 横幅与 `Standard Error` 定位信息）。
+  - 验证完成后两个演示实例均经 `terminate()` 正常退出，`defaults read org.cpeditor.native.macos workspaceAppearance` 确认恢复为 `system`。
+- **文档与发布材料更新**：全面重构根目录 `README.md`（融入 6 张真机运行截图、核心能力、校验下载指南、平台状态与 Mermaid 架构图、核对自 `EditorCommands.swift` 的 macOS 快捷键表、构建入口、`0.1.x` 版本规则与完整文档索引），同步更新 `docs/releases/v0.1.0.md`、`docs/status.md` 与 `out/releases/v0.1.0/release-notes.md`；`references/cpeditor` 子模块保持干净未修改。

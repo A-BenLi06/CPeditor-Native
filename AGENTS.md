@@ -10,3 +10,4 @@
 - 每次创建 Git 提交后，立即自动 push 到当前分支已配置的上游远端；推送成功后才报告已同步，失败时保留本地提交并记录、报告原因。
 - `references/cpeditor` 是上游研究子模块。不要将修改该子模块的实现当作原生应用开发。更新参考源码时，必须明确记录新的源码版本。
 - 在实现和验证提供证据之前，研究与架构文档中的行为均属于拟议设计。
+- 版本迭代规则：当前版本号按 `0.1.x` 补丁号持续递增迭代（`v0.1.0` → `v0.1.1` → `v0.1.2`…）。未经用户明确要求，不得提升前两位版本号；发版时同步更新 `CMakeLists.txt`、`apps/macos/AppMetadata.plist`、`apps/windows/CPEditorNativeWindows/Package.appxmanifest` 与 `docs/releases/`。

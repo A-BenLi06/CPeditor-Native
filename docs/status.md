@@ -1,22 +1,25 @@
 # 实施状态与证据
 
-更新时间：2026-11-23T18:53:07+08:00。目标仍为完成设计与实施，以下仅是当前进度，不代表全部里程碑已经通过。
+更新时间：2026-11-26T16:02:26+08:00。目标仍为完成设计与实施，以下仅是当前进度，不代表全部里程碑已经通过。
 
 | 阶段 | 状态 | 当前证据与剩余工作 |
 | --- | --- | --- |
 | 设计与源码研究 | 已完成当前基线 | 中文设计文档、固定 CP Editor 子模块与源码引用；实现中如需调整会继续更新 |
-| M0 原生编辑器 | 进行中 | 两端宿主已编写；macOS 统一 Xcode 27／macOS 26.0 构建目标、状态栏 `TextLineIndex` 稀疏位集行列索引、仿上游 CP Editor 顶部标签栏与左编右测布局、三种视图模式（`⌃⌘1`/`2`/`3` 与 `⌘⇧Y`）、内联结果一体化测试卡、默认 GNU G++17／20、可显式选择 Clang、Visual＋JSON 双模配置表及 `CodeEditorView`/`STTextView` 双深浅色外观修复已集成，108 项 Swift 测试（18 套件）、17/17 Core CTest 与原生窗口回归通过，历史布局快照见 `out/macos/layout-audit/`；Windows 固定源码补丁、PowerShell 入口与报告已提供；5225776 与 6fc3606 的 Server 2022 x64 Debug／Release 已通过 Core、Runner／Session、WinUIEdit及完整宿主编译／产物断言；a4d08e3 新增Companion六组桥接已在两配置CI执行通过；57f4fe7 的 Server2022 x64 Debug／Release 已通过新增 Companion 与完整宿主构建。目标 Windows、最低 macOS 26 实机、系统 IME／远程及整应用性能仍待验证 |
-| M1 可移植 Core | 进行中 | Qt-free C++20 领域、原生进程、文件事务、会话恢复、外部 checker、批量服务、JobRegistry、Companion 纯解码器与 ABI 1 已实现；macOS 普通和完整严格警告 ASan/UBSan 17/17 入口通过（含监听生命周期 ABI），CLI 3 AC。Windows Server 2022 x64 Debug／Release 在 dbecc57 均已通过 Core 14/14（含持久收件箱）及正式桥接测试，取消竞态／补丁换行修复已复验；501ad0d／4c18ee2 的 Windows Core 15/15 已通过；594a9cf 的 Windows Core 16/16、Runner／Session 桥接与 WinUIEdit 编译／产物断言均已通过，6fc3606 的 Windows Core 17/17、Runner／Session及完整宿主也已通过；目标机UI仍待验收 |
-| M2–M4 原生功能链路/互操作 | 未完成 | macOS C ABI actor 与原生测试面板已实现；13 项 Swift／真实 Core 测试和 CUA 导入样例→3 AC 通过。macOS 会话恢复、协调保存与关闭已接入；41 项 Swift／真实 Core 测试和 CUA 重启未保存正文／样例、冲突保护／另存及恢复后 AC 通过；外部 checker 配置、独立诊断、原始输出 hex 和重启配置恢复已通过真实 UI 验证，首次配置窗口的数据流缺陷已修复。Windows 多标签、独立样例、committed 快照及 C ABI Run All／Cancel 已接入源码；在 macOS 的普通／ASan+UBSan／TSan 真实 Core 桥接测试通过。Windows 会话 worker／完整候选模型／源文件事务／自动恢复与关闭屏障已接入源码，含最终 MAX 事务及同步 TextChanging；独立普通／ASan+UBSan 13组与作者TSan13组通过，原生恢复链路仍待实际Windows宿主及目标机验收；Companion 有界持久收件箱／去重更新／原子会话导入回执已通过普通及 ASan/UBSan 全部 Core 验收；四个导入 C ABI 已集成且通过全部 Core 验收；有界回环 HTTP 服务已完成独立审查，根普通／完整严格警告 ASan+UBSan 16/16 与 TSan HTTP 1/1 通过；监听生命周期 ABI 已实现，普通／完整 ASan+UBSan 17/17 及独立44项故障检查通过；Windows Companion面板、显式监听与文件导入已接入源码，根普通／完整ASan+UBSan六组与作者TSan六组通过，两处恢复基线／首owner预算问题经独立真实Core探针复验；新增Companion六组已在Windows两配置CI通过；57f4fe7 两配置 CI 已通过完整宿主，目标机 UI 仍待验收。macOS Companion 文件收件箱、持久绑定、回执后确认及来源运行门禁已接入，70项 Swift／真实 Core 测试通过，前台 Pending→Applied→AC／不兼容禁用／重启防重放通过；MAX 精确恢复、最后提交／关闭回滚与源写入完成回执、跨标签结果归属均有自动及独立探针。macOS HTTP／真实扩展和高级功能继续验收 |
+| M0 原生编辑器 | 进行中 | 两端宿主已编写；macOS 统一 Xcode 27／macOS 26.0 构建目标、状态栏 `TextLineIndex` 稀疏位集行列索引、仿上游 CP Editor 顶部标签栏与左编右测布局、三种视图模式（`⌃⌘1`/`2`/`3` 与 `⌘⇧Y`）、Compile / Run / Compile & Run 操作分离、Xcode 统一工具栏、Output 先行横向对照测试区、默认 GNU G++17／20、可显式选择 Clang、Visual＋JSON 双模配置表及 `CodeEditorView`/`STTextView` 双深浅色外观修复已集成，Release Swift 111 项（18 套件）、Core 17/17 CTest 与 6 场景真机窗口运行截图（`docs/screenshots/`）通过核验；Windows 固定源码补丁、PowerShell 入口与报告已提供；最新 Windows Server 2022 x64 Debug／Release CI 已通过 Core、Runner／Session、Companion、WinUIEdit 及完整宿主编译／产物断言。目标 Windows 10、最低 macOS 26 实机、系统 IME／远程及整应用性能仍待验证 |
+| M1 可移植 Core | 进行中 | Qt-free C++20 领域、原生进程、文件事务、会话恢复、外部 checker、批量服务（含 `compile_only` / `run_only` 模式）、JobRegistry、Companion 纯解码器与 ABI 1 已实现；macOS 普通、Release 与完整严格警告 ASan/UBSan 17/17 入口通过，CLI 3 AC。Windows Server 2022 x64 Debug／Release CI 已通过 Core 17/17、Runner／Session、Companion 与完整宿主构建；目标机 UI 仍待验收 |
+| M2–M4 原生功能链路/互操作 | 未完成 | macOS C ABI actor、原生测试面板、编译/运行分离、会话恢复、协调保存与关闭、外部 checker 配置与独立诊断、Companion 文件收件箱、MAX 精确恢复与跨标签结果归属已接入并纳入当前 Release 111 项测试及实机截图核验；macOS HTTP／真实扩展和高级功能继续验收。Windows 多标签、committed 快照、C ABI Run All／Cancel、会话恢复、Companion 面板与显式监听已接入源码并编译通过 Windows Server 2022 CI，目标机 UI 仍待验收 |
 | M5 高级服务 | 未完成 | 外部 checker 已接入 Core／C ABI／CLI 和 macOS 原生配置／独立诊断面板；Windows checker 配置、LSP、格式化、终端、压力/交互判题和提交适配器尚未完成 |
-| M6 发布 | 预览已发布，正式验收未完成 | `v0.1.0` 提供 macOS arm64 优化构建与 SHA-256；目标系统性能、安装／更新、Developer ID 签名／公证仍待验收 |
+| M6 发布 | 预览已更新（`v0.1.0`），正式验收未完成 | 已按 `0.1.x` 版本迭代规则基于最新 `main` 重建 `v0.1.0` Pre-release：提供 macOS arm64 Release ZIP、SHA-256、6 张实机截图与发布说明；目标系统性能、安装／更新、Developer ID 签名／公证及 Windows 安装包仍待验收 |
 
 当前可运行的检查：在仓库根目录执行 `cmake --preset dev`、`cmake --build --preset dev` 和 `ctest --preset dev`。这些覆盖当前领域、真实进程与判题服务、并发生命周期和 C ABI，不证明完整产品／目标平台验收完成。准确请求格式见 [当前 Core API](core-api.md)。
 
-实际执行主机：macOS 27.0.1 arm64，Xcode 27.2，Swift 6.4.2，Apple Clang 21，CMake 4.4.3。Windows 10 22H2/PowerShell 7 目标验证待执行。
+实际执行主机：macOS 27.0.1 arm64，Xcode 27.2，Swift 6.4.2，Apple Clang 21，CMake 4.4.3，Homebrew GCC 15.2.0_1（`/opt/homebrew/bin/g++-15`）。Windows 10 22H2/PowerShell 7 目标验证待执行。
 
 ## 本轮可复核证据
 
+- **v0.1.0 重建与实机运行核验**：在隔离目录 `out/releases/v0.1.0/` 完成 Release 构建与验证：Core Release CTest 17/17（4.09s）、`CPN_REQUIRE_GNU_CPP=1` SwiftPM Release 18 套件 111/111（14.103s）、`verify_macos_build.py` 15 个 Core 对象与可执行文件（`arm64`、`minos 26.0`、`sdk 27.2`、仅系统动态库）、打包前后 `codesign --verify --strict` 通过；解压后以 `--recovery-file` 启动实机 `CPEditorNative.app`，完成 GNU `g++-15` `bits/stdc++.h` 运行与 CE 诊断等 6 张真机窗口截图（`docs/screenshots/`），详情见 [v0.1.0 发布说明](releases/v0.1.0.md)。
+- [macOS CI 45548967251](https://github.com/A-BenLi06/CPeditor-Native/actions/runs/45548967251) 验证提交 `8ddde4f`，Swift、Core 与应用包构建及严格签名检查全部通过。
+- [Windows CI 45437684539](https://github.com/A-BenLi06/CPeditor-Native/actions/runs/45437684539) 验证提交 `75e7b52`，Server 2022 x64 Debug／Release 完整 Core、桥接测试与宿主构建通过。
 - [macOS CI 45160293245](https://github.com/A-BenLi06/CPeditor-Native/actions/runs/45160293245) 验证 `84bdd71`，Swift 108/108、Core 17/17、应用包构建和严格签名检查全部通过。
 
 - `v0.1.0` 之后的回归新增 7 项测试，复现并修复选区缩进丢字、引号边界误删、闭括号无对应上下文时误跳过、十六进制分隔符／未闭合字符串影响后续输入、局部换行格式和 G++ 路径升级失效。详细场景见 [发布后回归](regressions/macos-post-v0.1.0.md)。
