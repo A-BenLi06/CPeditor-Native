@@ -1,8 +1,8 @@
 # Windows 原生应用与共享 Core 接入
 
-这是 WinUI 3 + C++/WinRT + WinUIEdit 的原生应用工程。当前源码已编写多标签、每文档独立编辑器、committed 快照、源文件摘要保护、样例编辑、工具链选择、Run All / Cancel、会话恢复和共享 C ABI 协调。便携桥接测试已在 macOS 执行；会话恢复已在 Windows Server 2022 x64 Debug／Release CI 编译通过；本轮新增 Companion 面板的编译等待下一轮 CI。部署、运行及目标 Windows10 原生行为仍需实测。
+这是 WinUI 3 + C++/WinRT + WinUIEdit 的原生应用工程。当前已完成与 macOS `v0.1.0` 对齐的核心工作台体验：**MenuBar + 紧凑 Fluent 工具栏**、**左编右测可拖拽分栏与三视图模式**（Editor Only `Ctrl+Shift+1` / Split `Ctrl+Shift+2` / Tests Only `Ctrl+Shift+3`）、**Compile / Run Without Compiling / Compile & Run 分离与编译产物复用**、**Output 先行（`Input → Output → Expected Output`）三栏对照测试区与独立编译错误横幅**、**外部 Checker 配置与诊断**（Visual + JSON）、**运行时工具链自动发现**（MSVC / GCC / Clang / Python，自动跳过 0 字节 `WindowsApps` 占位）及 **Visual/JSON 配置表**、**原生 Settings 对话框**（Light/Dark/System 主题、自动换行、括号/引号配对、Tab 宽度）、**低干扰竞赛编辑辅助**（`EditorAssist` + 受 IME 门控的 WinUIEdit 按键/字符挂钩）与升级后的 **Companion 收件箱筛选/分页面板**。
 
-主要目标是 Windows 10 22H2 专业工作站版。实际开发与本轮便携验证主机为 macOS ARM64，不能将其结果记为 Windows、WinUI、输入法、DPI 或 UU 远程验证通过。
+主要目标平台为 **Windows 10 22H2 专业工作站版（19045 / SKU 161 x64）**。本轮已在该目标机使用 VS 2026 Build Tools（v145 / SDK `10.0.26100.0`）与 PowerShell 7.7.0 实机通过 Debug x64 全套自动测试、MSIX layout 部署与激活启动（0 警告 0 错误，加载 `WinUIEditor.dll`/`WinUIEdit.dll`/`Microsoft.UI.Xaml.dll` 并实测写入包含已发现工具链的 `LocalState\Recovery\workspace.json`）以及 Release x64 全量构建测试（`automatedPassed: true`）。由于代理执行沙箱位于独立桌面 `WinSta0\exebox-*`，无法跨桌面截取交互桌面 `WinSta0\Default` 的窗口画面，交互界面视觉、系统中文输入法、高 DPI、大文件及远程桌面行为仍须在交互桌面手工复核（不自动勾选未执行的 `manualScenarios`）。
 
 ## 组成与边界
 
@@ -104,7 +104,7 @@ pwsh -File ./tools/windows/verify.ps1 -Configuration Debug -Platform x64 -Deploy
 
 输出位于 `out/windows/<Platform>/<Configuration>/`，包含各阶段退出码与日志、Core 测试名称、归档及控件 SHA256、MSBuild binlog、MSIX layout、`build-result.json`、`verification-report.json` 和中文 `measurement-template.md`。非 Windows 主机执行会以失败退出并生成失败报告，全部 Windows 构建、执行和人工验收标记保持未执行。
 
-`-Deploy` 注册 AppxManifest，`-Launch` 请求部署与启动。PowerShell 7 使用 Windows PowerShell 兼容宿主调用 Appx。工程用正常 WinMD 项目引用注册组件。`activationRequested` 仅代表启动请求；`uiValidationCompleted` 保持 false，人工场景默认 `not_run` / `passed: null`。只有完成目标机操作并提供证据后才可填写通过。
+`-Deploy` 根据 `CPEditorNativeWindows.build.appxrecipe` 将完整载荷（含 JSON 配置、`Licenses\`、`Toolchains\*.json` 与 WinUIEdit/WebView2 运行时组件）物化到 `out/windows/<Platform>/<Configuration>/layout/`，自动检查并安装匹配的缺失 SDK 框架依赖（如 Debug 下的 `Microsoft.VCLibs.140.00.Debug` 与 `Debug.UWPDesktop`），再注册 `AppxManifest.xml`；`-Launch` 通过 `explorer.exe shell:AppsFolder\...` 请求激活。PowerShell 7 使用 Windows PowerShell 兼容宿主调用 Appx。工程用正常 WinMD 项目引用注册组件，所有 JSON 配置文件在 `.vcxproj` 中通过 `<None><DeploymentContent>true</DeploymentContent></None>` 声明部署内容。`activationRequested` 仅代表启动请求；`uiValidationCompleted` 保持 false，人工场景默认 `not_run` / `passed: null`。只有完成目标机操作并提供证据后才可填写通过。
 
 ## 验证范围与后续验收
 
@@ -163,4 +163,6 @@ MAX-1 最后一次追加使用现有 `PersistenceGate`：先结束自身 apply s
 恢复启动以加载时、原生 prepare 之前的实际磁盘逻辑内容建立基线。未修改的 Loaded／MAX-1／MAX 不为启动本身递增；真正补齐本机偏好等归一化变化仍需合法 successor。新 Inbox owner 若尚未实际持久且只剩最终 revision 或已耗尽，会在 owner 安装、载荷接收或监听启动之前明确拒绝，保留工作区和 Inbox；已有持久 owner 仍允许 MAX-1 的最后一次合法题目应用。首次绑定在等待中的恢复保存结束后重新检查实际剩余预算，不使用延时或关闭自动保存来回避边界。
 
 
-Windows CI `6fc3606` 已在 Server 2022 x64 Debug／Release 通过 Core 17/17、Runner／Session、WinUIEdit及完整宿主编译和产物检查。该版本尚未包含本轮新增Companion面板；后者由本次提交的CI继续验证。`verify.ps1` 已集成正式CompanionTests，自动通过必须同时完成Core、Runner、Session、Companion与原生宿主；20项人工场景保持未执行，包含导入保真、重复／更新、持久失败／另存、来源能力及真实扩展监听。
+本机实测（Windows 10 22H2 专业工作站版 19045 / SKU 161 x64，PowerShell 7.7.0，VS 2026 Build Tools v145）已通过 Debug/Release x64 全量 Core 17/17、`committed-text-tests`、`core-adapter-tests`、`session-tests`、`companion-tests`、WinUIEdit 与应用宿主编译（0 警告 0 错误），并完成 Debug MSIX layout 生成、VCLibs Debug 依赖自动安装、包注册与无崩溃进程启动（验证 `WinUIEditor.dll`/`WinUIEdit.dll` 加载及 `LocalState\Recovery\workspace.json` 工具链自动发现持久化）。交互式窗口 UI、系统中文 IME 候选、高 DPI 与整应用性能仍待交互桌面人工验收。
+
+`CoreWire` 现支持 `compile_only` / `run_only` / `compile_and_run` 运行模式与产物路径复用、外部 Checker 配置下发与独立诊断字段；`CheckerModel`（`checker-settings.json`）、`ToolchainDiscovery`（`toolchain-discovery.json`，支持 MSVC / GCC / Clang / Python 运行时扫描并过滤 `WindowsApps` 0 字节存根）与 `EditorAssist`（`editor-profiles.json`）均纳入 `core-adapter-tests` 离线严格验证。`RecoveryModel` 新增 `org.cpeditor.native.windows.workspace` v1 工作区 UI 偏好（主题、换行、自动配对、Tab 宽度、Checker 设置）持久化与向后兼容解析。

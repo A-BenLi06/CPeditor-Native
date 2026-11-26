@@ -1,4 +1,4 @@
-#Requires -Version 7.0
+﻿#Requires -Version 7.0
 [CmdletBinding()]
 param(
     [ValidateSet('Debug', 'Release')][string] $Configuration = 'Debug',
@@ -82,8 +82,10 @@ try {
         '/nologo', '/std:c++20', '/EHsc', '/W4', '/utf-8', $runtimeLibrary, '/DCPN_PORTABLE_ADAPTER_TEST',
         "/I$(Join-Path $repositoryRoot 'core/include')", "/I$(Join-Path $repositoryRoot 'third_party/json/include')", "/I$bridgeSource",
         (Join-Path $bridgeSource 'CoreWire.cpp'), (Join-Path $bridgeSource 'CoreRunner.cpp'),
+        (Join-Path $bridgeSource 'CheckerModel.cpp'), (Join-Path $bridgeSource 'ToolchainDiscovery.cpp'),
+        (Join-Path $bridgeSource 'EditorAssist.cpp'),
         (Join-Path $bridgeSource 'RunnerConfiguration.cpp'), (Join-Path $repositoryRoot 'apps/windows/tests/CoreRunnerTests.cpp'),
-        "/Fo$bridgeObjects\", "/Fe:$bridgeTestExe", '/link', $coreLibrary, 'Ws2_32.lib', 'Mswsock.lib'
+        "/Fo$bridgeObjects\", "/Fe:$bridgeTestExe", '/link', $coreLibrary, 'Ws2_32.lib', 'Mswsock.lib', 'Advapi32.lib'
     ) -Report $report -OutputRoot $outputRoot
     $report.bridgeBuildCompleted = $true
     if ($nativeTestPlatform) {
@@ -99,6 +101,7 @@ try {
         '/nologo', '/std:c++20', '/EHsc', '/W4', '/utf-8', $runtimeLibrary, '/DCPN_PORTABLE_ADAPTER_TEST',
         "/I$(Join-Path $repositoryRoot 'core/include')", "/I$(Join-Path $repositoryRoot 'third_party/json/include')", "/I$bridgeSource",
         (Join-Path $bridgeSource 'SessionWorker.cpp'), (Join-Path $bridgeSource 'RecoveryModel.cpp'),
+        (Join-Path $bridgeSource 'CheckerModel.cpp'),
         (Join-Path $bridgeSource 'SourceStore.cpp'), (Join-Path $bridgeSource 'RunnerConfiguration.cpp'),
         (Join-Path $repositoryRoot 'apps/windows/tests/SessionTests.cpp'),
         "/Fo$sessionObjects\", "/Fe:$sessionTestExe", '/link', $coreLibrary, 'Ws2_32.lib', 'Mswsock.lib'
@@ -119,7 +122,8 @@ try {
         '/nologo', '/std:c++20', '/EHsc', '/W4', '/utf-8', $runtimeLibrary, '/DCPN_PORTABLE_ADAPTER_TEST',
         "/I$(Join-Path $repositoryRoot 'core/include')", "/I$(Join-Path $repositoryRoot 'third_party/json/include')", "/I$bridgeSource",
         (Join-Path $bridgeSource 'CompanionModel.cpp'), (Join-Path $bridgeSource 'CompanionWorker.cpp'),
-        (Join-Path $bridgeSource 'RecoveryModel.cpp'), (Join-Path $bridgeSource 'SessionWorker.cpp'),
+        (Join-Path $bridgeSource 'RecoveryModel.cpp'), (Join-Path $bridgeSource 'CheckerModel.cpp'),
+        (Join-Path $bridgeSource 'SessionWorker.cpp'),
         (Join-Path $bridgeSource 'SourceStore.cpp'), (Join-Path $bridgeSource 'RunnerConfiguration.cpp'),
         (Join-Path $repositoryRoot 'apps/windows/tests/CompanionTests.cpp'),
         "/Fo$companionObjects\", "/Fe:$companionTestExe", '/link', $coreLibrary, 'Ws2_32.lib', 'Mswsock.lib'
@@ -202,13 +206,59 @@ try {
     if (-not (Test-Path -LiteralPath $appExecutable -PathType Leaf)) { throw "原生应用构建产物缺失：$appExecutable" }
     $report.appBuildCompleted = $true
     $report.appPackageHashes = Get-CpnPackageHashes -PackagesConfig (Join-Path (Split-Path $appProject) 'packages.config') -PackagesRoot $appPackages
+    $recipePath = Join-Path $outputRoot 'CPEditorNativeWindows.build.appxrecipe'
     $manifestPath = Join-Path $appLayout 'AppxManifest.xml'
     $report.layoutManifestPath = $manifestPath
     $report.executablePath = $appExecutable
     if ($Deploy -or $Launch) {
+        if (-not (Test-Path -LiteralPath $recipePath -PathType Leaf)) { throw "缺少 MSIX 打包配方：$recipePath" }
+        [xml] $recipe = Get-Content -LiteralPath $recipePath -Raw
+        $recipeNamespace = [Xml.XmlNamespaceManager]::new($recipe.NameTable)
+        $recipeNamespace.AddNamespace('m', 'http://schemas.microsoft.com/developer/msbuild/2003')
+        if (Test-Path -LiteralPath $appLayout) { Remove-Item -LiteralPath $appLayout -Recurse -Force }
+        New-Item -ItemType Directory -Path $appLayout -Force | Out-Null
+        $payloadNodes = @($recipe.SelectNodes('//m:AppXManifest | //m:AppxPackagedFile', $recipeNamespace))
+        foreach ($node in $payloadNodes) {
+            $sourceFile = [Uri]::UnescapeDataString($node.GetAttribute('Include'))
+            $packagePathNode = $node.SelectSingleNode('m:PackagePath', $recipeNamespace)
+            if ($null -eq $packagePathNode -or [string]::IsNullOrWhiteSpace($packagePathNode.InnerText)) { continue }
+            $packageRelative = [Uri]::UnescapeDataString($packagePathNode.InnerText.Trim())
+            if (-not (Test-Path -LiteralPath $sourceFile -PathType Leaf)) { throw "MSIX payload 源文件缺失：$sourceFile" }
+            $destinationFile = Join-Path $appLayout $packageRelative
+            $destinationDir = Split-Path -Path $destinationFile -Parent
+            if (-not (Test-Path -LiteralPath $destinationDir)) { New-Item -ItemType Directory -Path $destinationDir -Force | Out-Null }
+            Copy-Item -LiteralPath $sourceFile -Destination $destinationFile -Force
+        }
         if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw "缺少 MSIX layout 清单：$manifestPath" }
+        foreach ($requiredRelative in @('editor-profiles.json', 'checker-settings.json', 'toolchain-discovery.json', 'Toolchains\cpp-msvc.json')) {
+            $requiredPath = Join-Path $appLayout $requiredRelative
+            if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) { throw "MSIX layout 缺少关键配置文件：$requiredPath" }
+        }
         Import-Module Appx -UseWindowsPowerShell -ErrorAction Stop
-        Add-AppxPackage -Register $manifestPath -ErrorAction Stop
+        $seenDependencies = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        $sdkNodes = @($recipe.SelectNodes('//m:ResolvedSDKReference', $recipeNamespace))
+        foreach ($sdkNode in $sdkNodes) {
+            $arch = $sdkNode.SelectSingleNode('m:Architecture', $recipeNamespace)?.InnerText?.Trim()
+            if (-not [string]::Equals($arch, $Platform, [StringComparison]::OrdinalIgnoreCase)) { continue }
+            $depName = $sdkNode.SelectSingleNode('m:Name', $recipeNamespace)?.InnerText?.Trim()
+            $depVersionText = $sdkNode.SelectSingleNode('m:Version', $recipeNamespace)?.InnerText?.Trim()
+            $depLocation = [Uri]::UnescapeDataString(($sdkNode.SelectSingleNode('m:AppxLocation', $recipeNamespace)?.InnerText ?? '').Trim())
+            if ([string]::IsNullOrWhiteSpace($depName) -or [string]::IsNullOrWhiteSpace($depLocation)) { continue }
+            $dedupeKey = "$depName|$depVersionText|$depLocation"
+            if (-not $seenDependencies.Add($dedupeKey)) { continue }
+            $installedDep = @(Get-AppxPackage -Name $depName) | Where-Object {
+                [string]::Equals($_.Architecture, $Platform, [StringComparison]::OrdinalIgnoreCase)
+            } | Sort-Object { [version] $_.Version } -Descending | Select-Object -First 1
+            $needsInstall = $null -eq $installedDep
+            if (-not $needsInstall -and -not [string]::IsNullOrWhiteSpace($depVersionText)) {
+                $needsInstall = ([version] $installedDep.Version) -lt ([version] $depVersionText)
+            }
+            if ($needsInstall -and (Test-Path -LiteralPath $depLocation -PathType Leaf)) {
+                Write-Host "正在安装缺失框架依赖：$depName ($depVersionText, $Platform)"
+                Add-AppxPackage -Path $depLocation -ErrorAction Stop
+            }
+        }
+        Add-AppxPackage -Register $manifestPath -ForceApplicationShutdown -ErrorAction Stop
         $report.deploymentCompleted = $true
         [xml] $manifest = Get-Content -LiteralPath $manifestPath -Raw
         $namespace = [Xml.XmlNamespaceManager]::new($manifest.NameTable)

@@ -13,3 +13,4 @@ xcuserdata/
 /artifacts/
 apps/macos/.build/
 apps/macos/.swiftpm/
+apps/windows/CPEditorNativeWindows/Generated Files/

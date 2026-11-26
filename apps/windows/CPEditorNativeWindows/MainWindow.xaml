@@ -6,88 +6,480 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
-        <CommandBar x:Name="Commands" DefaultLabelPosition="Right" IsEnabled="False">
-            <AppBarButton x:Name="NewButton" x:Uid="NewCommand" Icon="Page2" Click="New_Click" />
-            <AppBarButton x:Name="OpenButton" x:Uid="OpenCommand" Icon="OpenFile" Click="Open_Click" />
-            <AppBarButton x:Name="SaveButton" x:Uid="SaveCommand" Icon="Save" Click="Save_Click" />
-            <AppBarButton x:Name="SaveAsButton" x:Uid="SaveAsCommand" Icon="SaveLocal" Click="SaveAs_Click" />
-            <AppBarButton x:Name="ExportButton" x:Uid="ExportCommand" Icon="Download" Click="Export_Click" />
-            <CommandBar.Content>
-                <ComboBox x:Name="Profiles" x:Uid="Profiles" Margin="12,4" MinWidth="140"
-                          SelectionChanged="Profile_SelectionChanged" />
-            </CommandBar.Content>
-        </CommandBar>
-        <TabView x:Name="Tabs" Grid.Row="1" IsAddTabButtonVisible="False"
-                 TabCloseRequested="Tabs_CloseRequested" SelectionChanged="Tabs_SelectionChanged" />
-        <Grid Grid.Row="2">
+
+        <!-- Row 0: Native MenuBar -->
+        <MenuBar x:Name="TopMenuBar" Grid.Row="0">
+            <MenuBarItem x:Uid="MenuFile">
+                <MenuFlyoutItem x:Name="MenuNewItem" x:Uid="MenuNew" Click="New_Click">
+                    <MenuFlyoutItem.KeyboardAccelerators>
+                        <KeyboardAccelerator Key="N" Modifiers="Control" />
+                    </MenuFlyoutItem.KeyboardAccelerators>
+                </MenuFlyoutItem>
+                <MenuFlyoutItem x:Name="MenuOpenItem" x:Uid="MenuOpen" Click="Open_Click">
+                    <MenuFlyoutItem.KeyboardAccelerators>
+                        <KeyboardAccelerator Key="O" Modifiers="Control" />
+                    </MenuFlyoutItem.KeyboardAccelerators>
+                </MenuFlyoutItem>
+                <MenuFlyoutItem x:Name="MenuSaveItem" x:Uid="MenuSave" Click="Save_Click">
+                    <MenuFlyoutItem.KeyboardAccelerators>
+                        <KeyboardAccelerator Key="S" Modifiers="Control" />
+                    </MenuFlyoutItem.KeyboardAccelerators>
+                </MenuFlyoutItem>
+                <MenuFlyoutItem x:Name="MenuSaveAsItem" x:Uid="MenuSaveAs" Click="SaveAs_Click">
+                    <MenuFlyoutItem.KeyboardAccelerators>
+                        <KeyboardAccelerator Key="S" Modifiers="Control,Shift" />
+                    </MenuFlyoutItem.KeyboardAccelerators>
+                </MenuFlyoutItem>
+                <MenuFlyoutItem x:Name="MenuSaveAllItem" x:Uid="MenuSaveAll" Click="SaveAll_Click">
+                    <MenuFlyoutItem.KeyboardAccelerators>
+                        <KeyboardAccelerator Key="S" Modifiers="Control,Menu" />
+                    </MenuFlyoutItem.KeyboardAccelerators>
+                </MenuFlyoutItem>
+                <MenuFlyoutSeparator />
+                <MenuFlyoutItem x:Name="MenuCloseTabItem" x:Uid="MenuCloseTab" Click="CloseTab_Click">
+                    <MenuFlyoutItem.KeyboardAccelerators>
+                        <KeyboardAccelerator Key="W" Modifiers="Control" />
+                    </MenuFlyoutItem.KeyboardAccelerators>
+                </MenuFlyoutItem>
+                <MenuFlyoutItem x:Name="MenuCloseSavedItem" x:Uid="MenuCloseSaved" Click="CloseSavedTabs_Click" />
+                <MenuFlyoutSeparator />
+                <MenuFlyoutSubItem x:Uid="MenuRecovery">
+                    <MenuFlyoutItem x:Name="MenuRetryRecoveryItem" x:Uid="MenuRetryRecovery" Click="RetryRecovery_Click" />
+                    <MenuFlyoutItem x:Name="MenuSaveRecoveryAsItem" x:Uid="MenuSaveRecoveryAs" Click="SaveRecoveryAs_Click" />
+                </MenuFlyoutSubItem>
+                <MenuFlyoutItem x:Name="MenuExportSnapshotItem" x:Uid="MenuExportSnapshot" Click="Export_Click" />
+            </MenuBarItem>
+
+            <MenuBarItem x:Uid="MenuEdit">
+                <MenuFlyoutItem x:Name="MenuUndoItem" x:Uid="MenuUndo" Click="Undo_Click">
+                    <MenuFlyoutItem.KeyboardAccelerators>
+                        <KeyboardAccelerator Key="Z" Modifiers="Control" />
+                    </MenuFlyoutItem.KeyboardAccelerators>
+                </MenuFlyoutItem>
+                <MenuFlyoutItem x:Name="MenuRedoItem" x:Uid="MenuRedo" Click="Redo_Click">
+                    <MenuFlyoutItem.KeyboardAccelerators>
+                        <KeyboardAccelerator Key="Y" Modifiers="Control" />
+                    </MenuFlyoutItem.KeyboardAccelerators>
+                </MenuFlyoutItem>
+                <MenuFlyoutSeparator />
+                <ToggleMenuFlyoutItem x:Name="MenuWordWrapItem" x:Uid="MenuWordWrap" Click="ToggleWordWrap_Click">
+                    <ToggleMenuFlyoutItem.KeyboardAccelerators>
+                        <KeyboardAccelerator Key="Z" Modifiers="Menu" />
+                    </ToggleMenuFlyoutItem.KeyboardAccelerators>
+                </ToggleMenuFlyoutItem>
+                <ToggleMenuFlyoutItem x:Name="MenuAutoPairItem" x:Uid="MenuAutoPair" Click="ToggleAutoPair_Click" />
+            </MenuBarItem>
+
+            <MenuBarItem x:Uid="MenuView">
+                <MenuFlyoutItem x:Uid="MenuViewEditorOnly" Click="ViewEditorOnly_Click">
+                    <MenuFlyoutItem.KeyboardAccelerators>
+                        <KeyboardAccelerator Key="Number1" Modifiers="Control" />
+                    </MenuFlyoutItem.KeyboardAccelerators>
+                </MenuFlyoutItem>
+                <MenuFlyoutItem x:Uid="MenuViewSplit" Click="ViewSplit_Click">
+                    <MenuFlyoutItem.KeyboardAccelerators>
+                        <KeyboardAccelerator Key="Number2" Modifiers="Control" />
+                    </MenuFlyoutItem.KeyboardAccelerators>
+                </MenuFlyoutItem>
+                <MenuFlyoutItem x:Uid="MenuViewTestsOnly" Click="ViewTestsOnly_Click">
+                    <MenuFlyoutItem.KeyboardAccelerators>
+                        <KeyboardAccelerator Key="Number3" Modifiers="Control" />
+                    </MenuFlyoutItem.KeyboardAccelerators>
+                </MenuFlyoutItem>
+                <MenuFlyoutSeparator />
+                <MenuFlyoutItem x:Uid="MenuToggleTestPanel" Click="ToggleTestPanel_Click">
+                    <MenuFlyoutItem.KeyboardAccelerators>
+                        <KeyboardAccelerator Key="Y" Modifiers="Control,Shift" />
+                    </MenuFlyoutItem.KeyboardAccelerators>
+                </MenuFlyoutItem>
+                <MenuFlyoutItem x:Uid="MenuCompanionInbox" Click="ToggleCompanionPane_Click">
+                    <MenuFlyoutItem.KeyboardAccelerators>
+                        <KeyboardAccelerator Key="I" Modifiers="Control,Shift" />
+                    </MenuFlyoutItem.KeyboardAccelerators>
+                </MenuFlyoutItem>
+            </MenuBarItem>
+
+            <MenuBarItem x:Uid="MenuRun">
+                <MenuFlyoutItem x:Name="MenuCompileItem" x:Uid="MenuCompile" Click="Compile_Click">
+                    <MenuFlyoutItem.KeyboardAccelerators>
+                        <KeyboardAccelerator Key="B" Modifiers="Control" />
+                    </MenuFlyoutItem.KeyboardAccelerators>
+                </MenuFlyoutItem>
+                <MenuFlyoutItem x:Name="MenuRunOnlyItem" x:Uid="MenuRunOnly" Click="RunOnly_Click">
+                    <MenuFlyoutItem.KeyboardAccelerators>
+                        <KeyboardAccelerator Key="R" Modifiers="Control,Shift" />
+                    </MenuFlyoutItem.KeyboardAccelerators>
+                </MenuFlyoutItem>
+                <MenuFlyoutItem x:Name="MenuCompileAndRunItem" x:Uid="MenuCompileAndRun" Click="Run_Click">
+                    <MenuFlyoutItem.KeyboardAccelerators>
+                        <KeyboardAccelerator Key="R" Modifiers="Control" />
+                    </MenuFlyoutItem.KeyboardAccelerators>
+                </MenuFlyoutItem>
+                <MenuFlyoutItem x:Name="MenuStopItem" x:Uid="MenuStop" Click="Cancel_Click">
+                    <MenuFlyoutItem.KeyboardAccelerators>
+                        <KeyboardAccelerator Key="F5" Modifiers="Shift" />
+                    </MenuFlyoutItem.KeyboardAccelerators>
+                </MenuFlyoutItem>
+                <MenuFlyoutSeparator />
+                <MenuFlyoutItem x:Name="MenuAddSampleItem" x:Uid="MenuAddSample" Click="AddTest_Click">
+                    <MenuFlyoutItem.KeyboardAccelerators>
+                        <KeyboardAccelerator Key="T" Modifiers="Control,Shift" />
+                    </MenuFlyoutItem.KeyboardAccelerators>
+                </MenuFlyoutItem>
+                <MenuFlyoutItem x:Name="MenuConfigureCheckerItem" x:Uid="MenuConfigureChecker" Click="ConfigureChecker_Click" />
+            </MenuBarItem>
+
+            <MenuBarItem x:Uid="MenuTools">
+                <MenuFlyoutItem x:Name="MenuSettingsItem" x:Uid="MenuSettings" Click="Settings_Click" />
+                <MenuFlyoutItem x:Name="MenuRescanToolchainsItem" x:Uid="MenuRescanToolchains" Click="RescanToolchains_Click" />
+            </MenuBarItem>
+        </MenuBar>
+
+        <!-- Row 1: Compact Fluent Toolbar -->
+        <Border Grid.Row="1"
+                Padding="10,6"
+                Background="{ThemeResource LayerFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="0,1,0,1">
+            <Grid ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <!-- Left Transport Controls -->
+                <StackPanel x:Name="Commands" Grid.Column="0" Orientation="Horizontal" Spacing="6">
+                    <Button x:Name="CompileButton" Click="Compile_Click" IsEnabled="False" Padding="10,5">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon Glyph="&#xE943;" FontSize="13" />
+                            <TextBlock x:Name="CompileBtnLabel" />
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="RunOnlyButton" Click="RunOnly_Click" IsEnabled="False" Padding="10,5">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon Glyph="&#xE768;" FontSize="13" />
+                            <TextBlock x:Name="RunOnlyBtnLabel" />
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="RunButton" Style="{ThemeResource AccentButtonStyle}" Click="Run_Click" IsEnabled="False" Padding="10,5">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon Glyph="&#xE768;" FontSize="13" />
+                            <TextBlock x:Name="CompileAndRunBtnLabel" />
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="CancelButton" Click="Cancel_Click" IsEnabled="False" Padding="10,5">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon Glyph="&#xE71A;" FontSize="13" />
+                            <TextBlock x:Name="StopBtnLabel" />
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+
+                <!-- Center Language + Toolchain -->
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <ComboBox x:Name="Profiles" x:Uid="Profiles" MinWidth="110" SelectionChanged="Profile_SelectionChanged" />
+                    <ComboBox x:Name="Toolchains" x:Uid="Toolchains" MinWidth="170" SelectionChanged="Toolchain_SelectionChanged" />
+                    <TextBlock x:Name="ToolchainAvailabilityText"
+                               VerticalAlignment="Center"
+                               FontSize="12"
+                               Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                               Visibility="Collapsed" />
+                </StackPanel>
+
+                <!-- Right View Switcher + Companion + Settings -->
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                    <Border CornerRadius="6"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                            BorderThickness="1"
+                            Padding="2">
+                        <StackPanel Orientation="Horizontal" Spacing="2">
+                            <ToggleButton x:Name="ViewEditorOnlyButton" x:Uid="ViewEditorOnly" Click="ViewEditorOnly_Click" Padding="8,4" FontSize="12" />
+                            <ToggleButton x:Name="ViewSplitButton" x:Uid="ViewSplit" Click="ViewSplit_Click" Padding="8,4" FontSize="12" IsChecked="True" />
+                            <ToggleButton x:Name="ViewTestsOnlyButton" x:Uid="ViewTestsOnly" Click="ViewTestsOnly_Click" Padding="8,4" FontSize="12" />
+                        </StackPanel>
+                    </Border>
+                    <ToggleButton x:Name="CompanionToggleButton" Click="ToggleCompanionPane_Click" Padding="10,5">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon Glyph="&#xE896;" FontSize="13" />
+                            <TextBlock x:Name="CompanionBtnLabel" />
+                        </StackPanel>
+                    </ToggleButton>
+                    <Button x:Name="SettingsButton" x:Uid="SettingsBtn" Click="Settings_Click" Padding="8,6">
+                        <FontIcon Glyph="&#xE713;" FontSize="14" />
+                    </Button>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Row 2: Document TabView + Collapsible Recovery/Warning InfoBar -->
+        <StackPanel Grid.Row="2">
+            <TabView x:Name="Tabs"
+                     IsAddTabButtonVisible="True"
+                     AddTabButtonClick="Tabs_AddTabButtonClick"
+                     TabCloseRequested="Tabs_CloseRequested"
+                     SelectionChanged="Tabs_SelectionChanged" />
+            <InfoBar x:Name="RecoveryInfoBar"
+                     IsOpen="False"
+                     IsClosable="False"
+                     Severity="Warning">
+                <InfoBar.ActionButton>
+                    <Button x:Name="RetryRecoveryButton" x:Uid="RetryRecovery" Click="RetryRecovery_Click" IsEnabled="False" />
+                </InfoBar.ActionButton>
+                <InfoBar.Content>
+                    <Button x:Name="SaveRecoveryAsButton" x:Uid="SaveRecoveryAs" Click="SaveRecoveryAs_Click" IsEnabled="False" Margin="0,0,0,8" />
+                </InfoBar.Content>
+            </InfoBar>
+        </StackPanel>
+
+        <!-- Row 3: Resizable Left-Editor / Right-Panel Split Workspace -->
+        <Grid x:Name="WorkspaceSplit" Grid.Row="3">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="3*" MinWidth="260" />
-                <ColumnDefinition Width="2*" MinWidth="300" />
+                <ColumnDefinition x:Name="LeftColumn" Width="3*" MinWidth="260" />
+                <ColumnDefinition x:Name="SplitterColumn" Width="6" />
+                <ColumnDefinition x:Name="RightColumn" Width="2*" MinWidth="320" />
             </Grid.ColumnDefinitions>
-            <Grid x:Name="EditorDeck" />
-            <TabView Grid.Column="1" IsAddTabButtonVisible="False" CanDragTabs="False" CanReorderTabs="False">
-                <TabViewItem x:Uid="TestsTab" IsClosable="False">
-                    <Grid Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+
+            <!-- Editor Deck (always mounted so Scintilla & Undo survive mode switches) -->
+            <Grid x:Name="EditorDeck" Grid.Column="0" />
+
+            <!-- Draggable Split Handle -->
+            <Border x:Name="SplitHandle"
+                    Grid.Column="1"
+                    Background="{ThemeResource CardStrokeColorDefaultBrush}"
+                    PointerPressed="SplitHandle_PointerPressed"
+                    PointerMoved="SplitHandle_PointerMoved"
+                    PointerReleased="SplitHandle_PointerReleased"
+                    PointerCaptureLost="SplitHandle_PointerCaptureLost"
+                    PointerEntered="SplitHandle_PointerEntered"
+                    PointerExited="SplitHandle_PointerExited" />
+
+            <!-- Right Pane: Tests & Output OR Companion Inbox -->
+            <Grid x:Name="RightPane" Grid.Column="2" Background="{ThemeResource LayerFillColorAltBrush}">
+                <!-- Tests & Output View -->
+                <Grid x:Name="TestsPane">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <!-- Compact Panel Header -->
+                    <Border Grid.Row="0"
+                            Padding="12,8"
+                            Background="{ThemeResource LayerFillColorDefaultBrush}"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                            BorderThickness="0,0,0,1">
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                <Border x:Name="SummaryBadge" CornerRadius="4" Padding="8,3" Background="{ThemeResource SubtleFillColorSecondaryBrush}">
+                                    <TextBlock x:Name="SummaryBadgeText" FontSize="12" FontWeight="SemiBold" />
+                                </Border>
+                                <ComboBox x:Name="Comparisons" x:Uid="Comparisons" MinWidth="150" SelectionChanged="Comparison_SelectionChanged" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                <ToggleButton x:Name="CheckerToggleButton" Click="CheckerToggle_Click" Padding="8,4" FontSize="12" />
+                                <Button x:Name="CheckerConfigButton" Click="ConfigureChecker_Click" Padding="6,5">
+                                    <FontIcon Glyph="&#xE713;" FontSize="12" />
+                                </Button>
+                                <Button x:Name="AddTestButton" x:Uid="AddTest" Click="AddTest_Click" IsEnabled="False" Padding="8,4" FontSize="12" />
+                                <Button x:Name="MoreSamplesButton" Padding="6,5" IsEnabled="False">
+                                    <FontIcon Glyph="&#xE712;" FontSize="12" />
+                                    <Button.Flyout>
+                                        <MenuFlyout>
+                                            <MenuFlyoutItem x:Name="UseAllOutputsItem" Click="UseAllOutputs_Click" />
+                                            <MenuFlyoutItem x:Name="DeleteAllSamplesItem" Click="DeleteAllSamples_Click" />
+                                        </MenuFlyout>
+                                    </Button.Flyout>
+                                </Button>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <!-- Collapsible Compiler Output Banner -->
+                    <Border x:Name="CompilerOutputBanner"
+                            Grid.Row="1"
+                            Visibility="Collapsed"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                            BorderThickness="0,0,0,1"
+                            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="3" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Border x:Name="CompilerAccentBar" Grid.Column="0" />
+                            <StackPanel Grid.Column="1" Padding="12,8" Spacing="6">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <Button x:Name="CompilerToggleButton"
+                                            Grid.Column="0"
+                                            HorizontalAlignment="Stretch"
+                                            HorizontalContentAlignment="Left"
+                                            Background="Transparent"
+                                            BorderThickness="0"
+                                            Padding="0"
+                                            Click="CompilerToggle_Click">
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <FontIcon x:Name="CompilerChevronIcon" Glyph="&#xE70D;" FontSize="11" />
+                                            <TextBlock x:Name="CompilerHeaderText" FontWeight="SemiBold" FontSize="12" />
+                                        </StackPanel>
+                                    </Button>
+                                    <Button x:Name="CompilerCopyButton" Grid.Column="1" Padding="6,3" FontSize="11" Click="CompilerCopy_Click" />
+                                </Grid>
+                                <ScrollViewer x:Name="CompilerOutputScroll"
+                                              MaxHeight="180"
+                                              VerticalScrollBarVisibility="Auto"
+                                              HorizontalScrollBarVisibility="Auto"
+                                              Visibility="Collapsed">
+                                    <TextBlock x:Name="CompilerOutputText"
+                                               FontFamily="Cascadia Mono, Consolas, Courier New"
+                                               FontSize="12"
+                                               TextWrapping="NoWrap"
+                                               IsTextSelectionEnabled="True" />
+                                </ScrollViewer>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <!-- Per-Document Test Scroll Deck -->
+                    <Grid x:Name="TestDeck" Grid.Row="2" />
+                </Grid>
+
+                <!-- Upgraded Companion Inbox View -->
+                <Grid x:Name="CompanionPane" Visibility="Collapsed">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="2*" />
+                        <RowDefinition Height="3*" />
+                    </Grid.RowDefinitions>
+
+                    <!-- Top Companion Controls -->
+                    <Border Grid.Row="0"
+                            Padding="12,8"
+                            Background="{ThemeResource LayerFillColorDefaultBrush}"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                            BorderThickness="0,0,0,1">
+                        <StackPanel Spacing="8">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Border Grid.Column="0" CornerRadius="6" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" Padding="2" HorizontalAlignment="Left">
+                                    <StackPanel Orientation="Horizontal" Spacing="2">
+                                        <ToggleButton x:Name="CompanionFilterAllButton" x:Uid="CompanionFilterAll" Click="CompanionFilter_Click" Padding="8,3" FontSize="12" IsChecked="True" />
+                                        <ToggleButton x:Name="CompanionFilterPendingButton" x:Uid="CompanionFilterPending" Click="CompanionFilter_Click" Padding="8,3" FontSize="12" />
+                                        <ToggleButton x:Name="CompanionFilterAppliedButton" x:Uid="CompanionFilterApplied" Click="CompanionFilter_Click" Padding="8,3" FontSize="12" />
+                                    </StackPanel>
+                                </Border>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
+                                    <Button x:Name="ImportCompanionButton" x:Uid="ImportCompanion" Click="ImportCompanion_Click" IsEnabled="False" Padding="8,4" FontSize="12" />
+                                    <Button x:Name="RefreshCompanionButton" x:Uid="RefreshCompanion" Click="RefreshCompanion_Click" IsEnabled="False" Padding="8,4" FontSize="12" />
+                                    <Button x:Name="MoreCompanionButton" x:Uid="MoreCompanion" Click="MoreCompanion_Click" IsEnabled="False" Padding="8,4" FontSize="12" />
+                                </StackPanel>
+                            </Grid>
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6">
+                                    <Button x:Name="StartCompanionButton" x:Uid="StartCompanion" Click="StartCompanion_Click" IsEnabled="False" Padding="8,4" FontSize="12" />
+                                    <Button x:Name="StopCompanionButton" x:Uid="StopCompanion" Click="StopCompanion_Click" IsEnabled="False" Padding="8,4" FontSize="12" />
+                                </StackPanel>
+                                <TextBlock x:Name="CompanionListenerStatus" Grid.Column="1" VerticalAlignment="Center" FontSize="12" TextTrimming="CharacterEllipsis" IsTextSelectionEnabled="True" />
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <TextBlock x:Name="CompanionNotice" Grid.Row="1" Margin="12,6" FontSize="12" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+
+                    <ListView x:Name="CompanionItems"
+                              Grid.Row="2"
+                              SelectionMode="Single"
+                              SelectionChanged="Companion_SelectionChanged"
+                              BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                              BorderThickness="0,1,0,1" />
+
+                    <!-- Pinned Header + Sample Detail Preview -->
+                    <Grid Grid.Row="3">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
-                        <StackPanel Spacing="8" Margin="12">
-                            <ComboBox x:Name="Toolchains" x:Uid="Toolchains" HorizontalAlignment="Stretch"
-                                      SelectionChanged="Toolchain_SelectionChanged" />
-                            <ComboBox x:Name="Comparisons" x:Uid="Comparisons" HorizontalAlignment="Stretch"
-                                      SelectionChanged="Comparison_SelectionChanged" />
-                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                <Button x:Name="RunButton" x:Uid="RunAll" Click="Run_Click" IsEnabled="False" />
-                                <Button x:Name="CancelButton" x:Uid="CancelRun" Click="Cancel_Click" IsEnabled="False" />
-                                <Button x:Name="AddTestButton" x:Uid="AddTest" Click="AddTest_Click" IsEnabled="False" />
-                            </StackPanel>
-                        </StackPanel>
-                        <Grid x:Name="TestDeck" Grid.Row="1" />
-                    </Grid>
-                </TabViewItem>
-                <TabViewItem x:Uid="CompanionTab" IsClosable="False">
-                    <Grid Padding="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="2*" />
-                            <RowDefinition Height="3*" />
-                        </Grid.RowDefinitions>
-                        <StackPanel Spacing="8">
-                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                <Button x:Name="ImportCompanionButton" x:Uid="ImportCompanion" Click="ImportCompanion_Click" IsEnabled="False" />
-                                <Button x:Name="RefreshCompanionButton" x:Uid="RefreshCompanion" Click="RefreshCompanion_Click" IsEnabled="False" />
-                                <Button x:Name="MoreCompanionButton" x:Uid="MoreCompanion" Click="MoreCompanion_Click" IsEnabled="False" />
-                            </StackPanel>
-                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                <Button x:Name="StartCompanionButton" x:Uid="StartCompanion" Click="StartCompanion_Click" IsEnabled="False" />
-                                <Button x:Name="StopCompanionButton" x:Uid="StopCompanion" Click="StopCompanion_Click" IsEnabled="False" />
-                                <Button x:Name="ApplyCompanionButton" x:Uid="ApplyCompanion" Click="ApplyCompanion_Click" IsEnabled="False" />
-                            </StackPanel>
-                            <TextBlock x:Name="CompanionListenerStatus" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
-                        </StackPanel>
-                        <TextBlock x:Name="CompanionNotice" Grid.Row="1" Margin="0,8" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
-                        <ListView x:Name="CompanionItems" Grid.Row="2" SelectionMode="Single" SelectionChanged="Companion_SelectionChanged" />
-                        <ScrollViewer Grid.Row="3" VerticalScrollBarVisibility="Auto" Margin="0,8,0,0">
-                            <TextBlock x:Name="CompanionPreview" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                        <Border Grid.Row="0"
+                                Padding="12,8"
+                                Background="{ThemeResource LayerFillColorDefaultBrush}"
+                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                BorderThickness="0,0,0,1">
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" Spacing="2">
+                                    <TextBlock x:Name="CompanionDetailTitle" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock x:Name="CompanionDetailMeta" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                                </StackPanel>
+                                <Button x:Name="ApplyCompanionButton"
+                                        x:Uid="ApplyCompanion"
+                                        Grid.Column="1"
+                                        Style="{ThemeResource AccentButtonStyle}"
+                                        Click="ApplyCompanion_Click"
+                                        IsEnabled="False"
+                                        VerticalAlignment="Center" />
+                            </Grid>
+                        </Border>
+                        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                            <StackPanel x:Name="CompanionPreviewPanel" Padding="12,8" Spacing="10" />
                         </ScrollViewer>
                     </Grid>
-                </TabViewItem>
-            </TabView>
+                </Grid>
+            </Grid>
         </Grid>
-        <Border Grid.Row="3" Padding="12,6" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
-            <StackPanel Spacing="6">
-                <TextBlock x:Name="Status" TextTrimming="CharacterEllipsis" />
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <Button x:Name="RetryRecoveryButton" x:Uid="RetryRecovery" Click="RetryRecovery_Click" IsEnabled="False" />
-                    <Button x:Name="SaveRecoveryAsButton" x:Uid="SaveRecoveryAs" Click="SaveRecoveryAs_Click" IsEnabled="False" />
-                    <TextBlock x:Name="RecoveryStatus" TextWrapping="Wrap" VerticalAlignment="Center" />
+
+        <!-- Row 4: Slim Status Bar -->
+        <Border Grid.Row="4"
+                Padding="12,4"
+                Background="{ThemeResource LayerFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="0,1,0,0">
+            <Grid ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+                    <TextBlock x:Name="StatusLanguageText" FontSize="12" FontWeight="SemiBold" />
+                    <TextBlock x:Name="StatusCursorText" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <TextBlock x:Name="StatusEncodingText" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <TextBlock x:Name="StatusBytesText" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                 </StackPanel>
-            </StackPanel>
+                <TextBlock x:Name="Status"
+                           Grid.Column="1"
+                           FontSize="12"
+                           VerticalAlignment="Center"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                           TextTrimming="CharacterEllipsis" />
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                    <TextBlock x:Name="StatusCompanionText" FontSize="12" Foreground="{ThemeResource SystemFillColorSuccessBrush}" Visibility="Collapsed" />
+                    <Button x:Name="StatusWrapButton" Click="ToggleWordWrap_Click" Padding="6,2" FontSize="11" Background="Transparent" BorderThickness="0" />
+                </StackPanel>
+            </Grid>
         </Border>
     </Grid>
 </Window>

@@ -1,6 +1,9 @@
 #include "CoreRunner.h"
+#include "CheckerModel.h"
+#include "EditorAssist.h"
 #include "RunnerConfiguration.h"
 #include "SaveBaseline.h"
+#include "ToolchainDiscovery.h"
 #include <chrono>
 #include <atomic>
 #include <condition_variable>
@@ -206,17 +209,183 @@ void closing(std::string const& executable, std::filesystem::path const& tempora
     auto const event = mailbox.terminal("close-running"); expect(event.result && event.state == "Cancelled", "Shutdown lost terminal result");
     mailbox.audit(1);
 }
+void compile_run_and_checker(std::string const& executable, std::filesystem::path const& temporary) {
+    Mailbox mailbox;
+    CoreRunner runner(options(), [&](RunEvent event) { mailbox.receive(std::move(event)); });
+    mailbox.wait([](auto const& event) { return event.kind == RunEvent::Kind::ready; });
+
+    const auto exported = temporary / "compiled-fixture.exe";
+    nlohmann::json build_profile{
+        {"schema_version", 1}, {"id", "fixture-compiled"}, {"language_id", "cpp"},
+        {"source_filename", "main.cpp"}, {"artifact_name", "compiled-fixture.exe"},
+        {"build", {{"executable", executable}, {"arguments", {"--build-copy", executable, "${artifact}"}}}},
+        {"run", {{"executable", "${artifact}"}, {"arguments", {"--fixture", "${source}"}}}},
+        {"build_limits", {{"wall_timeout_ms", 30000}}},
+        {"run_limits", {{"wall_timeout_ms", 30000}}}
+    };
+
+    RunRequest compile_only;
+    compile_only.token = "compile-only";
+    compile_only.document_id = "doc-sep";
+    compile_only.revision = 1;
+    compile_only.source = "{\"mode\":\"echo\"}";
+    compile_only.toolchain = build_profile;
+    compile_only.comparison = "byte";
+    compile_only.mode = "compile_only";
+    compile_only.artifact_path = path_text(exported);
+    compile_only.tests = {{"t1", "hello", std::string("hello"), true}};
+    runner.submit(compile_only);
+    auto const compiled = mailbox.terminal("compile-only");
+    expect(compiled.result && compiled.result->build_outcome == "Succeeded" &&
+        compiled.result->tests.empty() && std::filesystem::exists(exported),
+        "compile_only did not export reusable artifact");
+
+    RunRequest run_only;
+    run_only.token = "run-only";
+    run_only.document_id = "doc-sep";
+    run_only.revision = 1;
+    run_only.source = "{\"mode\":\"echo\"}";
+    nlohmann::json fail_if_built = build_profile;
+    fail_if_built["build"]["arguments"] = {"--build-error"};
+    run_only.toolchain = fail_if_built;
+    run_only.comparison = "byte";
+    run_only.mode = "run_only";
+    run_only.artifact_path = path_text(exported);
+    run_only.tests = {{"t1", "42\n", std::string("42\n"), true}};
+    runner.submit(run_only);
+    auto const ran = mailbox.terminal("run-only");
+    expect(ran.result && ran.result->build_outcome == "NotRequired" &&
+        ran.result->tests.size() == 1 && ran.result->tests[0].verdict == "AC",
+        "run_only re-invoked build or failed to run exported artifact");
+
+    RunRequest with_checker = request("with-checker", executable);
+    with_checker.tests = {{"chk-ac", "in", std::string("exp"), true}, {"chk-err", "err", std::string("exp"), true}};
+    with_checker.external_checker = nlohmann::json{
+        {"schema_version", 1},
+        {"command", {{"executable", executable}, {"arguments", {"--checker-fixture", "${input}", "${actual}", "${expected}"}}}},
+        {"accepted_exit_codes", {0}},
+        {"wrong_answer_exit_codes", {1, 2}},
+        {"inherit_environment", true},
+        {"environment", nlohmann::json::array()}
+    };
+    runner.submit(with_checker);
+    auto const checked = mailbox.terminal("with-checker");
+    expect(checked.result && checked.result->tests.size() == 2 &&
+        checked.result->tests[0].verdict == "AC" && checked.result->tests[0].checker &&
+        checked.result->tests[0].checker->verdict == "Accepted" &&
+        checked.result->tests[0].checker->standard_output == "ok-checker\n" &&
+        checked.result->tests[1].verdict == "CheckerError" && checked.result->tests[1].checker &&
+        checked.result->tests[1].checker->exit_code == 7,
+        "External checker diagnostics or verdict decoding failed");
+
+    runner.close();
+    mailbox.audit(3);
+}
+void checker_and_discovery_models() {
+    auto cfg = CheckerConfiguration::parse(R"({
+        "schemaVersion": 1,
+        "maxCheckerJsonBytes": 65536,
+        "defaultChecker": {
+            "schema_version": 1,
+            "command": {"executable": "checker.exe", "arguments": ["${input}", "${actual}", "${expected}"]},
+            "limits": {"spawn_timeout_ms": 5000, "wall_timeout_ms": 2000, "terminate_grace_ms": 100, "drain_timeout_ms": 500, "stdout_bytes": 1024, "stderr_bytes": 1024, "combined_bytes": 2048},
+            "accepted_exit_codes": [0],
+            "wrong_answer_exit_codes": [1, 2],
+            "inherit_environment": true,
+            "environment": [{"name": "KEEP_ME", "value": "1"}]
+        }
+    })");
+    auto draft = CheckerModel::visual_from_json(cfg.default_checker.dump(), cfg.max_checker_json_bytes);
+    expect(draft.executable == "checker.exe" && draft.arguments.size() == 3 && draft.wall_timeout_ms == 2000,
+        "Checker visual extraction failed");
+    draft.executable = "my_spj.exe";
+    draft.wall_timeout_ms = 3500;
+    draft.accepted_exit_codes = CheckerModel::parse_exit_codes("0, 4");
+    auto updated = CheckerModel::apply_visual_to_json(cfg.default_checker.dump(), draft, cfg.max_checker_json_bytes);
+    auto parsed = CheckerModel::validate_json(updated, cfg.max_checker_json_bytes);
+    expect(parsed.at("environment").size() == 1 && parsed.at("limits").at("spawn_timeout_ms") == 5000 &&
+        parsed.at("limits").at("wall_timeout_ms") == 3500 && parsed.at("accepted_exit_codes").size() == 2,
+        "Checker visual apply lost preserved fields");
+    bool bad_rejected = false;
+    try { (void)CheckerModel::validate_json("{\"schema_version\":1,\"unknown\":true}"); } catch (...) { bad_rejected = true; }
+    expect(bad_rejected, "Invalid checker JSON was accepted");
+    expect(CheckerModel::fingerprint({false, updated}) == "disabled" &&
+        CheckerModel::fingerprint({true, updated}).starts_with("enabled:"),
+        "Checker fingerprint mismatch");
+
+    ToolchainChoice sample_tc;
+    sample_tc.id = "cpp-gcc-windows";
+    sample_tc.file = "cpp-gcc-windows.json";
+    sample_tc.label_resource = "ToolchainGCC";
+    sample_tc.profile = {
+        {"schema_version", 1}, {"id", "cpp-gcc-windows"}, {"language_id", "cpp"},
+        {"source_filename", "main.cpp"}, {"artifact_name", "solution.exe"},
+        {"build", {{"executable", "g++"}, {"arguments", {"-std=c++20", "${source}", "-o", "${artifact}"}}}},
+        {"run", {{"executable", "${artifact}"}, {"arguments", nlohmann::json::array()}}},
+        {"build_limits", {{"wall_timeout_ms", 30000}}}, {"run_limits", {{"wall_timeout_ms", 2000}}},
+        {"inherit_environment", true}, {"environment", nlohmann::json::array()}, {"variables", nlohmann::json::array()}
+    };
+    auto tc_draft = RunnerConfiguration::visual_from_json(sample_tc.profile);
+    expect(tc_draft.has_build && tc_draft.build_executable == "g++" && tc_draft.build_wall_timeout_ms == 30000,
+        "Toolchain visual draft extraction failed");
+    tc_draft.build_arguments.push_back("-Wall");
+    auto tc_updated = RunnerConfiguration::apply_visual_to_json(sample_tc.profile, tc_draft);
+    expect(RunnerConfiguration::is_compiled_toolchain(tc_updated) &&
+        tc_updated.at("build").at("arguments").size() == 5,
+        "Toolchain visual apply failed");
+    auto probes = ToolchainDiscovery::probe_all({sample_tc}, ToolchainDiscoveryConfiguration::defaults());
+    expect(probes.size() == 1 && probes[0].id == "cpp-gcc-windows", "Toolchain probe count mismatch");
+}
+void editor_assist_tests() {
+    auto p1 = EditorAssist::plan_char_input("int main", "", "", '(', "cpp");
+    expect(p1 && p1->insert_text == "()" && p1->caret_offset_in_insert == 1, "Auto-pair '(' failed");
+    auto p2 = EditorAssist::plan_char_input("auto x = ", "", "a+b", '(', "cpp");
+    expect(p2 && p2->insert_text == "(a+b)" && p2->caret_offset_in_insert == 5, "Wrap selection failed");
+    auto p3 = EditorAssist::plan_char_input("foo(", ")", "", ')', "cpp");
+    expect(p3 && p3->erase_after == 1 && p3->insert_text == ")" && p3->caret_offset_in_insert == 1, "Closing skip failed");
+    auto p4 = EditorAssist::plan_char_input("int x = 1", "", "", '\'', "cpp");
+    expect(!p4, "C++ digit separator wrongly auto-paired");
+    auto p5 = EditorAssist::plan_char_input("// comment ", "", "", '(', "cpp");
+    expect(!p5, "Auto-pair triggered inside line comment");
+    auto p6 = EditorAssist::plan_char_input("std::string s = \"hi", "\"", "", '"', "cpp");
+    expect(p6 && p6->erase_after == 1 && p6->insert_text == "\"", "Closing quote skip failed");
+    auto p7 = EditorAssist::plan_backspace("(", ")");
+    expect(p7 && p7->erase_before == 1 && p7->erase_after == 1 && p7->insert_text.empty(), "Pair backspace failed");
+    auto p8 = EditorAssist::plan_backspace("\\\"", "\"");
+    expect(!p8, "Escaped quote was wrongly deleted as pair");
+    auto n1 = EditorAssist::plan_newline("    if (ok) {", "} else {}", "\r\n", 4);
+    expect(n1 && n1->insert_text == "\r\n        \r\n    " && n1->caret_offset_in_insert == 10, "CRLF brace newline failed");
+    auto t1 = EditorAssist::plan_tab_indent("  int a = 1;\r\n  int b = 2;\r\n", 3, 18, false, 4);
+    expect(t1 && t1->replacement == "      int a = 1;\r\n      int b = 2;" && t1->new_sel_start == 7, "Multi-line tab indent failed");
+    auto t2 = EditorAssist::plan_tab_indent("    int a = 1;\r\n  int b = 2;", 4, 20, true, 4);
+    expect(t2 && t2->replacement == "int a = 1;\r\nint b = 2;" && t2->new_sel_start == 0, "Multi-line Shift+Tab unindent failed");
+}
 }
 int run_tests(std::vector<std::filesystem::path> const& arguments) {
     const auto argc = arguments.size();
     try {
         if (argc == 3 && arguments[1] == "--fixture") return fixture(arguments[2]);
         if (argc == 2 && arguments[1] == "--build-error") { std::cerr << "fixture compiler diagnostic\n"; return 2; }
+        if (argc == 4 && arguments[1] == "--build-copy") {
+            std::filesystem::copy_file(arguments[2], arguments[3], std::filesystem::copy_options::overwrite_existing);
+            return 0;
+        }
+        if (argc == 5 && arguments[1] == "--checker-fixture") {
+#if defined(_WIN32)
+            _setmode(_fileno(stdout), _O_BINARY);
+            _setmode(_fileno(stderr), _O_BINARY);
+#endif
+            std::ifstream in(arguments[2], std::ios::binary);
+            std::string input_bytes{std::istreambuf_iterator<char>{in}, {}};
+            if (input_bytes == "err") { std::cerr << "bad checker exit\n"; return 7; }
+            std::cout << "ok-checker\n";
+            return 0;
+        }
         const auto executable = path_text(std::filesystem::absolute(arguments[0]));
         auto const temporary = std::filesystem::temp_directory_path() / ("cpn-adapter-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
         std::filesystem::create_directory(temporary);
         struct Cleanup { std::filesystem::path path; ~Cleanup() { std::error_code error; std::filesystem::remove_all(path, error); } } cleanup{temporary};
-        save_baseline(); pipeline(executable); cancellation(executable, temporary); closing(executable, temporary); callback_close_rejected(executable); delivery_failure();
+        save_baseline(); pipeline(executable); compile_run_and_checker(executable, temporary); checker_and_discovery_models(); editor_assist_tests(); cancellation(executable, temporary); closing(executable, temporary); callback_close_rejected(executable); delivery_failure();
         if (argc == 2) {
             std::ifstream file(arguments[1], std::ios::binary);
             const std::string text{std::istreambuf_iterator<char>{file}, {}};

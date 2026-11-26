@@ -6,10 +6,13 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="App.xaml.h" />
+    <ClInclude Include="CheckerModel.h" />
+    <ClInclude Include="EditorAssist.h" />
     <ClInclude Include="EditorProfiles.h" />
     <ClInclude Include="FileStore.h" />
     <ClInclude Include="MainWindow.xaml.h" />
     <ClInclude Include="SnapshotJson.h" />
+    <ClInclude Include="ToolchainDiscovery.h" />
     <ClInclude Include="UiStrings.h" />
     <ClInclude Include="WinUIEditAdapter.h" />
     <ClInclude Include="pch.h" />
@@ -32,10 +35,15 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="App.xaml.cpp" />
+    <ClCompile Include="CheckerModel.cpp" />
+    <ClCompile Include="EditorAssist.cpp" />
     <ClCompile Include="EditorProfiles.cpp" />
     <ClCompile Include="FileStore.cpp" />
     <ClCompile Include="MainWindow.xaml.cpp" />
+    <ClCompile Include="MainWindow.Tests.cpp" />
+    <ClCompile Include="MainWindow.Settings.cpp" />
     <ClCompile Include="SnapshotJson.cpp" />
+    <ClCompile Include="ToolchainDiscovery.cpp" />
     <ClCompile Include="WinUIEditAdapter.cpp" />
     <ClCompile Include="pch.cpp" />
     <ClCompile Include="$(GeneratedFilesDir)module.g.cpp" />
@@ -57,19 +65,21 @@
     <PRIResource Include="Strings\en-US\Resources.resw" />
   </ItemGroup>
   <ItemGroup>
-    <Content Include="editor-profiles.json" />
-    <Content Include="$(CPNGeneratedToolchainsDir)\*.json" />
-    <Content Include="..\..\..\tools\windows\profiles\cpp-clang-windows.json" />
-    <Content Include="..\..\..\resources\profiles\cpp-gcc-windows.json" />
-    <Content Include="..\..\..\tools\windows\profiles\python-windows.json" />
+    <None Include="checker-settings.json" />
+    <None Include="editor-profiles.json" />
+    <None Include="$(CPNGeneratedToolchainsDir)\*.json" />
+    <None Include="..\..\..\tools\windows\profiles\cpp-clang-windows.json" />
+    <None Include="..\..\..\resources\profiles\cpp-gcc-windows.json" />
+    <None Include="..\..\..\tools\windows\profiles\python-windows.json" />
     <None Include="packages.config" />
-    <Content Include="..\NOTICE.md" />
-    <Content Include="..\..\..\third_party\WinUIEdit\LICENSE" />
-    <Content Include="..\..\..\third_party\WinUIEdit\scintilla\License.txt" />
-    <Content Include="..\..\..\third_party\WinUIEdit\lexilla\License.txt" />
-    <Content Include="runner-settings.json" />
-    <Content Include="recovery-settings.json" />
-    <Content Include="companion-settings.json" />
+    <None Include="..\NOTICE.md" />
+    <None Include="..\..\..\third_party\WinUIEdit\LICENSE" />
+    <None Include="..\..\..\third_party\WinUIEdit\scintilla\License.txt" />
+    <None Include="..\..\..\third_party\WinUIEdit\lexilla\License.txt" />
+    <None Include="runner-settings.json" />
+    <None Include="recovery-settings.json" />
+    <None Include="companion-settings.json" />
+    <None Include="toolchain-discovery.json" />
   </ItemGroup>
   <ItemGroup>
     <Image Include="Assets\Square150x150Logo.scale-200.png" />

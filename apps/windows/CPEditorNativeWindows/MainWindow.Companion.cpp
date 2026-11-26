@@ -10,10 +10,70 @@ using namespace Windows::Foundation;
 using namespace Windows::Storage::Pickers;
 using namespace Microsoft::UI::Xaml;
 using namespace Microsoft::UI::Xaml::Controls;
+using namespace Microsoft::UI::Xaml::Media;
 using cpn::windows::CompanionModel;
 using cpn::windows::CompanionWorker;
 using cpn::windows::UiStrings;
+
 namespace winrt::CPEditorNativeWindows::implementation {
+namespace {
+Border make_preview_card(hstring const& title, hstring const& input_label, hstring const& input_text,
+                         hstring const& expected_label, hstring const& expected_text) {
+    Border card;
+    card.CornerRadius(CornerRadius{4});
+    card.BorderThickness(Thickness{1});
+    card.BorderBrush(Application::Current().Resources().Lookup(box_value(L"CardStrokeColorDefaultBrush")).as<Brush>());
+    card.Background(Application::Current().Resources().Lookup(box_value(L"CardBackgroundFillColorDefaultBrush")).as<Brush>());
+    card.Padding(Thickness{8, 6, 8, 8});
+
+    StackPanel root;
+    root.Spacing(6);
+    TextBlock hdr;
+    hdr.Text(title);
+    hdr.FontSize(12);
+    hdr.FontWeight(Microsoft::UI::Text::FontWeights::SemiBold());
+    root.Children().Append(hdr);
+
+    Grid cols;
+    cols.ColumnSpacing(8);
+    ColumnDefinition c0, c1;
+    c0.Width(GridLength{1, GridUnitType::Star});
+    c1.Width(GridLength{1, GridUnitType::Star});
+    cols.ColumnDefinitions().Append(c0);
+    cols.ColumnDefinitions().Append(c1);
+
+    auto const mono = FontFamily{L"Cascadia Mono, Consolas, Courier New"};
+    auto make_box = [&](hstring const& lbl, hstring const& body) {
+        StackPanel sp;
+        sp.Spacing(2);
+        TextBlock l;
+        l.Text(lbl);
+        l.FontSize(11);
+        l.Opacity(0.7);
+        TextBox b;
+        b.Text(body);
+        b.IsReadOnly(true);
+        b.AcceptsReturn(true);
+        b.TextWrapping(TextWrapping::NoWrap);
+        b.FontFamily(mono);
+        b.FontSize(11);
+        b.MaxHeight(120);
+        sp.Children().Append(l);
+        sp.Children().Append(b);
+        return sp;
+    };
+    auto left = make_box(input_label, input_text);
+    auto right = make_box(expected_label, expected_text);
+    Grid::SetColumn(left, 0);
+    Grid::SetColumn(right, 1);
+    cols.Children().Append(left);
+    cols.Children().Append(right);
+    root.Children().Append(cols);
+    card.Child(root);
+    return card;
+}
+}
+
 void MainWindow::InitializeCompanionStorage() {
     try {
         auto restored = CompanionModel::binding(workspace_preserved_preferences_, companion_configuration_.storage_namespace);
@@ -52,8 +112,6 @@ IAsyncOperation<bool> MainWindow::EnsureCompanionStorageAsync() {
     auto existing = CompanionModel::binding(workspace_preserved_preferences_, companion_configuration_.storage_namespace);
     if (existing && !CompanionModel::same_binding(*existing, *companion_binding_)) throw std::invalid_argument("Companion storage owner changed.");
     if (existing) {
-        // Verify the saved owner without spending a revision on unrelated pending
-        // edits. At MAX-1 those edits and the append belong in ONE final snapshot.
         auto worker = session_worker_; const auto paths = recovery_paths_; const auto expected = recovery_disk_digest_;
         const auto binding = *companion_binding_; const auto ns = companion_configuration_.storage_namespace;
         cpn::SessionLoadResult observed; apartment_context ui; std::exception_ptr failure;
@@ -71,15 +129,11 @@ IAsyncOperation<bool> MainWindow::EnsureCompanionStorageAsync() {
             throw hresult_error{E_FAIL, strings_.get(L"CompanionAwaitingRecovery")};
         }
     }
-    // This also covers an owner still only in memory after a failed first save.
-    // A verified persisted owner returned above and can use the final revision.
     if (!CompanionModel::can_create_storage_binding(recovery_revision_)) {
         companion_notice_ = std::wstring{strings_.get(L"CompanionStorageRevisionUnavailable")};
         co_return false;
     }
     if (!existing) {
-        // The owner must reach disk before accept/start. Finish this synchronous scope
-        // before flush so the last revision can wait for every OTHER persistent operation.
         PersistentOperation operation{*this};
         auto next = workspace_preserved_preferences_;
         if (next.size() >= cpn::SessionBounds{}.max_preferences_per_owner) throw hresult_error{E_BOUNDS, strings_.get(L"CompanionStorageUnavailable")};
@@ -89,7 +143,6 @@ IAsyncOperation<bool> MainWindow::EnsureCompanionStorageAsync() {
     if (!(co_await FlushRecoveryAsync())) {
         companion_notice_ = std::wstring{strings_.get(L"CompanionAwaitingRecovery")}; co_return false;
     }
-    // Flush validates the actual disk token, including an unchanged logical snapshot.
     auto persisted = cpn::parse_workspace_session(*recovery_saved_content_);
     auto owner = CompanionModel::binding(persisted.editor_preferences, companion_configuration_.storage_namespace);
     co_return owner && CompanionModel::same_binding(*owner, *companion_binding_);
@@ -98,12 +151,14 @@ hstring MainWindow::CompanionStatus(std::string const& code, std::string const& 
     auto label = companion_configuration_.status_labels.find(code);
     auto text = label == companion_configuration_.status_labels.end() ?
         UiStrings::format(strings_.get(L"CompanionStatusFormat"), {std::wstring{to_hstring(code)}}) : std::wstring{strings_.get(to_hstring(label->second))};
-    if (!detail.empty()) text += L"\n" + std::wstring{to_hstring(detail)};
+    if (!detail.empty()) text += L" — " + std::wstring{to_hstring(detail)};
     return hstring{text};
 }
 cpn::CompanionInboxItem const* MainWindow::SelectedCompanionItem() {
     const auto index = CompanionItems().SelectedIndex();
-    return index < 0 || static_cast<std::size_t>(index) >= companion_page_.items.size() ? nullptr : &companion_page_.items[static_cast<std::size_t>(index)];
+    if (index < 0 || static_cast<std::size_t>(index) >= companion_visible_indices_.size()) return nullptr;
+    auto const real_index = companion_visible_indices_[static_cast<std::size_t>(index)];
+    return real_index < companion_page_.items.size() ? &companion_page_.items[real_index] : nullptr;
 }
 void MainWindow::UpdateCompanionControls() {
     const bool ready = initialized_ && companion_available_ && companion_worker_ && !shutting_down_ && !busy_ && !companion_operating_ && !recovery_copying_ && !persistence_gate_.final_active();
@@ -121,46 +176,142 @@ void MainWindow::UpdateCompanionControls() {
     }
     ApplyCompanionButton().IsEnabled(ready && may_apply && item && item->state == cpn::CompanionInboxState::pending);
     CompanionNotice().Text(hstring{companion_notice_});
-    CompanionListenerStatus().Text(companion_listener_.running ? hstring{UiStrings::format(strings_.get(L"CompanionListenerFormat"), {std::to_wstring(companion_listener_.port)})} :
-        CompanionStatus(companion_listener_.status.empty() ? "NotStarted" : companion_listener_.status,
+    CompanionListenerStatus().Text(companion_listener_.running
+        ? hstring{UiStrings::format(strings_.get(L"CompanionListenerFormat"), {std::to_wstring(companion_listener_.port)})}
+        : CompanionStatus(companion_listener_.status.empty() ? "NotStarted" : companion_listener_.status,
             companion_listener_.failure_detail.empty() ? companion_listener_.detail : companion_listener_.failure_detail));
+
+    std::size_t pending_count = 0;
+    for (auto const& row : companion_page_.items) {
+        if (row.state == cpn::CompanionInboxState::pending) ++pending_count;
+    }
+    CompanionBtnLabel().Text(pending_count > 0
+        ? hstring{UiStrings::format(strings_.get(L"CompanionBtnBadgeFormat"), {std::to_wstring(pending_count)})}
+        : strings_.get(L"CompanionBtnText"));
+
+    if (companion_listener_.running) {
+        StatusCompanionText().Text(hstring{UiStrings::format(strings_.get(L"StatusBarCompanionActiveFormat"), {std::to_wstring(companion_listener_.port)})});
+        StatusCompanionText().Visibility(Visibility::Visible);
+    } else {
+        StatusCompanionText().Visibility(Visibility::Collapsed);
+    }
+
+    CompanionFilterAllButton().IsChecked(companion_filter_ == CompanionFilter::All);
+    CompanionFilterPendingButton().IsChecked(companion_filter_ == CompanionFilter::Pending);
+    CompanionFilterAppliedButton().IsChecked(companion_filter_ == CompanionFilter::Applied);
+}
+void MainWindow::CompanionFilter_Click(IInspectable const& sender, RoutedEventArgs const&) {
+    if (sender == CompanionFilterPendingButton()) companion_filter_ = CompanionFilter::Pending;
+    else if (sender == CompanionFilterAppliedButton()) companion_filter_ = CompanionFilter::Applied;
+    else companion_filter_ = CompanionFilter::All;
+    RenderCompanionItems();
 }
 void MainWindow::RenderCompanionItems() {
     std::optional<std::string> selected;
     if (auto item = SelectedCompanionItem()) selected = item->import_id;
     CompanionItems().Items().Clear();
+    companion_visible_indices_.clear();
     std::int32_t selected_index = -1;
     for (std::size_t i = 0; i < companion_page_.items.size(); ++i) {
         auto const& item = companion_page_.items[i];
-        const auto state = strings_.get(item.state == cpn::CompanionInboxState::pending ? L"CompanionPending" : L"CompanionApplied");
-        TextBlock row; row.TextWrapping(TextWrapping::Wrap);
-        row.Text(hstring{UiStrings::format(strings_.get(L"CompanionRowFormat"), {std::wstring{to_hstring(CompanionModel::preview(item.candidate.name, companion_configuration_.preview_bytes))},
+        if (companion_filter_ == CompanionFilter::Pending && item.state != cpn::CompanionInboxState::pending) continue;
+        if (companion_filter_ == CompanionFilter::Applied && item.state != cpn::CompanionInboxState::applied) continue;
+
+        auto const visible_pos = companion_visible_indices_.size();
+        companion_visible_indices_.push_back(i);
+
+        StackPanel row_panel;
+        row_panel.Padding(Thickness{4, 4, 4, 4});
+        row_panel.Spacing(2);
+        TextBlock title_blk;
+        title_blk.Text(to_hstring(CompanionModel::preview(item.candidate.name, companion_configuration_.preview_bytes)));
+        title_blk.FontSize(13);
+        title_blk.FontWeight(Microsoft::UI::Text::FontWeights::SemiBold());
+        title_blk.TextTrimming(TextTrimming::CharacterEllipsis);
+        TextBlock sub_blk;
+        auto const state = strings_.get(item.state == cpn::CompanionInboxState::pending ? L"CompanionPending" : L"CompanionApplied");
+        sub_blk.Text(hstring{UiStrings::format(strings_.get(L"CompanionRowSubtitleFormat"), {
             std::wstring{state}, std::to_wstring(item.candidate.tests.size())})});
-        CompanionItems().Items().Append(row);
-        if (selected && item.import_id == *selected) selected_index = static_cast<std::int32_t>(i);
+        sub_blk.FontSize(11);
+        sub_blk.Opacity(0.75);
+        row_panel.Children().Append(title_blk);
+        row_panel.Children().Append(sub_blk);
+        CompanionItems().Items().Append(row_panel);
+        if (selected && item.import_id == *selected) selected_index = static_cast<std::int32_t>(visible_pos);
     }
-    if (selected_index < 0 && !companion_page_.items.empty()) selected_index = 0;
-    CompanionItems().SelectedIndex(selected_index); Companion_SelectionChanged(nullptr, nullptr); UpdateCompanionControls();
+    if (selected_index < 0 && !companion_visible_indices_.empty()) selected_index = 0;
+    CompanionItems().SelectedIndex(selected_index);
+    Companion_SelectionChanged(nullptr, nullptr);
+    UpdateCompanionControls();
 }
 void MainWindow::Companion_SelectionChanged(IInspectable const&, SelectionChangedEventArgs const&) {
+    CompanionPreviewPanel().Children().Clear();
     auto const* item = SelectedCompanionItem();
-    if (!item) { CompanionPreview().Text(L""); UpdateCompanionControls(); return; }
-    auto const& candidate = item->candidate;
-    const auto bounded = [&](std::string const& bytes) { return std::wstring{to_hstring(CompanionModel::preview(bytes, companion_configuration_.preview_bytes))}; };
-    auto text = UiStrings::format(strings_.get(L"CompanionMetadataFormat"), {bounded(candidate.name), bounded(candidate.group), bounded(candidate.url),
-        std::to_wstring(candidate.tests.size()), bounded(item->import_id)});
-    if (candidate.batch) text += L"\n" + UiStrings::format(strings_.get(L"CompanionBatchFormat"), {bounded(candidate.batch->id), std::to_wstring(candidate.batch->size)});
-    for (auto const& issue : candidate.ordinary_stdio_issues) {
-        const auto label = companion_configuration_.issue_labels.find(cpn::companion_stdio_issue_name(issue.code));
-        text += L"\n" + UiStrings::format(strings_.get(label == companion_configuration_.issue_labels.end() ? L"CompanionIssueUnknown" : to_hstring(label->second)), {bounded(issue.value)});
+    if (!item) {
+        CompanionDetailTitle().Text(L"");
+        CompanionDetailMeta().Text(strings_.get(L"CompanionNoSelection"));
+        UpdateCompanionControls();
+        return;
     }
+    auto const& candidate = item->candidate;
+    const auto bounded = [&](std::string const& bytes) {
+        return std::wstring{to_hstring(CompanionModel::preview(bytes, companion_configuration_.preview_bytes))};
+    };
+    CompanionDetailTitle().Text(hstring{bounded(candidate.name)});
+    auto meta = UiStrings::format(strings_.get(L"CompanionMetadataFormat"), {
+        bounded(candidate.group), bounded(candidate.url), std::to_wstring(candidate.tests.size()), bounded(item->import_id)});
+    if (candidate.source_limits.time_limit_ms > 0 || candidate.source_limits.memory_limit_mb > 0) {
+        meta += L"\n" + UiStrings::format(strings_.get(L"CompanionSourceLimitsFormat"), {
+            std::to_wstring(candidate.source_limits.time_limit_ms), std::to_wstring(candidate.source_limits.memory_limit_mb)});
+    }
+    if (candidate.batch) {
+        meta += L"\n" + UiStrings::format(strings_.get(L"CompanionBatchFormat"), {bounded(candidate.batch->id), std::to_wstring(candidate.batch->size)});
+    }
+    CompanionDetailMeta().Text(hstring{meta});
+
+    for (auto const& issue : candidate.ordinary_stdio_issues) {
+        InfoBar bar;
+        bar.IsOpen(true);
+        bar.IsClosable(false);
+        bar.Severity(InfoBarSeverity::Warning);
+        const auto label = companion_configuration_.issue_labels.find(cpn::companion_stdio_issue_name(issue.code));
+        bar.Message(hstring{UiStrings::format(strings_.get(
+            label == companion_configuration_.issue_labels.end() ? L"CompanionIssueUnknown" : to_hstring(label->second)),
+            {bounded(issue.value)})});
+        CompanionPreviewPanel().Children().Append(bar);
+    }
+
     std::size_t index{};
     for (auto const& sample : candidate.tests) {
-        if (index >= companion_configuration_.preview_samples) { text += L"\n" + std::wstring{strings_.get(L"CompanionPreviewTruncated")}; break; }
-        text += L"\n\n" + UiStrings::format(strings_.get(L"CompanionSampleFormat"), {std::to_wstring(++index), bounded(sample.input), bounded(sample.output)});
+        if (index >= companion_configuration_.preview_samples) {
+            TextBlock trunc;
+            trunc.Text(strings_.get(L"CompanionPreviewTruncated"));
+            trunc.FontSize(11);
+            trunc.Opacity(0.75);
+            CompanionPreviewPanel().Children().Append(trunc);
+            break;
+        }
+        auto hdr = hstring{UiStrings::format(strings_.get(L"SampleHeaderFormat"), {std::to_wstring(++index)})};
+        CompanionPreviewPanel().Children().Append(make_preview_card(
+            hdr, strings_.get(L"TestInput"), hstring{bounded(sample.input)},
+            strings_.get(L"TestExpected"), hstring{bounded(sample.output)}));
     }
-    text += L"\n\n" + UiStrings::format(strings_.get(L"CompanionPayloadFormat"), {std::to_wstring(candidate.original_json.size()), bounded(candidate.original_json)});
-    CompanionPreview().Text(hstring{text}); UpdateCompanionControls();
+
+    Expander payload_exp;
+    payload_exp.Header(box_value(hstring{UiStrings::format(strings_.get(L"CompanionPayloadFormat"), {std::to_wstring(candidate.original_json.size())})}));
+    payload_exp.HorizontalAlignment(HorizontalAlignment::Stretch);
+    TextBox payload_box;
+    payload_box.IsReadOnly(true);
+    payload_box.AcceptsReturn(true);
+    payload_box.TextWrapping(TextWrapping::Wrap);
+    payload_box.FontFamily(FontFamily{L"Cascadia Mono, Consolas, Courier New"});
+    payload_box.FontSize(11);
+    payload_box.MaxHeight(160);
+    payload_box.Text(hstring{bounded(candidate.original_json)});
+    payload_exp.Content(payload_box);
+    CompanionPreviewPanel().Children().Append(payload_exp);
+
+    UpdateCompanionControls();
 }
 IAsyncAction MainWindow::ReadCompanionPageAsync(bool reset) {
     ValidateCompanionStorage();
@@ -182,13 +333,11 @@ void MainWindow::InstallCompanionDelta(cpn::windows::CompanionDelta const& delta
     if (!WorkspaceMutable() || documents_.size() >= runner_configuration_.maximum_documents) throw hresult_error{E_BOUNDS, strings_.get(L"CompanionRevisionUnavailable")};
     auto current = CaptureWorkspace(); if (!current) throw hresult_error{E_PENDING, strings_.get(L"FinishCompositionBeforeSaving")};
     auto merged = CompanionModel::merge(*current, base, delta);
-    // Validate the complete latest native budget before mounting anything. Existing
-    // adapters are retained, so edits, selection, Undo and active jobs survive prepare.
     std::vector<std::string> profiles; for (auto const& profile : configuration_.profiles) profiles.push_back(to_string(hstring{profile.id}));
     (void)cpn::windows::RecoveryModel::prepare(merged, recovery_configuration_, runner_configuration_, profiles, to_string(hstring{configuration_.default_profile}));
     auto preferences = std::move(merged.editor_preferences);
-    AddRestoredDocument(delta.document, delta.preferences); // Strong rollback if mounting fails.
-    workspace_preserved_preferences_.swap(preferences); // No await or throwing step splits document + receipt.
+    AddRestoredDocument(delta.document, delta.preferences);
+    workspace_preserved_preferences_.swap(preferences);
     ScheduleRecoverySave();
 }
 IAsyncAction MainWindow::ApplyCompanionAsync(cpn::CompanionInboxItem item) {
@@ -227,8 +376,6 @@ IAsyncAction MainWindow::ApplyCompanionAsync(cpn::CompanionInboxItem item) {
     }
     if (operation) operation->finish();
     if (!(co_await FlushRecoveryAsync())) { companion_notice_ = std::wstring{strings_.get(L"CompanionAwaitingRecovery")}; co_return; }
-    // mark_applied verifies a receipt in the REAL persisted recovery file. A failed
-    // flush/mark leaves Pending visible and replay uses the existing receipt.
     const auto paths = recovery_paths_;
     cpn::windows::CompanionWriteResponse marked; failure = {};
     co_await resume_background();

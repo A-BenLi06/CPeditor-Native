@@ -1,4 +1,5 @@
 #pragma once
+#include "CheckerModel.h"
 #include "RunnerConfiguration.h"
 #include "SessionWorker.h"
 #include "cpn/session.hpp"
@@ -31,10 +32,19 @@ struct DocumentPreferences {
     std::uint64_t test_revision{1};
     bool opaque{};
 };
+struct WorkspaceUiPreferences {
+    std::string theme{"system"};
+    bool word_wrap{false};
+    bool auto_pair{true};
+    std::uint32_t tab_width{4};
+    std::optional<CheckerSettings> checker;
+    [[nodiscard]] bool operator==(WorkspaceUiPreferences const&) const noexcept = default;
+};
 struct PreparedRecovery {
     cpn::WorkspaceSession session;
     std::vector<DocumentPreferences> documents;
     std::optional<std::vector<ToolchainChoice>> toolchains;
+    WorkspaceUiPreferences ui_preferences;
     bool workspace_opaque{};
 };
 struct RecoveryModel {
@@ -45,6 +55,7 @@ struct RecoveryModel {
         RunnerConfiguration const& defaults, std::vector<std::string> const& editor_profiles, std::string const& default_editor_profile);
     [[nodiscard]] static cpn::NativeEditorPreferences document_preferences(DocumentPreferences const&, std::string const& namespace_id);
     [[nodiscard]] static cpn::NativeEditorPreferences workspace_preferences(std::vector<ToolchainChoice> const&, std::string const& namespace_id);
+    [[nodiscard]] static cpn::NativeEditorPreferences workspace_preferences(std::vector<ToolchainChoice> const&, WorkspaceUiPreferences const&, std::string const& namespace_id);
     // Unknown/future own versions win: retain all original entries and do not append a downgraded version.
     [[nodiscard]] static bool merge_preferences(std::vector<cpn::NativeEditorPreferences>&, cpn::NativeEditorPreferences);
     [[nodiscard]] static cpn::SessionLoadResult load_response(std::string_view);

@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "RunnerConfiguration.h"
+#include "cpn/api.h"
 #include <algorithm>
 #include <set>
 #include <stdexcept>
@@ -65,5 +66,53 @@ std::string const& RunnerConfiguration::default_toolchain(std::string const& lan
     const auto found = default_toolchains.find(language);
     if (found == default_toolchains.end()) throw std::invalid_argument("Missing default toolchain for editor language.");
     return found->second;
+}
+bool RunnerConfiguration::is_compiled_toolchain(nlohmann::json const& profile) {
+    return profile.is_object() && profile.contains("build") && !profile.at("build").is_null();
+}
+nlohmann::json RunnerConfiguration::validate_toolchain_json(std::string_view json_text) {
+    cpn_error error{};
+    error.struct_size = sizeof(error);
+    auto status = cpn_validate_toolchain_json(
+        cpn_bytes{reinterpret_cast<std::uint8_t const*>(json_text.data()), json_text.size()}, &error);
+    if (status != CPN_OK) throw std::invalid_argument(error.message);
+    return Json::parse(json_text);
+}
+ToolchainVisualDraft RunnerConfiguration::visual_from_json(nlohmann::json const& profile) {
+    auto validated = validate_toolchain_json(profile.dump());
+    ToolchainVisualDraft draft;
+    draft.has_build = is_compiled_toolchain(validated);
+    if (draft.has_build) {
+        auto const& build = validated.at("build");
+        draft.build_executable = build.at("executable").get<std::string>();
+        draft.build_arguments = build.at("arguments").get<std::vector<std::string>>();
+        if (validated.contains("build_limits") && validated.at("build_limits").is_object() &&
+            validated.at("build_limits").contains("wall_timeout_ms"))
+            draft.build_wall_timeout_ms = validated.at("build_limits").at("wall_timeout_ms").get<std::uint64_t>();
+    }
+    auto const& run = validated.at("run");
+    draft.run_executable = run.at("executable").get<std::string>();
+    draft.run_arguments = run.at("arguments").get<std::vector<std::string>>();
+    if (validated.contains("run_limits") && validated.at("run_limits").is_object() &&
+        validated.at("run_limits").contains("wall_timeout_ms"))
+        draft.run_wall_timeout_ms = validated.at("run_limits").at("wall_timeout_ms").get<std::uint64_t>();
+    if (validated.contains("inherit_environment"))
+        draft.inherit_environment = validated.at("inherit_environment").get<bool>();
+    return draft;
+}
+nlohmann::json RunnerConfiguration::apply_visual_to_json(nlohmann::json const& base_profile, ToolchainVisualDraft const& draft) {
+    auto next = validate_toolchain_json(base_profile.dump());
+    if (draft.has_build) {
+        next["build"] = Json{{"executable", draft.build_executable}, {"arguments", draft.build_arguments}};
+        if (!next.contains("build_limits") || !next.at("build_limits").is_object()) next["build_limits"] = Json::object();
+        next["build_limits"]["wall_timeout_ms"] = draft.build_wall_timeout_ms;
+    } else {
+        next["build"] = nullptr;
+    }
+    next["run"] = Json{{"executable", draft.run_executable}, {"arguments", draft.run_arguments}};
+    if (!next.contains("run_limits") || !next.at("run_limits").is_object()) next["run_limits"] = Json::object();
+    next["run_limits"]["wall_timeout_ms"] = draft.run_wall_timeout_ms;
+    next["inherit_environment"] = draft.inherit_environment;
+    return validate_toolchain_json(next.dump());
 }
 }

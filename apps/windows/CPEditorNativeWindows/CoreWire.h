@@ -21,6 +21,24 @@ struct RunRequest {
     nlohmann::json toolchain;
     std::vector<RunCase> tests;
     std::string comparison;
+    std::string mode{"compile_and_run"};
+    std::optional<std::string> artifact_path;
+    std::optional<nlohmann::json> external_checker;
+};
+struct ExternalCheckerOutput {
+    std::string verdict;
+    bool process_attempted{};
+    std::string termination;
+    std::optional<int> exit_code;
+    std::optional<int> signal;
+    std::uint64_t elapsed_ms{};
+    std::string standard_output;
+    std::string standard_error;
+    std::uint64_t stdout_total_bytes{};
+    std::uint64_t stderr_total_bytes{};
+    bool stdout_truncated{};
+    bool stderr_truncated{};
+    std::string detail;
 };
 struct RunCaseOutput {
     std::string id;
@@ -31,6 +49,12 @@ struct RunCaseOutput {
     std::uint64_t elapsed_ms{};
     bool stdout_truncated{};
     bool stderr_truncated{};
+    std::string termination;
+    std::optional<int> exit_code;
+    std::optional<int> signal;
+    std::uint64_t stdout_total_bytes{};
+    std::uint64_t stderr_total_bytes{};
+    std::optional<ExternalCheckerOutput> checker;
 };
 struct RunOutput {
     std::string document_id;
@@ -42,6 +66,9 @@ struct RunOutput {
     bool build_stderr_truncated{};
     std::string error;
     std::vector<RunCaseOutput> tests;
+    std::string profile_id;
+    std::string source_digest;
+    std::uint64_t build_elapsed_ms{};
 };
 struct RunEvent {
     enum class Kind { ready, job, engine_error };

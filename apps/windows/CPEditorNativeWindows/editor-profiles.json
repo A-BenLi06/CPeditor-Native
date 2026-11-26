@@ -4,6 +4,16 @@
   "fallbackProfile": "plain",
   "maxDocumentBytes": 16777216,
   "tabWidth": 4,
+  "assist": {
+    "autoPairDefault": true,
+    "pairs": [
+      { "open": "(", "close": ")" },
+      { "open": "[", "close": "]" },
+      { "open": "{", "close": "}" },
+      { "open": "\"", "close": "\"" },
+      { "open": "'", "close": "'" }
+    ]
+  },
   "profiles": [
     {
       "id": "cpp",

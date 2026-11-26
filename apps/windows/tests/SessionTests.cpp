@@ -145,6 +145,32 @@ void model(RecoveryConfiguration const& config) {
     candidate = sample(); auto removed = settings.toolchains; removed[0].id = "replacement"; removed[0].profile["id"] = "replacement";
     (void)RecoveryModel::merge_preferences(candidate.editor_preferences, RecoveryModel::workspace_preferences(removed, config.workspace_namespace));
     rejects([&] { (void)RecoveryModel::prepare(candidate, config, settings, {"cpp"}, "cpp"); }, "Restored catalog omitted a required default toolchain.");
+
+    // Backward-compatible legacy workspace preferences + new UI preferences round trip.
+    candidate = sample(); candidate.documents[0].toolchain_profile_id = "fixture";
+    (void)RecoveryModel::merge_preferences(candidate.editor_preferences, RecoveryModel::workspace_preferences(settings.toolchains, config.workspace_namespace));
+    auto legacy = RecoveryModel::prepare(candidate, config, settings, {"cpp"}, "cpp");
+    expect(legacy.ui_preferences.theme == "system" && !legacy.ui_preferences.word_wrap &&
+        legacy.ui_preferences.auto_pair && legacy.ui_preferences.tab_width == 4 && !legacy.ui_preferences.checker,
+        "Legacy workspace preferences did not initialize UI defaults.");
+
+    WorkspaceUiPreferences ui;
+    ui.theme = "dark";
+    ui.word_wrap = true;
+    ui.auto_pair = false;
+    ui.tab_width = 2;
+    ui.checker = CheckerSettings{true, R"({"schema_version":1,"command":{"executable":"spj.exe","arguments":["${input}","${actual}","${expected}"]},"accepted_exit_codes":[0],"wrong_answer_exit_codes":[1,2],"inherit_environment":true,"environment":[]})"};
+    (void)RecoveryModel::merge_preferences(candidate.editor_preferences, RecoveryModel::workspace_preferences(settings.toolchains, ui, config.workspace_namespace));
+    auto roundtrip = RecoveryModel::prepare(candidate, config, settings, {"cpp"}, "cpp");
+    expect(roundtrip.ui_preferences == ui, "Workspace UI preferences failed to round trip.");
+
+    auto bad_ui = ui; bad_ui.theme = "neon";
+    (void)RecoveryModel::merge_preferences(candidate.editor_preferences,
+        cpn::NativeEditorPreferences{config.workspace_namespace, 1, Json{{"toolchains", Json::parse(RecoveryModel::workspace_preferences(settings.toolchains, config.workspace_namespace).object_json).at("toolchains")}, {"theme", "neon"}}.dump()});
+    rejects([&] { (void)RecoveryModel::prepare(candidate, config, settings, {"cpp"}, "cpp"); }, "Invalid theme preference was accepted.");
+    (void)RecoveryModel::merge_preferences(candidate.editor_preferences,
+        cpn::NativeEditorPreferences{config.workspace_namespace, 1, Json{{"toolchains", Json::parse(RecoveryModel::workspace_preferences(settings.toolchains, config.workspace_namespace).object_json).at("toolchains")}, {"tab_width", 0}}.dump()});
+    rejects([&] { (void)RecoveryModel::prepare(candidate, config, settings, {"cpp"}, "cpp"); }, "Zero tab_width preference was accepted.");
 }
 void sessions(std::filesystem::path const& directory, RecoveryConfiguration const& config) {
     SessionWorker worker(config.options); const auto paths = config.paths(directory / "workspace.json");

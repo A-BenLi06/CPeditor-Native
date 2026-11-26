@@ -24,6 +24,9 @@
   <data xml:space="preserve" name="Untitled">
     <value>Untitled</value>
   </data>
+  <data xml:space="preserve" name="UntitledNumberedFormat">
+    <value>Untitled {0}</value>
+  </data>
   <data xml:space="preserve" name="UnsavedSuffix">
     <value> *</value>
   </data>
@@ -31,7 +34,28 @@
     <value>{0} — {1}{2}</value>
   </data>
   <data xml:space="preserve" name="StatusFormat">
-    <value>{0}  |  Committed revision {1}  |  UTF-8: {2} bytes  |  Caret: {3}  |  Anchor: {4}</value>
+    <value>{0}  |  Rev {1}  |  UTF-8: {2} B</value>
+  </data>
+  <data xml:space="preserve" name="StatusBarLnColFormat">
+    <value>Ln {0}, Col {1}</value>
+  </data>
+  <data xml:space="preserve" name="StatusBarEncodingUtf8">
+    <value>UTF-8</value>
+  </data>
+  <data xml:space="preserve" name="StatusBarEncodingBom">
+    <value>UTF-8 BOM</value>
+  </data>
+  <data xml:space="preserve" name="StatusBarBytesFormat">
+    <value>{0} B</value>
+  </data>
+  <data xml:space="preserve" name="StatusBarWrapOn">
+    <value>Wrap: On</value>
+  </data>
+  <data xml:space="preserve" name="StatusBarWrapOff">
+    <value>Wrap: Off</value>
+  </data>
+  <data xml:space="preserve" name="StatusBarCompanionActiveFormat">
+    <value>Companion :{0}</value>
   </data>
   <data xml:space="preserve" name="ErrorTitle">
     <value>Unable to complete the action</value>
@@ -80,32 +104,143 @@
   <data xml:space="preserve" name="ProfilePlain">
     <value>Plain text</value>
   </data>
-  <data xml:space="preserve" name="NewCommand.Label">
-    <value>New</value>
+  <data xml:space="preserve" name="ProfilePython">
+    <value>Python (plain text)</value>
   </data>
-  <data xml:space="preserve" name="OpenCommand.Label">
-    <value>Open</value>
+  <data xml:space="preserve" name="MenuFile.Title">
+    <value>File</value>
   </data>
-  <data xml:space="preserve" name="SaveCommand.Label">
+  <data xml:space="preserve" name="MenuEdit.Title">
+    <value>Edit</value>
+  </data>
+  <data xml:space="preserve" name="MenuView.Title">
+    <value>View</value>
+  </data>
+  <data xml:space="preserve" name="MenuRun.Title">
+    <value>Run</value>
+  </data>
+  <data xml:space="preserve" name="MenuTools.Title">
+    <value>Tools</value>
+  </data>
+  <data xml:space="preserve" name="MenuNew.Text">
+    <value>New Document</value>
+  </data>
+  <data xml:space="preserve" name="MenuOpen.Text">
+    <value>Open…</value>
+  </data>
+  <data xml:space="preserve" name="MenuSave.Text">
     <value>Save</value>
   </data>
-  <data xml:space="preserve" name="SaveAsCommand.Label">
-    <value>Save as</value>
+  <data xml:space="preserve" name="MenuSaveAs.Text">
+    <value>Save As…</value>
   </data>
-  <data xml:space="preserve" name="ExportCommand.Label">
-    <value>Export snapshot</value>
+  <data xml:space="preserve" name="MenuSaveAll.Text">
+    <value>Save All</value>
+  </data>
+  <data xml:space="preserve" name="MenuCloseTab.Text">
+    <value>Close Tab</value>
+  </data>
+  <data xml:space="preserve" name="MenuCloseSaved.Text">
+    <value>Close Saved Tabs</value>
+  </data>
+  <data xml:space="preserve" name="MenuRecovery.Text">
+    <value>Workspace Recovery</value>
+  </data>
+  <data xml:space="preserve" name="MenuRetryRecovery.Text">
+    <value>Retry Recovery Save</value>
+  </data>
+  <data xml:space="preserve" name="MenuSaveRecoveryAs.Text">
+    <value>Save Recovery As…</value>
+  </data>
+  <data xml:space="preserve" name="MenuExportSnapshot.Text">
+    <value>Export Snapshot…</value>
+  </data>
+  <data xml:space="preserve" name="MenuUndo.Text">
+    <value>Undo</value>
+  </data>
+  <data xml:space="preserve" name="MenuRedo.Text">
+    <value>Redo</value>
+  </data>
+  <data xml:space="preserve" name="MenuWordWrap.Text">
+    <value>Word Wrap</value>
+  </data>
+  <data xml:space="preserve" name="MenuAutoPair.Text">
+    <value>Auto-Pair &amp; Smart Indent</value>
+  </data>
+  <data xml:space="preserve" name="MenuViewEditorOnly.Text">
+    <value>Editor Only</value>
+  </data>
+  <data xml:space="preserve" name="MenuViewSplit.Text">
+    <value>Split View</value>
+  </data>
+  <data xml:space="preserve" name="MenuViewTestsOnly.Text">
+    <value>Tests &amp; Output Only</value>
+  </data>
+  <data xml:space="preserve" name="MenuToggleTestPanel.Text">
+    <value>Toggle Tests Panel</value>
+  </data>
+  <data xml:space="preserve" name="MenuCompanionInbox.Text">
+    <value>Companion Inbox</value>
+  </data>
+  <data xml:space="preserve" name="MenuCompile.Text">
+    <value>Compile</value>
+  </data>
+  <data xml:space="preserve" name="MenuRunOnly.Text">
+    <value>Run Without Compiling</value>
+  </data>
+  <data xml:space="preserve" name="MenuCompileAndRun.Text">
+    <value>Compile &amp; Run</value>
+  </data>
+  <data xml:space="preserve" name="MenuStop.Text">
+    <value>Stop</value>
+  </data>
+  <data xml:space="preserve" name="MenuAddSample.Text">
+    <value>Add Sample</value>
+  </data>
+  <data xml:space="preserve" name="MenuConfigureChecker.Text">
+    <value>Configure External Checker…</value>
+  </data>
+  <data xml:space="preserve" name="MenuSettings.Text">
+    <value>Settings…</value>
+  </data>
+  <data xml:space="preserve" name="MenuRescanToolchains.Text">
+    <value>Rescan Compilers</value>
+  </data>
+  <data xml:space="preserve" name="CompileBtnText">
+    <value>Compile</value>
+  </data>
+  <data xml:space="preserve" name="RunOnlyBtnText">
+    <value>Run</value>
+  </data>
+  <data xml:space="preserve" name="CompileAndRunBtnText">
+    <value>Compile &amp; Run</value>
+  </data>
+  <data xml:space="preserve" name="StopBtnText">
+    <value>Stop</value>
+  </data>
+  <data xml:space="preserve" name="ViewEditorOnly.Content">
+    <value>Editor</value>
+  </data>
+  <data xml:space="preserve" name="ViewSplit.Content">
+    <value>Split</value>
+  </data>
+  <data xml:space="preserve" name="ViewTestsOnly.Content">
+    <value>Tests</value>
+  </data>
+  <data xml:space="preserve" name="CompanionBtnText">
+    <value>Companion</value>
+  </data>
+  <data xml:space="preserve" name="CompanionBtnBadgeFormat">
+    <value>Companion ({0})</value>
+  </data>
+  <data xml:space="preserve" name="SettingsBtn.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip">
+    <value>Settings (Ctrl+,)</value>
   </data>
   <data xml:space="preserve" name="Profiles.PlaceholderText">
     <value>Language</value>
   </data>
   <data xml:space="preserve" name="Profiles.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name">
     <value>Language</value>
-  </data>
-  <data xml:space="preserve" name="RunAll.Content">
-    <value>Run all</value>
-  </data>
-  <data xml:space="preserve" name="CancelRun.Content">
-    <value>Cancel</value>
   </data>
   <data xml:space="preserve" name="AddTest.Content">
     <value>Add sample</value>
@@ -117,22 +252,31 @@
     <value>Toolchain</value>
   </data>
   <data xml:space="preserve" name="Comparisons.PlaceholderText">
-    <value>Output comparison</value>
+    <value>Comparison</value>
   </data>
   <data xml:space="preserve" name="Comparisons.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name">
     <value>Output comparison</value>
   </data>
   <data xml:space="preserve" name="ToolchainMSVC">
-    <value>C++ / MSVC</value>
+    <value>C++ (MSVC)</value>
   </data>
   <data xml:space="preserve" name="ToolchainClang">
-    <value>C++ / Clang</value>
+    <value>C++ (Clang)</value>
   </data>
   <data xml:space="preserve" name="ToolchainGCC">
-    <value>C++ / GCC</value>
+    <value>C++ (GCC)</value>
   </data>
   <data xml:space="preserve" name="ToolchainPython">
     <value>Python</value>
+  </data>
+  <data xml:space="preserve" name="ToolchainMissingHint">
+    <value>Compiler not found</value>
+  </data>
+  <data xml:space="preserve" name="ToolchainAvailableFormat">
+    <value>Available: {0}</value>
+  </data>
+  <data xml:space="preserve" name="ToolchainUnavailableFormat">
+    <value>Unavailable: {0}</value>
   </data>
   <data xml:space="preserve" name="ComparisonTrailing">
     <value>Ignore trailing spaces</value>
@@ -143,14 +287,11 @@
   <data xml:space="preserve" name="ComparisonByte">
     <value>Exact bytes</value>
   </data>
-  <data xml:space="preserve" name="ProfilePython">
-    <value>Python (plain text)</value>
-  </data>
   <data xml:space="preserve" name="RunIdle">
     <value>Ready</value>
   </data>
   <data xml:space="preserve" name="RunAwaitingCommittedText">
-    <value>Waiting for committed source text…</value>
+    <value>Waiting for committed source…</value>
   </data>
   <data xml:space="preserve" name="RunQueued">
     <value>Queued</value>
@@ -175,6 +316,15 @@
   </data>
   <data xml:space="preserve" name="RunUnknown">
     <value>Unknown</value>
+  </data>
+  <data xml:space="preserve" name="RunCompiledState">
+    <value>Compiled</value>
+  </data>
+  <data xml:space="preserve" name="RunBuildStale">
+    <value>Source changed since last build; running previous artifact.</value>
+  </data>
+  <data xml:space="preserve" name="RunMissingArtifact">
+    <value>No compiled executable yet. Compile first or use Compile &amp; Run.</value>
   </data>
   <data xml:space="preserve" name="VerdictAC">
     <value>AC</value>
@@ -201,10 +351,10 @@
     <value>Not run</value>
   </data>
   <data xml:space="preserve" name="VerdictCheckerError">
-    <value>Checker error</value>
+    <value>Checker Error</value>
   </data>
   <data xml:space="preserve" name="VerdictInfrastructureError">
-    <value>Execution error</value>
+    <value>Execution Error</value>
   </data>
   <data xml:space="preserve" name="BuildNotRequired">
     <value>Not required</value>
@@ -231,16 +381,91 @@
     <value>Enabled</value>
   </data>
   <data xml:space="preserve" name="HasExpected">
-    <value>Compare expected output (empty text means empty output)</value>
+    <value>Compare</value>
   </data>
   <data xml:space="preserve" name="TestInput">
     <value>Input</value>
   </data>
+  <data xml:space="preserve" name="TestOutput">
+    <value>Output</value>
+  </data>
   <data xml:space="preserve" name="TestExpected">
-    <value>Expected output</value>
+    <value>Expected Output</value>
   </data>
   <data xml:space="preserve" name="RemoveTest">
-    <value>Remove sample</value>
+    <value>Remove</value>
+  </data>
+  <data xml:space="preserve" name="DuplicateSample">
+    <value>Duplicate</value>
+  </data>
+  <data xml:space="preserve" name="UseOutputAsExpected">
+    <value>Use Output</value>
+  </data>
+  <data xml:space="preserve" name="UseAllOutputsAsExpected">
+    <value>Use all outputs as expected</value>
+  </data>
+  <data xml:space="preserve" name="DeleteAllSamples">
+    <value>Delete all samples</value>
+  </data>
+  <data xml:space="preserve" name="CopyText">
+    <value>Copy</value>
+  </data>
+  <data xml:space="preserve" name="CopiedNotice">
+    <value>Copied to clipboard.</value>
+  </data>
+  <data xml:space="preserve" name="SampleHeaderFormat">
+    <value>Sample {0}</value>
+  </data>
+  <data xml:space="preserve" name="SampleElapsedFormat">
+    <value>{0} ms</value>
+  </data>
+  <data xml:space="preserve" name="BytesBadgeFormat">
+    <value>{0} B</value>
+  </data>
+  <data xml:space="preserve" name="NoSamplesTitle">
+    <value>No samples yet</value>
+  </data>
+  <data xml:space="preserve" name="NoSamplesHint">
+    <value>Add a sample to test standard input and output, or click Compile to build only.</value>
+  </data>
+  <data xml:space="preserve" name="CompilerOutputTitle">
+    <value>Compiler Output</value>
+  </data>
+  <data xml:space="preserve" name="CompiledBannerFormat">
+    <value>Compiled ({0} ms)</value>
+  </data>
+  <data xml:space="preserve" name="CheckerToggleText">
+    <value>Checker</value>
+  </data>
+  <data xml:space="preserve" name="CheckerConfigTip">
+    <value>Configure external checker</value>
+  </data>
+  <data xml:space="preserve" name="CheckerResultFormat">
+    <value>Checker: {0}  |  {1} ms{2}</value>
+  </data>
+  <data xml:space="preserve" name="CheckerExitCodeFormat">
+    <value>  |  exit {0}</value>
+  </data>
+  <data xml:space="preserve" name="CheckerNotAttempted">
+    <value>  |  not launched</value>
+  </data>
+  <data xml:space="preserve" name="StderrLabel">
+    <value>stderr:</value>
+  </data>
+  <data xml:space="preserve" name="CheckerStdoutLabel">
+    <value>checker stdout:</value>
+  </data>
+  <data xml:space="preserve" name="CheckerStderrLabel">
+    <value>checker stderr:</value>
+  </data>
+  <data xml:space="preserve" name="SummaryAllPassedFormat">
+    <value>{0}/{1} AC</value>
+  </data>
+  <data xml:space="preserve" name="SummaryCompiledFormat">
+    <value>Compiled ({0} ms)</value>
+  </data>
+  <data xml:space="preserve" name="SummaryNoTests">
+    <value>No tests run</value>
   </data>
   <data xml:space="preserve" name="RunError">
     <value>The program could not be run.</value>
@@ -273,47 +498,25 @@
     <value>Cancellation requested…</value>
   </data>
   <data xml:space="preserve" name="ResultRevisionFormat">
-    <value>Result for source revision {0}</value>
+    <value>Rev {0}</value>
   </data>
   <data xml:space="preserve" name="ResultStale">
-    <value>Outdated: source, samples or run settings have changed.</value>
+    <value>Outdated</value>
   </data>
   <data xml:space="preserve" name="OutputHex">
-    <value>Binary or invalid UTF-8 output (hex):</value>
+    <value>Binary / invalid UTF-8 (hex):</value>
   </data>
   <data xml:space="preserve" name="DisplayOutputTruncated">
-    <value>Display limited; the captured output contains {0} bytes.</value>
+    <value>Display truncated ({0} bytes total).</value>
   </data>
   <data xml:space="preserve" name="CoreOutputTruncated">
-    <value>The process output was truncated by the configured capture limit.</value>
-  </data>
-  <data xml:space="preserve" name="BuildOutputFormat">
-    <value>Build: {0}
-
-Build stdout:
-{1}
-
-Build stderr:
-{2}
-
-{3}</value>
-  </data>
-  <data xml:space="preserve" name="TestResultFormat">
-    <value>{0}  |  {1} ms
-
-stdout:
-{2}
-
-stderr:
-{3}
-
-{4}</value>
+    <value>Process output truncated by capture limit.</value>
   </data>
   <data xml:space="preserve" name="CoreDeliveryFailed">
     <value>The run coordinator could not deliver an event. Reopen the application to restart it.</value>
   </data>
   <data name="RetryRecovery.Content" xml:space="preserve">
-    <value>Retry Recovery Save</value>
+    <value>Retry Save</value>
   </data>
   <data name="SaveRecoveryAs.Content" xml:space="preserve">
     <value>Save Recovery As…</value>
@@ -355,10 +558,10 @@ stderr:
     <value>The file was replaced, but its durable storage could not be confirmed.</value>
   </data>
   <data name="BinaryTestInput" xml:space="preserve">
-    <value>Input (binary bytes preserved; read only)</value>
+    <value>Input (binary, read only)</value>
   </data>
   <data name="BinaryTestExpected" xml:space="preserve">
-    <value>Expected output (binary bytes preserved; read only)</value>
+    <value>Expected Output (binary, read only)</value>
   </data>
   <data name="RecoveryCopyPreservedFormat" xml:space="preserve">
     <value>A recovery copy was saved at {0}. Its startup location could not be confirmed; the previous location remains active.</value>
@@ -381,41 +584,36 @@ stderr:
   <data name="TestTextTrackingFailed" xml:space="preserve">
     <value>Sample text tracking failed. Running and recovery are blocked to preserve the recorded data.</value>
   </data>
-  <data name="TestsTab.Header" xml:space="preserve"><value>Samples</value></data>
-  <data name="CompanionTab.Header" xml:space="preserve"><value>Companion Inbox</value></data>
   <data name="ImportCompanion.Content" xml:space="preserve"><value>Import JSON…</value></data>
   <data name="RefreshCompanion.Content" xml:space="preserve"><value>Refresh</value></data>
   <data name="MoreCompanion.Content" xml:space="preserve"><value>Load more</value></data>
-  <data name="ApplyCompanion.Content" xml:space="preserve"><value>Apply to workspace</value></data>
-  <data name="StartCompanion.Content" xml:space="preserve"><value>Start listener</value></data>
-  <data name="StopCompanion.Content" xml:space="preserve"><value>Stop listener</value></data>
+  <data name="ApplyCompanion.Content" xml:space="preserve"><value>Apply to Workspace</value></data>
+  <data name="StartCompanion.Content" xml:space="preserve"><value>Start Listener</value></data>
+  <data name="StopCompanion.Content" xml:space="preserve"><value>Stop Listener</value></data>
+  <data name="CompanionFilterAll.Content" xml:space="preserve"><value>All</value></data>
+  <data name="CompanionFilterPending.Content" xml:space="preserve"><value>Pending</value></data>
+  <data name="CompanionFilterApplied.Content" xml:space="preserve"><value>Applied</value></data>
+  <data name="CompanionNoSelection" xml:space="preserve"><value>Select a problem from the inbox or import a Competitive Companion JSON payload.</value></data>
   <data name="CompanionReady" xml:space="preserve"><value>Ready to import problems. Start the listener to receive from Competitive Companion.</value></data>
   <data name="CompanionStorageUnavailable" xml:space="preserve"><value>Companion storage is unavailable. Existing data was preserved.</value></data>
   <data name="CompanionAwaitingRecovery" xml:space="preserve"><value>The problem remains pending. Save recovery successfully, then apply again.</value></data>
   <data name="CompanionStatusFormat" xml:space="preserve"><value>Companion: {0}</value></data>
   <data name="CompanionPending" xml:space="preserve"><value>Pending</value></data>
   <data name="CompanionApplied" xml:space="preserve"><value>Applied</value></data>
-  <data name="CompanionRowFormat" xml:space="preserve"><value>{0}  |  {1}  |  {2} samples</value></data>
-  <data name="CompanionListenerFormat" xml:space="preserve"><value>Listening on localhost:{0}</value></data>
-  <data name="CompanionMetadataFormat" xml:space="preserve"><value>{0}
-Group: {1}
-URL: {2}
-Samples: {3}
-Import: {4}</value></data>
+  <data name="CompanionRowSubtitleFormat" xml:space="preserve"><value>{0}  |  {1} samples</value></data>
+  <data name="CompanionListenerFormat" xml:space="preserve"><value>Listening on 127.0.0.1:{0}</value></data>
+  <data name="CompanionMetadataFormat" xml:space="preserve"><value>Group: {0}
+URL: {1}
+Samples: {2}  |  Import: {3}</value></data>
   <data name="CompanionBatchFormat" xml:space="preserve"><value>Batch: {0}  |  {1} problems</value></data>
+  <data name="CompanionSourceLimitsFormat" xml:space="preserve"><value>Problem limits: {0} ms / {1} MB</value></data>
   <data name="CompanionIssueUnknown" xml:space="preserve"><value>Ordinary input/output is unavailable: {0}</value></data>
   <data name="CompanionIssueInteractive" xml:space="preserve"><value>Interactive problem: {0}. Ordinary sample runs are unavailable.</value></data>
   <data name="CompanionIssueTestType" xml:space="preserve"><value>Test type {0} requires a different run mode.</value></data>
   <data name="CompanionIssueInputMode" xml:space="preserve"><value>Input mode {0} requires file or custom input handling.</value></data>
   <data name="CompanionIssueOutputMode" xml:space="preserve"><value>Output mode {0} requires file or custom output handling.</value></data>
-  <data name="CompanionPreviewTruncated" xml:space="preserve"><value>Sample preview is limited; the complete bytes are preserved in the inbox.</value></data>
-  <data name="CompanionSampleFormat" xml:space="preserve"><value>Sample {0}
-Input:
-{1}
-Expected output:
-{2}</value></data>
-  <data name="CompanionPayloadFormat" xml:space="preserve"><value>Original payload: {0} bytes
-{1}</value></data>
+  <data name="CompanionPreviewTruncated" xml:space="preserve"><value>Sample preview is limited; complete bytes are preserved in the inbox.</value></data>
+  <data name="CompanionPayloadFormat" xml:space="preserve"><value>Original payload ({0} bytes)</value></data>
   <data name="CompanionRevisionUnavailable" xml:space="preserve"><value>The workspace has no capacity for another imported document. The problem stays in the inbox.</value></data>
   <data name="CompanionRefreshRequired" xml:space="preserve"><value>Refresh the inbox before applying this problem.</value></data>
   <data name="CompanionPreserved" xml:space="preserve"><value>The action could not be completed. Existing inbox data and workspace receipts were preserved.</value></data>
@@ -429,4 +627,40 @@ Expected output:
   <data name="CompanionRunUnsupported" xml:space="preserve"><value>This problem requires interactive or file input/output. Ordinary sample runs are unavailable.</value></data>
   <data name="CompanionRunUnavailable" xml:space="preserve"><value>This problem has unsupported source metadata. Ordinary sample runs are unavailable until its metadata can be interpreted.</value></data>
   <data name="CompanionStorageRevisionUnavailable" xml:space="preserve"><value>This workspace cannot save new Companion storage and an imported problem within its remaining revision budget. Existing data is unchanged.</value></data>
+  <data name="SettingsTitle" xml:space="preserve"><value>Settings</value></data>
+  <data name="SettingsTabGeneral" xml:space="preserve"><value>General</value></data>
+  <data name="SettingsTabEditor" xml:space="preserve"><value>Editor</value></data>
+  <data name="SettingsTabRun" xml:space="preserve"><value>Run &amp; Toolchains</value></data>
+  <data name="SettingsThemeLabel" xml:space="preserve"><value>Appearance</value></data>
+  <data name="SettingsThemeSystem" xml:space="preserve"><value>System default</value></data>
+  <data xml:space="preserve" name="SettingsThemeLight"><value>Light</value></data>
+  <data xml:space="preserve" name="SettingsThemeDark"><value>Dark</value></data>
+  <data xml:space="preserve" name="SettingsRecoveryLocation"><value>Active workspace recovery file</value></data>
+  <data xml:space="preserve" name="SettingsWordWrap"><value>Word wrap</value></data>
+  <data xml:space="preserve" name="SettingsAutoPair"><value>Auto-pair brackets &amp; quotes and smart indent</value></data>
+  <data xml:space="preserve" name="SettingsTabWidth"><value>Tab width (spaces)</value></data>
+  <data xml:space="preserve" name="SettingsToolchainSection"><value>Compiler / Runtime Toolchain</value></data>
+  <data xml:space="preserve" name="SettingsRescanBtn"><value>Rescan Compilers</value></data>
+  <data xml:space="preserve" name="SettingsModeVisual"><value>Visual</value></data>
+  <data xml:space="preserve" name="SettingsModeJson"><value>JSON</value></data>
+  <data xml:space="preserve" name="SettingsBuildExecutable"><value>Compiler executable</value></data>
+  <data xml:space="preserve" name="SettingsBuildArgs"><value>Compiler arguments (one per line)</value></data>
+  <data xml:space="preserve" name="SettingsBuildTimeout"><value>Compile timeout (ms)</value></data>
+  <data xml:space="preserve" name="SettingsRunExecutable"><value>Run executable</value></data>
+  <data xml:space="preserve" name="SettingsRunArgs"><value>Run arguments (one per line)</value></data>
+  <data xml:space="preserve" name="SettingsRunTimeout"><value>Run timeout (ms)</value></data>
+  <data xml:space="preserve" name="SettingsInheritEnv"><value>Inherit system environment variables</value></data>
+  <data xml:space="preserve" name="SettingsApplyToolchain"><value>Apply Toolchain</value></data>
+  <data xml:space="preserve" name="SettingsToolchainApplied"><value>Toolchain configuration validated and applied.</value></data>
+  <data xml:space="preserve" name="SettingsCheckerSection"><value>External Checker</value></data>
+  <data xml:space="preserve" name="SettingsCheckerEnabled"><value>Enable custom external checker when expected output exists</value></data>
+  <data xml:space="preserve" name="SettingsCheckerExecutable"><value>Checker executable</value></data>
+  <data xml:space="preserve" name="SettingsCheckerArgs"><value>Checker arguments (one per line)</value></data>
+  <data xml:space="preserve" name="SettingsCheckerTimeout"><value>Checker timeout (ms)</value></data>
+  <data xml:space="preserve" name="SettingsCheckerAcceptCodes"><value>Accepted exit codes (comma-separated)</value></data>
+  <data xml:space="preserve" name="SettingsCheckerWaCodes"><value>Wrong Answer exit codes (comma-separated)</value></data>
+  <data xml:space="preserve" name="SettingsApplyChecker"><value>Apply Checker</value></data>
+  <data xml:space="preserve" name="SettingsCheckerApplied"><value>External checker configuration validated and applied.</value></data>
+  <data xml:space="preserve" name="SettingsInvalidNumber"><value>Please enter a positive integer timeout value.</value></data>
+  <data xml:space="preserve" name="SettingsReadOnlyHint"><value>Workspace recovery reached its revision limit; persistent settings are read only.</value></data>
 </root>

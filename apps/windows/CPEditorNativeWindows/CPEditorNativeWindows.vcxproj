@@ -83,7 +83,7 @@
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
-      <AdditionalDependencies>cpn_core.lib;windowsapp.lib;ole32.lib;Ws2_32.lib;Mswsock.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>cpn_core.lib;windowsapp.lib;ole32.lib;Ws2_32.lib;Mswsock.lib;Advapi32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(CPNCoreLibraryDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
@@ -110,12 +110,15 @@
     <ClInclude Include="App.xaml.h">
       <DependentUpon>App.xaml</DependentUpon>
     </ClInclude>
+    <ClInclude Include="CheckerModel.h" />
+    <ClInclude Include="EditorAssist.h" />
     <ClInclude Include="EditorProfiles.h" />
     <ClInclude Include="FileStore.h" />
     <ClInclude Include="MainWindow.xaml.h">
       <DependentUpon>MainWindow.xaml</DependentUpon>
     </ClInclude>
     <ClInclude Include="SnapshotJson.h" />
+    <ClInclude Include="ToolchainDiscovery.h" />
     <ClInclude Include="UiStrings.h" />
     <ClInclude Include="WinUIEditAdapter.h" />
     <ClInclude Include="pch.h" />
@@ -140,12 +143,17 @@
     <ClCompile Include="App.xaml.cpp">
       <DependentUpon>App.xaml</DependentUpon>
     </ClCompile>
+    <ClCompile Include="CheckerModel.cpp" />
+    <ClCompile Include="EditorAssist.cpp" />
     <ClCompile Include="EditorProfiles.cpp" />
     <ClCompile Include="FileStore.cpp" />
     <ClCompile Include="MainWindow.xaml.cpp">
       <DependentUpon>MainWindow.xaml</DependentUpon>
     </ClCompile>
+    <ClCompile Include="MainWindow.Tests.cpp" />
+    <ClCompile Include="MainWindow.Settings.cpp" />
     <ClCompile Include="SnapshotJson.cpp" />
+    <ClCompile Include="ToolchainDiscovery.cpp" />
     <ClCompile Include="WinUIEditAdapter.cpp" />
     <ClCompile Include="pch.cpp">
       <PrecompiledHeader>Create</PrecompiledHeader>
@@ -175,23 +183,41 @@
     <PRIResource Include="Strings\en-US\Resources.resw" />
   </ItemGroup>
   <ItemGroup>
-    <Content Include="editor-profiles.json" />
+    <None Include="checker-settings.json">
+      <DeploymentContent>true</DeploymentContent>
+    </None>
+    <None Include="editor-profiles.json">
+      <DeploymentContent>true</DeploymentContent>
+    </None>
     <None Include="packages.config" />
-    <Content Include="..\NOTICE.md">
+    <None Include="..\NOTICE.md">
       <Link>NOTICE.md</Link>
-    </Content>
-    <Content Include="..\..\..\third_party\WinUIEdit\LICENSE">
+      <DeploymentContent>true</DeploymentContent>
+    </None>
+    <None Include="..\..\..\third_party\WinUIEdit\LICENSE">
       <Link>Licenses\WinUIEdit.txt</Link>
-    </Content>
-    <Content Include="..\..\..\third_party\WinUIEdit\scintilla\License.txt">
+      <DeploymentContent>true</DeploymentContent>
+    </None>
+    <None Include="..\..\..\third_party\WinUIEdit\scintilla\License.txt">
       <Link>Licenses\Scintilla.txt</Link>
-    </Content>
-    <Content Include="..\..\..\third_party\WinUIEdit\lexilla\License.txt">
+      <DeploymentContent>true</DeploymentContent>
+    </None>
+    <None Include="..\..\..\third_party\WinUIEdit\lexilla\License.txt">
       <Link>Licenses\Lexilla.txt</Link>
-    </Content>
-    <Content Include="runner-settings.json" />
-    <Content Include="recovery-settings.json" />
-    <Content Include="companion-settings.json" />
+      <DeploymentContent>true</DeploymentContent>
+    </None>
+    <None Include="runner-settings.json">
+      <DeploymentContent>true</DeploymentContent>
+    </None>
+    <None Include="recovery-settings.json">
+      <DeploymentContent>true</DeploymentContent>
+    </None>
+    <None Include="companion-settings.json">
+      <DeploymentContent>true</DeploymentContent>
+    </None>
+    <None Include="toolchain-discovery.json">
+      <DeploymentContent>true</DeploymentContent>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <Image Include="Assets\Square150x150Logo.scale-200.png" />
@@ -205,18 +231,22 @@
     <ProjectCapability Include="Msix" />
   </ItemGroup>
   <ItemGroup>
-    <Content Include="$(CPNGeneratedToolchainsDir)\*.json">
+    <None Include="$(CPNGeneratedToolchainsDir)\*.json">
       <Link>Toolchains\%(Filename)%(Extension)</Link>
-    </Content>
-    <Content Include="..\..\..\tools\windows\profiles\cpp-clang-windows.json">
+      <DeploymentContent>true</DeploymentContent>
+    </None>
+    <None Include="..\..\..\tools\windows\profiles\cpp-clang-windows.json">
       <Link>Toolchains\cpp-clang-windows.json</Link>
-    </Content>
-    <Content Include="..\..\..\resources\profiles\cpp-gcc-windows.json">
+      <DeploymentContent>true</DeploymentContent>
+    </None>
+    <None Include="..\..\..\resources\profiles\cpp-gcc-windows.json">
       <Link>Toolchains\cpp-gcc-windows.json</Link>
-    </Content>
-    <Content Include="..\..\..\tools\windows\profiles\python-windows.json">
+      <DeploymentContent>true</DeploymentContent>
+    </None>
+    <None Include="..\..\..\tools\windows\profiles\python-windows.json">
       <Link>Toolchains\python-windows.json</Link>
-    </Content>
+      <DeploymentContent>true</DeploymentContent>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="$(CPNWinUIEditProject)">

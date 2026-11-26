@@ -63,6 +63,9 @@ void coordinate(std::int64_t value, std::string const& source) {
         (static_cast<std::size_t>(value) < source.size() && (static_cast<unsigned char>(source[static_cast<std::size_t>(value)]) & 0xc0) == 0x80))
         throw std::invalid_argument("Restored selection is not a UTF-8 byte boundary.");
 }
+bool valid_theme(std::string_view theme) {
+    return theme == "system" || theme == "light" || theme == "dark";
+}
 }
 RecoveryConfiguration RecoveryConfiguration::parse(std::string_view input) {
     auto value = cpn::windows::parse(input);
@@ -127,7 +130,7 @@ PreparedRecovery RecoveryModel::prepare(cpn::WorkspaceSession session, RecoveryC
     PreparedRecovery result;
     result.workspace_opaque = known_future(session.editor_preferences, config.workspace_namespace);
     if (auto prefs = take_known(session.editor_preferences, config.workspace_namespace)) {
-        fields(*prefs, {"toolchains"});
+        fields(*prefs, {"toolchains", "theme", "word_wrap", "auto_pair", "tab_width", "checker"});
         if (!prefs->at("toolchains").is_array() || prefs->at("toolchains").empty()) throw std::invalid_argument("Restored toolchain catalog is empty.");
         std::vector<ToolchainChoice> choices; std::set<std::string> ids;
         for (auto const& entry : prefs->at("toolchains")) {
@@ -139,6 +142,27 @@ PreparedRecovery RecoveryModel::prepare(cpn::WorkspaceSession session, RecoveryC
             choices.push_back(std::move(choice));
         }
         result.toolchains = std::move(choices);
+        if (prefs->contains("theme")) {
+            auto theme = text(prefs->at("theme"));
+            if (!valid_theme(theme)) throw std::invalid_argument("Restored theme preference is invalid.");
+            result.ui_preferences.theme = std::move(theme);
+        }
+        if (prefs->contains("word_wrap")) result.ui_preferences.word_wrap = prefs->at("word_wrap").get<bool>();
+        if (prefs->contains("auto_pair")) result.ui_preferences.auto_pair = prefs->at("auto_pair").get<bool>();
+        if (prefs->contains("tab_width")) {
+            auto tw = integer(prefs->at("tab_width"), 32);
+            if (tw < 1 || tw > 32) throw std::invalid_argument("Restored tab width is invalid.");
+            result.ui_preferences.tab_width = static_cast<std::uint32_t>(tw);
+        }
+        if (prefs->contains("checker") && !prefs->at("checker").is_null()) {
+            auto const& checker = prefs->at("checker");
+            fields(checker, {"enabled", "json"});
+            CheckerSettings cs;
+            cs.enabled = checker.at("enabled").get<bool>();
+            cs.json_text = text(checker.at("json"));
+            (void)CheckerModel::validate_json(cs.json_text);
+            result.ui_preferences.checker = std::move(cs);
+        }
     }
     auto const& choices = result.toolchains ? *result.toolchains : defaults.toolchains;
     if (std::find(profiles.begin(), profiles.end(), default_profile) == profiles.end())
@@ -182,6 +206,22 @@ cpn::NativeEditorPreferences RecoveryModel::workspace_preferences(std::vector<To
     auto catalog = Json::array();
     for (auto const& choice : choices) catalog.push_back({{"id", choice.id}, {"file", choice.file}, {"label_resource", choice.label_resource}, {"profile", choice.profile}});
     return {ns, 1, Json{{"toolchains", std::move(catalog)}}.dump()};
+}
+cpn::NativeEditorPreferences RecoveryModel::workspace_preferences(
+    std::vector<ToolchainChoice> const& choices, WorkspaceUiPreferences const& ui, std::string const& ns) {
+    auto catalog = Json::array();
+    for (auto const& choice : choices) catalog.push_back({{"id", choice.id}, {"file", choice.file}, {"label_resource", choice.label_resource}, {"profile", choice.profile}});
+    Json payload{
+        {"toolchains", std::move(catalog)},
+        {"theme", valid_theme(ui.theme) ? ui.theme : std::string{"system"}},
+        {"word_wrap", ui.word_wrap},
+        {"auto_pair", ui.auto_pair},
+        {"tab_width", ui.tab_width}
+    };
+    if (ui.checker) {
+        payload["checker"] = Json{{"enabled", ui.checker->enabled}, {"json", ui.checker->json_text}};
+    }
+    return {ns, 1, payload.dump()};
 }
 bool RecoveryModel::merge_preferences(std::vector<cpn::NativeEditorPreferences>& preferences, cpn::NativeEditorPreferences own) {
     if (known_future(preferences, own.namespace_id)) return false;

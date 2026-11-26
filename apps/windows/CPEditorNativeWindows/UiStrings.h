@@ -6,6 +6,7 @@ struct UiStrings {
     static constexpr auto app_title = L"AppTitle";
     static constexpr auto window_title_format = L"WindowTitleFormat";
     static constexpr auto untitled = L"Untitled";
+    static constexpr auto untitled_numbered_format = L"UntitledNumberedFormat";
     static constexpr auto unsaved_suffix = L"UnsavedSuffix";
     static constexpr auto status_format = L"StatusFormat";
     static constexpr auto error_title = L"ErrorTitle";

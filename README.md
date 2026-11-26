@@ -7,7 +7,7 @@
 
 **面向算法竞赛的原生桌面编辑器：** Windows 采用 **WinUI 3 + C++/WinRT**，macOS 采用 **SwiftUI + AppKit**，两端共享**不依赖 Qt 的 C++20 竞赛引擎（Core）**，通过版本化稳定 C ABI 协调编译、运行、判题、会话恢复与 Competitive Companion 导入。
 
-> **当前发布**：[`v0.1.0` Pre-release](https://github.com/A-BenLi06/CPeditor-Native/releases/tag/v0.1.0) 已提供 **macOS Apple Silicon（arm64）** 预览应用压缩包与校验文件；Windows 版本源码已在仓库及标签内，目前通过 Windows Server 2022 构建与桥接 CI，Windows 10 真机桌面验收尚未完成，暂不提供 Windows 安装包。
+> **当前发布**：[`v0.1.0` Pre-release](https://github.com/A-BenLi06/CPeditor-Native/releases/tag/v0.1.0) 已提供 **macOS Apple Silicon（arm64）** 预览应用压缩包与校验文件；Windows WinUI 3 版本已完成功能接入并通过本机 Windows 10 22H2 Debug 部署启动与 Release x64 构建验证，交互桌面与手工验收矩阵仍在补全，暂不发布 Windows 安装包。
 
 ---
 
@@ -74,7 +74,7 @@ brew install gcc
 | --- | --- | --- |
 | **共享 C++20 Core** | 已可独立构建并测试 | 不依赖 Qt 与 UI 框架；涵盖领域模型、文本比较、POSIX/Win32 子进程、外部 Checker、会话恢复、Companion 收件箱／回环 HTTP 与有界 C ABI 1；Release CTest **17/17** 通过 |
 | **macOS 原生应用** | **v0.1.0 预览可用** | SwiftUI + AppKit 双编辑器适配器；macOS 27.0.1 arm64 Release 测试 **18 套件 111/111** 通过（含 `bits/stdc++.h` 真实 G++ 编译运行）、严格签名通过、6 场景实机截图核验；macOS 26 / Intel / 系统中文 IME 候选窗待验 |
-| **Windows 原生应用** | 源码已接入，待真机验收 | **主要目标平台为 Windows 10 22H2 专业工作站版**（WinUI 3 + C++/WinRT + WinUIEdit）；Windows Server 2022 x64 Debug/Release CI 通过 Core、桥接测试与完整宿主构建；Windows 10 真机 UI、IME、DPI 与 UU 远程实测待执行，本轮不提供安装包 |
+| **Windows 原生应用** | **WinUI 3 版本已接入并通过本机部署启动/构建** | **主要目标平台为 Windows 10 22H2 专业工作站版**（WinUI 3 + C++/WinRT + WinUIEdit）；已对齐 macOS `v0.1.0` 工作台能力（分栏三视图、Compile/Run 分离、Output 先行对照、外部 Checker、运行时编译器发现、Fluent Settings、编辑辅助与 Companion 筛选）；在本机 Windows 10 19045/161 x64（VS 2026 Build Tools v145）通过 Debug 部署启动、Release 0 警告 0 错误构建及全部 Core 17/17 + 原生桥接测试；交互桌面视觉、系统中文 IME、高 DPI 与 UU 远程实测待人工执行，本轮不提供安装包 |
 
 ```mermaid
 flowchart TB

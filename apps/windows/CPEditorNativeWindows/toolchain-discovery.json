@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "msvcToolchainId": "cpp-msvc",
+  "vswherePaths": [
+    "%ProgramFiles(x86)%\\Microsoft Visual Studio\\Installer\\vswhere.exe",
+    "%ProgramFiles%\\Microsoft Visual Studio\\Installer\\vswhere.exe"
+  ],
+  "entries": [
+    {
+      "id": "cpp-gcc-windows",
+      "executable": "g++.exe",
+      "searchDirectories": [
+        "C:\\msys64\\ucrt64\\bin",
+        "C:\\msys64\\mingw64\\bin",
+        "C:\\msys64\\clang64\\bin",
+        "C:\\mingw64\\bin",
+        "C:\\mingw32\\bin",
+        "C:\\TDM-GCC-64\\bin",
+        "%USERPROFILE%\\scoop\\shims",
+        "%ProgramData%\\chocolatey\\bin"
+      ]
+    },
+    {
+      "id": "cpp-clang-windows",
+      "executable": "clang++.exe",
+      "searchDirectories": [
+        "%ProgramFiles%\\LLVM\\bin",
+        "%ProgramFiles(x86)%\\LLVM\\bin",
+        "C:\\msys64\\clang64\\bin",
+        "C:\\msys64\\ucrt64\\bin"
+      ]
+    },
+    {
+      "id": "python-windows",
+      "executable": "python.exe",
+      "searchDirectories": [
+        "%LOCALAPPDATA%\\Programs\\Python\\Python314",
+        "%LOCALAPPDATA%\\Programs\\Python\\Python313",
+        "%LOCALAPPDATA%\\Programs\\Python\\Python312",
+        "%LOCALAPPDATA%\\Programs\\Python\\Python311",
+        "C:\\Python314",
+        "C:\\Python313",
+        "C:\\Python312",
+        "C:\\Python311",
+        "%ProgramFiles%\\Python314",
+        "%ProgramFiles%\\Python313",
+        "%ProgramFiles%\\Python312"
+      ]
+    }
+  ]
+}

@@ -3,9 +3,11 @@
 #include "SnapshotJson.h"
 #include "TestTextChange.h"
 #include "cpn/batch.hpp"
+#include "cpn/companion_inbox.hpp"
 #include "cpn/digest.hpp"
 #include <objbase.h>
 #include <shobjidl.h>
+#include <algorithm>
 #include <sstream>
 #include <utility>
 #if __has_include("MainWindow.g.cpp")
@@ -18,8 +20,16 @@ using namespace Windows::Storage;
 using namespace Windows::Storage::Pickers;
 using namespace Microsoft::UI::Xaml;
 using namespace Microsoft::UI::Xaml::Controls;
+using namespace Microsoft::UI::Xaml::Input;
+using namespace Microsoft::UI::Xaml::Media;
+using cpn::windows::CheckerConfiguration;
+using cpn::windows::CheckerModel;
 using cpn::windows::FileStore;
+using cpn::windows::RunnerConfiguration;
+using cpn::windows::ToolchainDiscovery;
+using cpn::windows::ToolchainDiscoveryConfiguration;
 using cpn::windows::UiStrings;
+
 namespace {
 std::string identity() {
     GUID value{}; check_hresult(CoCreateGuid(&value));
@@ -27,34 +37,70 @@ std::string identity() {
     if (!StringFromGUID2(value, text, static_cast<int>(std::size(text)))) throw_hresult(E_UNEXPECTED);
     return to_string(hstring{text});
 }
-bool checked(CheckBox const& box) { const auto value = box.IsChecked(); return value && value.Value(); }
-void set_checked(CheckBox const& box, bool value) { box.IsChecked(box_value(value).as<IReference<bool>>()); }
+std::string sanitize_id(std::string_view raw) {
+    std::string out;
+    out.reserve(raw.size());
+    for (unsigned char c : raw) {
+        if (std::isalnum(c) || c == '-' || c == '_') out.push_back(static_cast<char>(c));
+        else out.push_back('_');
+    }
+    if (out.empty()) out = "doc";
+    if (out.size() > 64) out.resize(64);
+    return out;
+}
 void select_id(ComboBox const& box, auto const& choices, auto const& id) {
     for (std::size_t index = 0; index < choices.size(); ++index)
         if (choices[index].id == id) { box.SelectedIndex(static_cast<std::int32_t>(index)); return; }
     throw_hresult(E_INVALIDARG);
 }
 }
+
 namespace winrt::CPEditorNativeWindows::implementation {
 MainWindow::MainWindow() {
     InitializeComponent();
     recovery_idle_ = winrt::handle{CreateEventW(nullptr, true, true, nullptr)};
     if (!recovery_idle_) throw_last_error();
     Title(strings_.get(UiStrings::app_title));
-    AppWindow().Resize(Windows::Graphics::SizeInt32{1280, 820});
-    closing_ = AppWindow().Closing(auto_revoke, {this, &MainWindow::OnClosing});
+    AppWindow().Resize(Windows::Graphics::SizeInt32{1360, 860});
+
+    CompileBtnLabel().Text(strings_.get(L"CompileBtnText"));
+    RunOnlyBtnLabel().Text(strings_.get(L"RunOnlyBtnText"));
+    CompileAndRunBtnLabel().Text(strings_.get(L"CompileAndRunBtnText"));
+    StopBtnLabel().Text(strings_.get(L"StopBtnText"));
+    CompanionBtnLabel().Text(strings_.get(L"CompanionBtnText"));
+    CheckerToggleButton().Content(box_value(strings_.get(L"CheckerToggleText")));
+    ToolTipService::SetToolTip(CheckerConfigButton(), box_value(strings_.get(L"CheckerConfigTip")));
+    UseAllOutputsItem().Text(strings_.get(L"UseAllOutputsAsExpected"));
+    DeleteAllSamplesItem().Text(strings_.get(L"DeleteAllSamples"));
+    StatusWrapButton().Content(box_value(strings_.get(L"StatusBarWrapOff")));
+    SummaryBadgeText().Text(strings_.get(L"RunIdle"));
+
+    KeyboardAccelerator settings_acc;
+    settings_acc.Key(static_cast<Windows::System::VirtualKey>(188)); // VK_OEM_COMMA
+    settings_acc.Modifiers(Windows::System::VirtualKeyModifiers::Control);
+    MenuSettingsItem().KeyboardAccelerators().Append(settings_acc);
+
     const auto weak = get_weak();
+    closing_token_ = AppWindow().Closing([weak](auto const& sender, Microsoft::UI::Windowing::AppWindowClosingEventArgs const& args) {
+        if (auto self = weak.get()) self->OnClosing(sender, args);
+    });
     closed_ = Closed(auto_revoke, [weak](auto const&, auto const&) {
         if (auto self = weak.get()) {
             self->shutting_down_ = true;
-            if (self->recovery_timer_) self->recovery_timer_.Stop();
-            self->recovery_tick_.revoke();
-            self->closing_.revoke(); self->closed_.revoke();
+            if (self->recovery_timer_) {
+                if (self->recovery_tick_token_) self->recovery_timer_.Tick(std::exchange(self->recovery_tick_token_, {}));
+                self->recovery_timer_.Stop();
+            }
+            if (self->closing_token_) {
+                try { self->AppWindow().Closing(std::exchange(self->closing_token_, {})); } catch (...) {}
+            }
+            self->closed_.revoke();
             for (auto const& document : self->documents_) {
                 document->loaded.revoke();
                 if (document->adapter) document->adapter->dispose();
             }
             self->documents_.clear();
+            self->CleanupWorkspaceArtifacts();
             auto runner = std::exchange(self->runner_, {});
             if (runner) CloseRunnerBackground(std::move(runner));
             auto session = std::exchange(self->session_worker_, {});
@@ -73,6 +119,7 @@ hstring MainWindow::CurrentError() {
     catch (std::exception const& error) { return to_hstring(error.what()); }
     catch (...) { return hresult_error{HRESULT_FROM_WIN32(ERROR_UNHANDLED_EXCEPTION)}.message(); }
 }
+
 fire_and_forget MainWindow::Root_Loaded(IInspectable const&, RoutedEventArgs const&) {
     auto lifetime = get_strong();
     if (initialized_ || initializing_) co_return;
@@ -80,13 +127,26 @@ fire_and_forget MainWindow::Root_Loaded(IInspectable const&, RoutedEventArgs con
     hstring error;
     try {
         auto file = co_await StorageFile::GetFileFromApplicationUriAsync(Uri{L"ms-appx:///editor-profiles.json"});
-        configuration_ = cpn::windows::EditorConfiguration::parse(co_await FileIO::ReadTextAsync(file));
+        auto const editor_profiles_text = co_await FileIO::ReadTextAsync(file);
+        configuration_ = cpn::windows::EditorConfiguration::parse(editor_profiles_text);
+        assist_config_ = cpn::windows::AssistConfig::parse_from_editor_profiles(to_string(editor_profiles_text));
+
         file = co_await StorageFile::GetFileFromApplicationUriAsync(Uri{L"ms-appx:///runner-settings.json"});
-        runner_configuration_ = cpn::windows::RunnerConfiguration::parse(to_string(co_await FileIO::ReadTextAsync(file)));
+        runner_configuration_ = RunnerConfiguration::parse(to_string(co_await FileIO::ReadTextAsync(file)));
         file = co_await StorageFile::GetFileFromApplicationUriAsync(Uri{L"ms-appx:///recovery-settings.json"});
         recovery_configuration_ = cpn::windows::RecoveryConfiguration::parse(to_string(co_await FileIO::ReadTextAsync(file)));
         file = co_await StorageFile::GetFileFromApplicationUriAsync(Uri{L"ms-appx:///companion-settings.json"});
         companion_configuration_ = cpn::windows::CompanionConfiguration::parse(to_string(co_await FileIO::ReadTextAsync(file)));
+        file = co_await StorageFile::GetFileFromApplicationUriAsync(Uri{L"ms-appx:///checker-settings.json"});
+        checker_configuration_ = CheckerConfiguration::parse(to_string(co_await FileIO::ReadTextAsync(file)));
+        file = co_await StorageFile::GetFileFromApplicationUriAsync(Uri{L"ms-appx:///toolchain-discovery.json"});
+        discovery_configuration_ = ToolchainDiscoveryConfiguration::parse(to_string(co_await FileIO::ReadTextAsync(file)));
+
+        checker_settings_.enabled = false;
+        checker_settings_.json_text = checker_configuration_.default_checker.dump(2);
+        ui_preferences_.tab_width = configuration_.tab_width;
+        ui_preferences_.auto_pair = assist_config_.auto_pair_default;
+
         for (auto const& [status, resource] : companion_configuration_.status_labels) { (void)status; (void)strings_.get(to_hstring(resource)); }
         for (auto const& [issue, resource] : companion_configuration_.issue_labels) { (void)issue; (void)strings_.get(to_hstring(resource)); }
         companion_worker_ = std::make_shared<cpn::windows::CompanionWorker>(companion_configuration_.worker);
@@ -96,6 +156,7 @@ fire_and_forget MainWindow::Root_Loaded(IInspectable const&, RoutedEventArgs con
             const auto profile = cpn::parse_toolchain_profile(choice.profile.dump());
             if (profile.id != choice.id) throw std::invalid_argument("Toolchain catalog identity mismatch.");
         }
+
         const std::filesystem::path local{std::wstring{ApplicationData::Current().LocalFolder().Path()}};
         recovery_location_file_ = local / cpn::path_from_utf8(recovery_configuration_.location_filename);
         auto recovery_file = local / cpn::path_from_utf8(recovery_configuration_.directory) / cpn::path_from_utf8(recovery_configuration_.filename);
@@ -112,8 +173,15 @@ fire_and_forget MainWindow::Root_Loaded(IInspectable const&, RoutedEventArgs con
         cpn::SessionLoadResult loaded; std::optional<cpn::windows::PreparedRecovery> prepared;
         std::optional<cpn::WorkspaceSession> frozen;
         std::optional<std::string> loaded_content;
+        auto default_toolchains = runner_configuration_.toolchains;
+        auto discovery_cfg = discovery_configuration_;
+        std::vector<cpn::windows::ToolchainProbeResult> initial_probes;
+
         co_await resume_background();
         try {
+            initial_probes = ToolchainDiscovery::probe_all(default_toolchains, discovery_cfg);
+            (void)ToolchainDiscovery::apply_discovered_defaults(default_toolchains, initial_probes);
+            initial_probes = ToolchainDiscovery::probe_all(default_toolchains, discovery_cfg);
             try {
                 if (auto location = cpn::native_file_store()->read_optional(location_file, recovery_config.maximum_location_bytes))
                     recovery_file = cpn::windows::RecoveryModel::parse_location(*location, recovery_config);
@@ -121,26 +189,32 @@ fire_and_forget MainWindow::Root_Loaded(IInspectable const&, RoutedEventArgs con
             std::filesystem::create_directories(recovery_file.parent_path());
             loaded = cpn::windows::RecoveryModel::load_response(worker->load(cpn::path_to_utf8(recovery_file)).get());
             if (loaded.status == cpn::SessionLoadStatus::loaded) {
-                // The baseline describes the real persisted state BEFORE native
-                // normalization. Startup only spends a revision if capture changes it.
                 loaded_content = cpn::windows::RecoveryModel::logical_content(*loaded.session);
                 if (cpn::windows::RevisionPolicy::exhausted(loaded.session->revision)) frozen = *loaded.session;
                 prepared = cpn::windows::RecoveryModel::prepare(std::move(*loaded.session), recovery_config, runner_defaults, profiles, default_profile);
             }
         } catch (...) { failure = std::current_exception(); }
         co_await ui;
+
+        runner_configuration_.toolchains = std::move(default_toolchains);
+        toolchain_probes_ = std::move(initial_probes);
         recovery_paths_ = recovery_configuration_.paths(recovery_file);
-        if (prepared && prepared->toolchains) {
-            try {
-                // Validate every resource before applying any recovered native state.
-                for (auto const& choice : *prepared->toolchains)
-                    if (strings_.get(to_hstring(choice.label_resource)).empty()) throw std::invalid_argument("Unknown restored toolchain label resource.");
-                runner_configuration_.toolchains = std::move(*prepared->toolchains);
-            } catch (...) { failure = std::current_exception(); prepared.reset(); }
+        if (prepared) {
+            if (prepared->toolchains) {
+                try {
+                    for (auto const& choice : *prepared->toolchains)
+                        if (strings_.get(to_hstring(choice.label_resource)).empty()) throw std::invalid_argument("Unknown restored toolchain label resource.");
+                    runner_configuration_.toolchains = std::move(*prepared->toolchains);
+                    (void)ToolchainDiscovery::apply_discovered_defaults(runner_configuration_.toolchains, toolchain_probes_);
+                    toolchain_probes_ = ToolchainDiscovery::probe_all(runner_configuration_.toolchains, discovery_configuration_);
+                } catch (...) { failure = std::current_exception(); prepared.reset(); }
+            }
+            if (prepared) {
+                ui_preferences_ = prepared->ui_preferences;
+                if (ui_preferences_.checker) checker_settings_ = *ui_preferences_.checker;
+            }
         }
-        for (auto const& choice : runner_configuration_.toolchains) {
-            ComboBoxItem item; item.Content(box_value(strings_.get(to_hstring(choice.label_resource)))); Toolchains().Items().Append(item);
-        }
+        RebuildToolchainComboBox();
         for (auto const& choice : runner_configuration_.comparisons) {
             ComboBoxItem item; item.Content(box_value(strings_.get(to_hstring(choice.label_resource)))); Comparisons().Items().Append(item);
         }
@@ -148,7 +222,9 @@ fire_and_forget MainWindow::Root_Loaded(IInspectable const&, RoutedEventArgs con
             (void)runner_configuration_.default_toolchain(to_string(hstring{profile.id}));
             ComboBoxItem item; item.Content(box_value(strings_.get(profile.label_resource))); Profiles().Items().Append(item);
         }
+
         initialized_ = true; workspace_id_ = prepared ? prepared->session.workspace_id : identity();
+        artifact_root_directory_ = std::filesystem::temp_directory_path() / L"CPEditorNative" / L"artifacts" / cpn::path_from_utf8(sanitize_id(workspace_id_));
         recovery_disk_digest_ = loaded.disk_digest;
         if (prepared) {
             recovery_revision_ = prepared->session.revision;
@@ -176,13 +252,20 @@ fire_and_forget MainWindow::Root_Loaded(IInspectable const&, RoutedEventArgs con
         recovery_timer_ = DispatcherQueue().CreateTimer(); recovery_timer_.IsRepeating(false);
         recovery_timer_.Interval(recovery_configuration_.autosave_interval);
         const auto weak = get_weak();
-        recovery_tick_ = recovery_timer_.Tick(auto_revoke, [weak](auto const&, auto const&) { if (auto self = weak.get()) self->SaveRecoveryAsync(); });
-        recovery_initialized_ = true; InitializeCompanionStorage(); StartRunner(); ScheduleRecoverySave(true); UpdateRecoveryControls();
+        recovery_tick_token_ = recovery_timer_.Tick([weak](auto const&, auto const&) { if (auto self = weak.get()) self->SaveRecoveryAsync(); });
+        recovery_initialized_ = true;
+        ApplyWorkspaceUiPreferences();
+        SetViewMode(ViewMode::Split);
+        InitializeCompanionStorage();
+        StartRunner();
+        ScheduleRecoverySave(true);
+        UpdateRecoveryControls();
     } catch (...) { error = CurrentError(); }
     initializing_ = false; SetBusy(false);
     if (!error.empty()) co_await ShowErrorAsync(L"RecoveryError", error);
     if (companion_available_) co_await CompanionAsync(CompanionCommand::Refresh);
 }
+
 void MainWindow::StartRunner() {
     core_ready_ = false; delivery_failure_reported_ = false;
     if (runner_generation_ == std::numeric_limits<std::uint64_t>::max()) throw_hresult(E_BOUNDS);
@@ -197,15 +280,10 @@ void MainWindow::StartRunner() {
     });
     UpdateControls();
 }
-fire_and_forget MainWindow::CloseRunnerBackground(std::shared_ptr<cpn::windows::CoreRunner> runner) {
-    co_await resume_background(); runner->close();
-}
-fire_and_forget MainWindow::CloseSessionBackground(std::shared_ptr<cpn::windows::SessionWorker> worker) {
-    co_await resume_background(); worker->close();
-}
-fire_and_forget MainWindow::CloseCompanionBackground(std::shared_ptr<cpn::windows::CompanionWorker> worker) {
-    co_await resume_background(); worker->close();
-}
+fire_and_forget MainWindow::CloseRunnerBackground(std::shared_ptr<cpn::windows::CoreRunner> runner) { co_await resume_background(); runner->close(); }
+fire_and_forget MainWindow::CloseSessionBackground(std::shared_ptr<cpn::windows::SessionWorker> worker) { co_await resume_background(); worker->close(); }
+fire_and_forget MainWindow::CloseCompanionBackground(std::shared_ptr<cpn::windows::CompanionWorker> worker) { co_await resume_background(); worker->close(); }
+
 void MainWindow::SetBusy(bool value) {
     busy_ = value; UpdateControls();
     if (!value && recovery_pending_) ScheduleRecoverySave();
@@ -222,11 +300,142 @@ MainWindow::FinalRevisionLease::~FinalRevisionLease() noexcept {
         try { owner.UpdateControls(); } catch (...) {}
     }
 }
+
+std::filesystem::path MainWindow::ManagedArtifactPath(std::shared_ptr<Document> const& document, std::string const& artifact_name) const {
+    auto doc_id = document->adapter ? to_string(hstring{document->adapter->document_id()})
+        : (document->initial_record ? document->initial_record->document_id : std::string{"doc"});
+    auto dir = artifact_root_directory_ / cpn::path_from_utf8(sanitize_id(doc_id));
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    return dir / cpn::path_from_utf8(artifact_name.empty() ? std::string{"solution.exe"} : artifact_name);
+}
+void MainWindow::CleanupDocumentArtifacts(std::string const& document_id) const noexcept {
+    if (artifact_root_directory_.empty() || document_id.empty()) return;
+    std::error_code ec;
+    std::filesystem::remove_all(artifact_root_directory_ / cpn::path_from_utf8(sanitize_id(document_id)), ec);
+}
+void MainWindow::CleanupWorkspaceArtifacts() const noexcept {
+    if (artifact_root_directory_.empty()) return;
+    std::error_code ec;
+    std::filesystem::remove_all(artifact_root_directory_, ec);
+}
+
+bool MainWindow::IsResultCurrent(std::shared_ptr<Document> const& document) const {
+    if (!document || !document->result || !document->adapter || !document->adapter->committed_available()) return false;
+    auto const* tc = FindToolchain(document->toolchain);
+    std::string const current_tc = tc ? tc->profile.dump() : std::string{};
+    return document->result->revision == document->adapter->revision() &&
+           document->result_test_revision == document->test_revision &&
+           document->result_toolchain_dump == current_tc &&
+           document->result_comparison == document->comparison &&
+           document->result_checker_fingerprint == CheckerModel::fingerprint(checker_settings_, checker_configuration_.max_checker_json_bytes);
+}
+
+std::wstring MainWindow::ComputeTabTitle(std::shared_ptr<Document> const& document) const {
+    if (!document->path.empty()) return document->path.filename().wstring();
+    if (document->companion_title && !document->companion_title->empty())
+        return std::wstring{to_hstring(*document->companion_title)};
+    std::size_t untitled_index = 0;
+    for (auto const& row : documents_) {
+        if (row->path.empty() && (!row->companion_title || row->companion_title->empty())) {
+            ++untitled_index;
+            if (row == document) break;
+        }
+    }
+    if (untitled_index <= 1) return std::wstring{strings_.get(UiStrings::untitled)};
+    return UiStrings::format(strings_.get(UiStrings::untitled_numbered_format), {std::to_wstring(untitled_index)});
+}
+
 std::shared_ptr<MainWindow::Document> MainWindow::CurrentDocument() {
     const auto selected = Tabs().SelectedItem();
     for (auto const& document : documents_) if (selected == document->tab) return document;
     return {};
 }
+
+void MainWindow::SetViewMode(ViewMode mode) {
+    view_mode_ = mode;
+    auto const total_width = WorkspaceSplit().ActualWidth();
+    if (mode == ViewMode::EditorOnly) {
+        LeftColumn().MinWidth(0); RightColumn().MinWidth(0);
+        LeftColumn().Width(GridLength{1, GridUnitType::Star});
+        SplitterColumn().Width(GridLength{0, GridUnitType::Pixel});
+        RightColumn().Width(GridLength{0, GridUnitType::Pixel});
+        SplitHandle().Visibility(Visibility::Collapsed);
+    } else if (mode == ViewMode::TestsOnly) {
+        // Keep EditorDeck mounted at 0px width so WinUIEdit Scintilla & Undo history survive mode switches.
+        LeftColumn().MinWidth(0); RightColumn().MinWidth(320);
+        LeftColumn().Width(GridLength{0, GridUnitType::Pixel});
+        SplitterColumn().Width(GridLength{0, GridUnitType::Pixel});
+        RightColumn().Width(GridLength{1, GridUnitType::Star});
+        SplitHandle().Visibility(Visibility::Collapsed);
+    } else {
+        LeftColumn().MinWidth(260); RightColumn().MinWidth(320);
+        SplitterColumn().Width(GridLength{6, GridUnitType::Pixel});
+        SplitHandle().Visibility(Visibility::Visible);
+        if (split_left_width_ >= 260.0 && total_width > 620.0) {
+            double clamped = std::clamp(split_left_width_, 260.0, total_width - 326.0);
+            LeftColumn().Width(GridLength{clamped, GridUnitType::Pixel});
+            RightColumn().Width(GridLength{1, GridUnitType::Star});
+        } else {
+            LeftColumn().Width(GridLength{3, GridUnitType::Star});
+            RightColumn().Width(GridLength{2, GridUnitType::Star});
+        }
+    }
+    ViewEditorOnlyButton().IsChecked(mode == ViewMode::EditorOnly);
+    ViewSplitButton().IsChecked(mode == ViewMode::Split);
+    ViewTestsOnlyButton().IsChecked(mode == ViewMode::TestsOnly);
+}
+
+void MainWindow::ViewEditorOnly_Click(IInspectable const&, RoutedEventArgs const&) { SetViewMode(ViewMode::EditorOnly); }
+void MainWindow::ViewSplit_Click(IInspectable const&, RoutedEventArgs const&) { SetViewMode(ViewMode::Split); }
+void MainWindow::ViewTestsOnly_Click(IInspectable const&, RoutedEventArgs const&) { SetViewMode(ViewMode::TestsOnly); }
+void MainWindow::ToggleTestPanel_Click(IInspectable const&, RoutedEventArgs const&) {
+    SetViewMode(view_mode_ == ViewMode::EditorOnly ? ViewMode::Split : ViewMode::EditorOnly);
+}
+void MainWindow::ToggleCompanionPane_Click(IInspectable const&, RoutedEventArgs const&) {
+    companion_pane_open_ = !companion_pane_open_;
+    CompanionToggleButton().IsChecked(companion_pane_open_);
+    TestsPane().Visibility(companion_pane_open_ ? Visibility::Collapsed : Visibility::Visible);
+    CompanionPane().Visibility(companion_pane_open_ ? Visibility::Visible : Visibility::Collapsed);
+    if (companion_pane_open_ && view_mode_ == ViewMode::EditorOnly) SetViewMode(ViewMode::Split);
+}
+
+void MainWindow::SplitHandle_PointerPressed(IInspectable const&, PointerRoutedEventArgs const& args) {
+    if (view_mode_ != ViewMode::Split) return;
+    split_drag_active_ = SplitHandle().CapturePointer(args.Pointer());
+    if (split_drag_active_) {
+        split_drag_start_x_ = args.GetCurrentPoint(WorkspaceSplit()).Position().X;
+        split_drag_start_left_width_ = LeftColumn().ActualWidth();
+        args.Handled(true);
+    }
+}
+void MainWindow::SplitHandle_PointerMoved(IInspectable const&, PointerRoutedEventArgs const& args) {
+    if (!split_drag_active_ || view_mode_ != ViewMode::Split) return;
+    double const total = WorkspaceSplit().ActualWidth();
+    double const max_left = std::max(260.0, total - 326.0);
+    double const delta = args.GetCurrentPoint(WorkspaceSplit()).Position().X - split_drag_start_x_;
+    double const next = std::clamp(split_drag_start_left_width_ + delta, 260.0, max_left);
+    split_left_width_ = next;
+    LeftColumn().Width(GridLength{next, GridUnitType::Pixel});
+    RightColumn().Width(GridLength{1, GridUnitType::Star});
+    args.Handled(true);
+}
+void MainWindow::SplitHandle_PointerReleased(IInspectable const&, PointerRoutedEventArgs const& args) {
+    if (split_drag_active_) {
+        split_drag_active_ = false;
+        SplitHandle().ReleasePointerCapture(args.Pointer());
+        args.Handled(true);
+    }
+}
+void MainWindow::SplitHandle_PointerCaptureLost(IInspectable const&, PointerRoutedEventArgs const&) { split_drag_active_ = false; }
+void MainWindow::SplitHandle_PointerEntered(IInspectable const&, PointerRoutedEventArgs const&) {
+    SplitHandle().Background(Application::Current().Resources().Lookup(box_value(L"AccentFillColorDefaultBrush")).as<Brush>());
+}
+void MainWindow::SplitHandle_PointerExited(IInspectable const&, PointerRoutedEventArgs const&) {
+    if (!split_drag_active_)
+        SplitHandle().Background(Application::Current().Resources().Lookup(box_value(L"CardStrokeColorDefaultBrush")).as<Brush>());
+}
+
 void MainWindow::AddDocument(std::filesystem::path path, cpn::windows::LoadedDocument loaded, std::optional<std::string> disk_digest) {
     if (!WorkspaceMutable()) throw hresult_error{E_PENDING, strings_.get(L"PersistentOperationUnavailable")};
     cpn::SessionDocument record; record.document_id = identity(); record.revision = 1;
@@ -243,11 +452,47 @@ void MainWindow::AddDocument(std::filesystem::path path, cpn::windows::LoadedDoc
     record.tests.push_back({identity(), {}, {}, true});
     AddRestoredDocument(std::move(record), std::move(prefs));
 }
+
 void MainWindow::AddRestoredDocument(cpn::SessionDocument record, cpn::windows::DocumentPreferences prefs) {
     if (documents_.size() >= runner_configuration_.maximum_documents)
         throw hresult_error{E_BOUNDS, strings_.get(L"DocumentLimit")};
     auto document = std::make_shared<Document>();
     document->run_capability = cpn::windows::CompanionModel::run_capability(record);
+    try {
+        if (auto prov = cpn::read_companion_document_provenance(record)) {
+            for (auto const& item : companion_page_.items) {
+                if (item.import_id == prov->identity.import_id) {
+                    document->companion_title = item.candidate.name;
+                    break;
+                }
+            }
+        }
+    } catch (...) {}
+
+    document->tab = TabViewItem{};
+    StackPanel tab_hdr;
+    tab_hdr.Orientation(Orientation::Horizontal);
+    tab_hdr.Spacing(6);
+    TextBlock tab_title;
+    tab_title.VerticalAlignment(VerticalAlignment::Center);
+    Border tab_badge;
+    tab_badge.CornerRadius(CornerRadius{4});
+    tab_badge.Padding(Thickness{5, 1, 5, 1});
+    tab_badge.Visibility(Visibility::Collapsed);
+    TextBlock tab_badge_text;
+    tab_badge_text.FontSize(10);
+    tab_badge_text.FontWeight(Microsoft::UI::Text::FontWeights::SemiBold());
+    tab_badge.Child(tab_badge_text);
+    tab_hdr.Children().Append(tab_title);
+    tab_hdr.Children().Append(tab_badge);
+    document->tab.Header(tab_hdr);
+    document->tab_title = tab_title;
+    document->tab_badge = tab_badge;
+    document->tab_badge_text = tab_badge_text;
+
+    document->control = winrt::WinUIEditor::CodeEditorControl{};
+    document->test_view = ScrollViewer{};
+    document->test_panel = StackPanel{};
     document->path = record.original_path.value_or(std::filesystem::path{});
     document->profile = std::wstring{to_hstring(record.language_id.value_or(to_string(hstring{configuration_.default_profile})))};
     document->toolchain = record.toolchain_profile_id.value_or(runner_configuration_.default_toolchain(to_string(hstring{document->profile})));
@@ -257,12 +502,35 @@ void MainWindow::AddRestoredDocument(cpn::SessionDocument record, cpn::windows::
     document->control.IsEnabled(false); document->control.Visibility(Visibility::Collapsed);
     document->test_view.Visibility(Visibility::Collapsed);
     document->test_view.VerticalScrollBarVisibility(ScrollBarVisibility::Auto);
-    document->test_panel.Margin(Thickness{12, 0, 12, 12}); document->test_panel.Spacing(12);
-    document->run_status.TextWrapping(TextWrapping::Wrap);
-    document->run_details.TextWrapping(TextWrapping::Wrap); document->run_details.IsTextSelectionEnabled(true);
-    document->test_panel.Children().Append(document->run_status); document->test_panel.Children().Append(document->run_details);
+    document->test_panel.Spacing(0);
+
+    // Empty samples guide card
+    Border empty_card;
+    empty_card.Margin(Thickness{12});
+    empty_card.Padding(Thickness{16});
+    empty_card.CornerRadius(CornerRadius{6});
+    empty_card.BorderThickness(Thickness{1});
+    empty_card.BorderBrush(Application::Current().Resources().Lookup(box_value(L"CardStrokeColorDefaultBrush")).as<Brush>());
+    empty_card.Background(Application::Current().Resources().Lookup(box_value(L"CardBackgroundFillColorDefaultBrush")).as<Brush>());
+    StackPanel empty_stack;
+    empty_stack.Spacing(4);
+    TextBlock empty_title;
+    empty_title.Text(strings_.get(L"NoSamplesTitle"));
+    empty_title.FontWeight(Microsoft::UI::Text::FontWeights::SemiBold());
+    TextBlock empty_hint;
+    empty_hint.Text(strings_.get(L"NoSamplesHint"));
+    empty_hint.FontSize(12);
+    empty_hint.Opacity(0.75);
+    empty_hint.TextWrapping(TextWrapping::Wrap);
+    empty_stack.Children().Append(empty_title);
+    empty_stack.Children().Append(empty_hint);
+    empty_card.Child(empty_stack);
+    document->empty_tests_panel = empty_card;
+    document->test_panel.Children().Append(empty_card);
+
     document->test_view.Content(document->test_panel);
     for (auto const& test : record.tests) AddTest(document, test);
+    RefreshTestHeaders(document);
     document->initial_record = std::move(record);
     const auto weak = get_weak(); const std::weak_ptr<Document> weak_document = document;
     document->loaded = document->control.Loaded(auto_revoke, [weak, weak_document](auto const&, auto const&) {
@@ -287,6 +555,7 @@ void MainWindow::AddRestoredDocument(cpn::SessionDocument record, cpn::windows::
     }
     ScheduleRecoverySave();
 }
+
 fire_and_forget MainWindow::InitializeDocument(std::shared_ptr<Document> document) {
     auto lifetime = get_strong();
     if (document->adapter || shutting_down_) co_return;
@@ -296,15 +565,21 @@ fire_and_forget MainWindow::InitializeDocument(std::shared_ptr<Document> documen
         document->adapter = cpn::windows::WinUIEditAdapter::create(document->control, [weak, weak_document] {
             if (auto self = weak.get()) self->ScheduleDocumentChanged(weak_document);
         });
-        document->adapter->set_tab_width(configuration_.tab_width);
+        document->adapter->set_tab_width(ui_preferences_.tab_width);
+        document->adapter->set_word_wrap(ui_preferences_.word_wrap);
+        document->adapter->set_assist_enabled(ui_preferences_.auto_pair);
+        document->adapter->set_assist_config(assist_config_);
         document->adapter->set_language(configuration_.by_id(document->profile).highlighting_language);
+        document->adapter->set_language_id(to_string(hstring{document->profile}));
         if (!document->initial_record) throw_hresult(E_UNEXPECTED);
         document->adapter->restore_document(*document->initial_record,
             document->restore_preferences.caret_byte, document->restore_preferences.anchor_byte);
         document->adapter->set_workspace_read_only(!WorkspaceMutable());
         document->initial_record.reset();
         document->control.IsEnabled(true);
-        document->loaded.revoke(); UpdateDocument(document); UpdateControls();
+        document->loaded.revoke();
+        UpdateDocument(document);
+        UpdateControls();
     } catch (...) {
         error = CurrentError();
         if (document->adapter) document->adapter->dispose();
@@ -313,6 +588,7 @@ fire_and_forget MainWindow::InitializeDocument(std::shared_ptr<Document> documen
     }
     if (!error.empty()) co_await ShowErrorAsync(UiStrings::error_config, error);
 }
+
 void MainWindow::ScheduleDocumentChanged(std::weak_ptr<Document> const& weak_document) {
     auto document = weak_document.lock();
     if (!document || document->closed || document->dispatch_pending || shutting_down_) return;
@@ -322,11 +598,25 @@ void MainWindow::ScheduleDocumentChanged(std::weak_ptr<Document> const& weak_doc
         if (auto self = weak.get()) if (auto value = weak_document.lock()) self->DocumentChanged(std::move(value));
     })) document->dispatch_pending = false;
 }
+
 fire_and_forget MainWindow::DocumentChanged(std::shared_ptr<Document> document) {
     auto lifetime = get_strong(); document->dispatch_pending = false;
     if (shutting_down_ || document->closed || !document->adapter) co_return;
     hstring error;
     try {
+        bool auto_enabled_expected = false;
+        for (auto const& test : document->tests) {
+            if (!test->expected_bytes.empty() && !test->has_expected_value && TestsMutable(document)) {
+                test->has_expected_value = true;
+                updating_ui_ = true;
+                test->has_expected.IsChecked(box_value(true).as<IReference<bool>>());
+                updating_ui_ = false;
+                auto_enabled_expected = true;
+            }
+        }
+        RefreshTestHeaders(document);
+        if (auto_enabled_expected) TestsChanged(document);
+
         if (document->pending_run) {
             if (!document->adapter->tracking_available()) {
                 CancelRun(document); document->run_state = "Failed";
@@ -340,12 +630,17 @@ fire_and_forget MainWindow::DocumentChanged(std::shared_ptr<Document> document) 
     }
     if (!error.empty()) co_await ShowErrorAsync(L"RunError", error);
 }
+
 void MainWindow::SelectDocument(std::shared_ptr<Document> const& selected) {
     for (auto const& document : documents_) {
         const auto visibility = document == selected ? Visibility::Visible : Visibility::Collapsed;
         document->control.Visibility(visibility); document->test_view.Visibility(visibility);
     }
-    if (!selected) { UpdateControls(); return; }
+    if (!selected) {
+        CompilerOutputBanner().Visibility(Visibility::Collapsed);
+        UpdateControls();
+        return;
+    }
     selecting_document_ = true;
     try {
         select_id(Profiles(), configuration_.profiles, selected->profile);
@@ -353,17 +648,27 @@ void MainWindow::SelectDocument(std::shared_ptr<Document> const& selected) {
         select_id(Comparisons(), runner_configuration_.comparisons, selected->comparison);
     } catch (...) { selecting_document_ = false; throw; }
     selecting_document_ = false;
-    UpdateDocument(selected); UpdateControls();
+    UpdateDocument(selected);
+    RenderCompilerBanner(selected);
+    UpdateSummaryBadge(selected);
+    UpdateControls();
 }
+
 void MainWindow::Tabs_SelectionChanged(IInspectable const&, SelectionChangedEventArgs const&) {
     if (initialized_) { SelectDocument(CurrentDocument()); ScheduleRecoverySave(); }
+}
+fire_and_forget MainWindow::Tabs_AddTabButtonClick(TabView const&, IInspectable const&) {
+    co_await ExecuteAsync(Command::New);
 }
 void MainWindow::Profile_SelectionChanged(IInspectable const&, SelectionChangedEventArgs const&) {
     auto document = CurrentDocument(); const auto index = Profiles().SelectedIndex();
     if (selecting_document_ || !document || index < 0 || !TestsMutable(document)) return;
     document->profile = configuration_.profiles.at(static_cast<std::size_t>(index)).id;
     document->toolchain = runner_configuration_.default_toolchain(to_string(hstring{document->profile}));
-    if (document->adapter) document->adapter->set_language(configuration_.by_id(document->profile).highlighting_language);
+    if (document->adapter) {
+        document->adapter->set_language(configuration_.by_id(document->profile).highlighting_language);
+        document->adapter->set_language_id(to_string(hstring{document->profile}));
+    }
     selecting_document_ = true;
     try { select_id(Toolchains(), runner_configuration_.toolchains, document->toolchain); }
     catch (...) { selecting_document_ = false; throw; }
@@ -373,85 +678,23 @@ void MainWindow::Profile_SelectionChanged(IInspectable const&, SelectionChangedE
 void MainWindow::Toolchain_SelectionChanged(IInspectable const&, SelectionChangedEventArgs const&) {
     auto document = CurrentDocument(); const auto index = Toolchains().SelectedIndex();
     if (selecting_document_ || !document || index < 0 || !TestsMutable(document)) return;
-    document->toolchain = runner_configuration_.toolchains.at(static_cast<std::size_t>(index)).id; TestsChanged(document);
+    document->toolchain = runner_configuration_.toolchains.at(static_cast<std::size_t>(index)).id;
+    TestsChanged(document);
 }
 void MainWindow::Comparison_SelectionChanged(IInspectable const&, SelectionChangedEventArgs const&) {
     auto document = CurrentDocument(); const auto index = Comparisons().SelectedIndex();
     if (selecting_document_ || !document || index < 0 || !TestsMutable(document)) return;
-    document->comparison = runner_configuration_.comparisons.at(static_cast<std::size_t>(index)).id; TestsChanged(document);
-}
-void MainWindow::AddTest(std::shared_ptr<Document> const& document, std::optional<cpn::TestCase> restored) {
-    if (!restored && !TestsMutable(document)) return;
-    if (document->tests.size() >= runner_configuration_.maximum_tests) throw hresult_error{E_BOUNDS, strings_.get(L"TestLimit")};
-    auto test = std::make_shared<TestView>(); test->id = restored ? restored->id : identity(); test->panel.Spacing(6);
-    test->input_bytes = restored ? restored->input : std::string{};
-    test->expected_bytes = restored && restored->expected ? *restored->expected : std::string{};
-    const auto is_binary = [](std::string_view bytes) {
-        if (bytes.find('\0') != std::string_view::npos) return true;
-        try { FileStore::validate_utf8(bytes); return false; } catch (...) { return true; }
-    };
-    test->input_binary = is_binary(test->input_bytes); test->expected_binary = is_binary(test->expected_bytes);
-    test->enabled_value = !restored || restored->enabled; test->has_expected_value = restored && restored->expected.has_value();
-    set_checked(test->enabled, test->enabled_value); test->enabled.Content(box_value(strings_.get(L"TestEnabled")));
-    set_checked(test->has_expected, test->has_expected_value); test->has_expected.Content(box_value(strings_.get(L"HasExpected")));
-    test->input.AcceptsReturn(true); test->input.TextWrapping(TextWrapping::Wrap); test->input.MinHeight(72);
-    test->input.Header(box_value(strings_.get(test->input_binary ? L"BinaryTestInput" : L"TestInput")));
-    test->input.Text(test->input_binary ? RenderBytes(test->input_bytes) : to_hstring(test->input_bytes)); test->input.IsReadOnly(test->input_binary);
-    test->expected.AcceptsReturn(true); test->expected.TextWrapping(TextWrapping::Wrap); test->expected.MinHeight(72);
-    test->expected.Header(box_value(strings_.get(test->expected_binary ? L"BinaryTestExpected" : L"TestExpected")));
-    test->expected.Text(test->expected_binary ? RenderBytes(test->expected_bytes) : to_hstring(test->expected_bytes)); test->expected.IsReadOnly(test->expected_binary);
-    test->result.TextWrapping(TextWrapping::Wrap); test->result.IsTextSelectionEnabled(true);
-    test->result.Text(strings_.get(L"VerdictNotRun"));
-    test->remove.Content(box_value(strings_.get(L"RemoveTest")));
-    test->panel.Children().Append(test->enabled); test->panel.Children().Append(test->input);
-    test->panel.Children().Append(test->has_expected); test->panel.Children().Append(test->expected);
-    test->panel.Children().Append(test->result); test->panel.Children().Append(test->remove);
-    const auto weak = get_weak(); const std::weak_ptr<Document> weak_document = document; const std::weak_ptr<TestView> weak_test = test;
-    const auto before_text = [weak, weak_document, weak_test](bool input, auto const& args) {
-        bool allowed = false;
-        if (auto self = weak.get()) if (auto value = weak_document.lock()) if (auto item = weak_test.lock())
-            allowed = !(input ? item->input_binary : item->expected_binary) && self->TestsMutable(value);
-        args.Cancel(!allowed);
-    };
-    test->input.BeforeTextChanging([before_text](auto const&, auto const& args) { before_text(true, args); });
-    test->expected.BeforeTextChanging([before_text](auto const&, auto const& args) { before_text(false, args); });
-    test->input.TextChanging([weak, weak_document, weak_test](auto const&, auto const&) {
-        if (auto self = weak.get()) if (auto value = weak_document.lock()) if (auto item = weak_test.lock())
-            self->RecordTestText(value, item, true);
-    });
-    test->expected.TextChanging([weak, weak_document, weak_test](auto const&, auto const&) {
-        if (auto self = weak.get()) if (auto value = weak_document.lock()) if (auto item = weak_test.lock())
-            self->RecordTestText(value, item, false);
-    });
-    const auto changed = [weak, weak_document, weak_test](auto const&, auto const&) {
-        if (auto self = weak.get()) if (auto value = weak_document.lock()) if (auto item = weak_test.lock()) {
-            const bool enabled = checked(item->enabled), has_expected = checked(item->has_expected);
-            if (enabled == item->enabled_value && has_expected == item->has_expected_value) return;
-            if (!self->TestsMutable(value)) {
-                set_checked(item->enabled, item->enabled_value); set_checked(item->has_expected, item->has_expected_value);
-                return;
-            }
-            item->enabled_value = enabled; item->has_expected_value = has_expected; self->TestsChanged(value);
-        }
-    };
-    test->enabled.Checked(changed); test->enabled.Unchecked(changed);
-    test->has_expected.Checked(changed); test->has_expected.Unchecked(changed);
-    test->remove.Click([weak, weak_document, weak_test](auto const&, auto const&) {
-        if (auto self = weak.get()) if (auto value = weak_document.lock()) if (auto item = weak_test.lock(); item && self->TestsMutable(value)) {
-            std::uint32_t index{};
-            if (value->test_panel.Children().IndexOf(item->panel, index)) value->test_panel.Children().RemoveAt(index);
-            std::erase(value->tests, item); self->TestsChanged(value);
-        }
-    });
-    document->tests.push_back(test); document->test_panel.Children().Append(test->panel);
-    if (!restored) TestsChanged(document);
+    document->comparison = runner_configuration_.comparisons.at(static_cast<std::size_t>(index)).id;
+    TestsChanged(document);
 }
 void MainWindow::TestsChanged(std::shared_ptr<Document> const& document) {
     if (document->closed || !TestsMutable(document)) return;
-    document->test_revision = cpn::windows::RevisionPolicy::next(document->test_revision); UpdateDocument(document); UpdateControls(); ScheduleRecoverySave();
+    document->test_revision = cpn::windows::RevisionPolicy::next(document->test_revision);
+    UpdateDocument(document);
+    UpdateControls();
+    ScheduleRecoverySave();
 }
 void MainWindow::RecordTestText(std::shared_ptr<Document> const& document, std::shared_ptr<TestView> const& test, bool input) {
-    // TextChanging runs synchronously with the new Text; never update the visual tree here.
     try {
         auto& bytes = input ? test->input_bytes : test->expected_bytes;
         const auto& box = input ? test->input : test->expected;
@@ -461,56 +704,67 @@ void MainWindow::RecordTestText(std::shared_ptr<Document> const& document, std::
         if (result == cpn::windows::TestTextChange::Result::rejected) document->test_text_tracking_failed = true;
     } catch (...) { document->test_text_tracking_failed = true; }
     recovery_pending_ = true;
-    try { ScheduleDocumentChanged(document); } catch (...) { /* The authoritative model remains guarded. */ }
+    try { ScheduleDocumentChanged(document); } catch (...) {}
 }
 fire_and_forget MainWindow::AddTest_Click(IInspectable const&, RoutedEventArgs const&) {
     auto lifetime = get_strong(); hstring error;
     try { if (auto document = CurrentDocument()) AddTest(document); } catch (...) { error = CurrentError(); }
     if (!error.empty()) co_await ShowErrorAsync(L"TestError", error);
 }
+
 void MainWindow::UpdateDocument(std::shared_ptr<Document> const& document) {
-    const auto name = document->path.empty() ? std::wstring{strings_.get(UiStrings::untitled)} : document->path.filename().wstring();
+    const auto name = ComputeTabTitle(document);
     const bool available = document->adapter && document->adapter->committed_available();
     const bool dirty = document->adapter ? (!available || document->adapter->dirty()) :
         (document->initial_record && (!document->save_point || cpn::sha256(document->initial_record->source_text) != document->save_point->source_digest));
-    document->tab.Header(box_value(hstring{name + (dirty ? std::wstring{strings_.get(UiStrings::unsaved_suffix)} : L"")}));
-    auto const state = runner_configuration_.state_labels.find(document->run_state);
-    auto state_text = state == runner_configuration_.state_labels.end() ? strings_.get(L"RunUnknown") : strings_.get(to_hstring(state->second));
-    std::wstring run_status{state_text};
-    if (document->run_capability != cpn::windows::CompanionRunCapability::ordinary)
-        run_status += L"\n" + std::wstring{strings_.get(document->run_capability == cpn::windows::CompanionRunCapability::unsupported ? L"CompanionRunUnsupported" : L"CompanionRunUnavailable")};
-    if (document->cancel_requested) run_status += L"  " + std::wstring{strings_.get(L"CancellationRequested")};
-    if (document->result) {
-        const bool stale = !available || document->result->revision != document->adapter->revision() ||
-                           document->result_test_revision != document->test_revision;
-        run_status += L"\n" + UiStrings::format(strings_.get(L"ResultRevisionFormat"), {std::to_wstring(document->result->revision)});
-        if (stale) run_status += L"  " + std::wstring{strings_.get(L"ResultStale")};
+    if (document->tab_title) {
+        document->tab_title.Text(hstring{name + (dirty ? std::wstring{strings_.get(UiStrings::unsaved_suffix)} : L"")});
     }
-    document->run_status.Text(hstring{run_status});
+    UpdateSummaryBadge(document);
+    if (document->result) {
+        bool const current = IsResultCurrent(document);
+        for (auto const& test : document->tests) {
+            test->use_output.IsEnabled(current && test->last_output_adoptable && !test->expected_binary && TestsMutable(document));
+        }
+    }
+
     if (CurrentDocument() != document) return;
     Title(hstring{UiStrings::format(strings_.get(UiStrings::window_title_format), {
         std::wstring{strings_.get(UiStrings::app_title)}, name, dirty ? std::wstring{strings_.get(UiStrings::unsaved_suffix)} : L""})});
-    hstring status;
-    if (!document->adapter) status = strings_.get(L"EditorInitializing");
-    else if (document->test_text_tracking_failed) status = strings_.get(L"TestTextTrackingFailed");
-    else if (!document->adapter->tracking_available()) status = strings_.get(L"SnapshotTrackingFailed");
-    else if (!available) status = strings_.get(L"CompositionOrNativeBusy");
-    else status = hstring{UiStrings::format(strings_.get(UiStrings::status_format), {
-        std::wstring{strings_.get(configuration_.by_id(document->profile).label_resource)}, std::to_wstring(document->adapter->revision()),
-        std::to_wstring(document->adapter->length()), std::to_wstring(document->adapter->caret_byte()), std::to_wstring(document->adapter->anchor_byte())})};
-    if (persistence_gate_.final_active()) status = hstring{std::wstring{status} + L"  " + std::wstring{strings_.get(L"FinalRevisionCommitting")}};
-    else if (!WorkspaceMutable()) status = hstring{std::wstring{status} + L"  " + std::wstring{strings_.get(L"WorkspaceRevisionExhausted")}};
+
+    StatusLanguageText().Text(strings_.get(configuration_.by_id(document->profile).label_resource));
+    StatusEncodingText().Text(strings_.get(document->utf8_bom ? L"StatusBarEncodingBom" : L"StatusBarEncodingUtf8"));
+    if (document->adapter) {
+        StatusCursorText().Text(hstring{UiStrings::format(strings_.get(L"StatusBarLnColFormat"), {
+            std::to_wstring(document->adapter->line_number()), std::to_wstring(document->adapter->column_number())})});
+        StatusBytesText().Text(hstring{UiStrings::format(strings_.get(L"StatusBarBytesFormat"), {
+            std::to_wstring(document->adapter->length())})});
+    } else {
+        StatusCursorText().Text(L"Ln 1, Col 1");
+        StatusBytesText().Text(L"0 B");
+    }
+
+    std::wstring notice_parts;
+    if (!document->adapter) notice_parts = std::wstring{strings_.get(L"EditorInitializing")};
+    else if (document->test_text_tracking_failed) notice_parts = std::wstring{strings_.get(L"TestTextTrackingFailed")};
+    else if (!document->adapter->tracking_available()) notice_parts = std::wstring{strings_.get(L"SnapshotTrackingFailed")};
+    else if (!available) notice_parts = std::wstring{strings_.get(L"CompositionOrNativeBusy")};
+    else if (document->run_capability != cpn::windows::CompanionRunCapability::ordinary)
+        notice_parts = std::wstring{strings_.get(document->run_capability == cpn::windows::CompanionRunCapability::unsupported ? L"CompanionRunUnsupported" : L"CompanionRunUnavailable")};
+    else if (document->cancel_requested) notice_parts = std::wstring{strings_.get(L"CancellationRequested")};
+    else if (persistence_gate_.final_active()) notice_parts = std::wstring{strings_.get(L"FinalRevisionCommitting")};
+    else if (!WorkspaceMutable()) notice_parts = std::wstring{strings_.get(L"WorkspaceRevisionExhausted")};
     else if ((available && cpn::windows::RevisionPolicy::exhausted(document->adapter->revision())) || cpn::windows::RevisionPolicy::exhausted(document->test_revision))
-        status = hstring{std::wstring{status} + L"  " + std::wstring{strings_.get(L"DocumentRevisionExhausted")}};
-    if (!document->notice.empty()) status = hstring{std::wstring{status} + L"  " + document->notice};
-    Status().Text(status);
+        notice_parts = std::wstring{strings_.get(L"DocumentRevisionExhausted")};
+    if (!document->notice.empty()) {
+        if (!notice_parts.empty()) notice_parts += L"  ";
+        notice_parts += document->notice;
+    }
+    Status().Text(hstring{notice_parts});
 }
-bool MainWindow::WorkspaceRevisionAvailable() const noexcept {
-    return !cpn::windows::RevisionPolicy::exhausted(recovery_revision_);
-}
-bool MainWindow::WorkspaceMutable() const noexcept {
-    return WorkspaceRevisionAvailable() && !persistence_gate_.final_active();
-}
+
+bool MainWindow::WorkspaceRevisionAvailable() const noexcept { return !cpn::windows::RevisionPolicy::exhausted(recovery_revision_); }
+bool MainWindow::WorkspaceMutable() const noexcept { return WorkspaceRevisionAvailable() && !persistence_gate_.final_active(); }
 bool MainWindow::WorkspaceCommittedAvailable() const {
     for (auto const& document : documents_) {
         if (document->test_text_tracking_failed) throw hresult_error{E_FAIL, strings_.get(L"TestTextTrackingFailed")};
@@ -544,6 +798,7 @@ void MainWindow::FreezePersistedNavigation(cpn::windows::PreparedRecovery const&
         }
     }
 }
+
 void MainWindow::UpdateControls() {
     if (runner_ && runner_->delivery_failed() && !shutting_down_ && !delivery_failure_reported_) {
         core_ready_ = false; delivery_failure_reported_ = true;
@@ -553,29 +808,84 @@ void MainWindow::UpdateControls() {
             value->notice = std::wstring{strings_.get(L"CoreDeliveryFailed")}; UpdateDocument(value);
         }
     }
-    const auto document = CurrentDocument(); const bool editor_ready = document && document->adapter;
-    Commands().IsEnabled(initialized_ && !busy_ && !shutting_down_ && !persistence_gate_.final_active());
+    const auto document = CurrentDocument();
+    const bool editor_ready = document && document->adapter;
+    const bool file_ops_ready = initialized_ && !busy_ && !shutting_down_ && !persistence_gate_.final_active();
     const bool metadata_mutable = initialized_ && !shutting_down_ && document && TestsMutable(document);
-    Profiles().IsEnabled(metadata_mutable); Toolchains().IsEnabled(metadata_mutable); Comparisons().IsEnabled(metadata_mutable);
-    NewButton().IsEnabled(WorkspaceMutable()); OpenButton().IsEnabled(WorkspaceMutable());
-    SaveButton().IsEnabled(WorkspaceMutable()); SaveAsButton().IsEnabled(WorkspaceMutable());
-    ExportButton().IsEnabled(editor_ready);
+
+    Profiles().IsEnabled(metadata_mutable);
+    Toolchains().IsEnabled(metadata_mutable);
+    Comparisons().IsEnabled(metadata_mutable);
+    CheckerToggleButton().IsEnabled(initialized_ && WorkspaceMutable() && !shutting_down_);
+
+    MenuNewItem().IsEnabled(file_ops_ready && WorkspaceMutable());
+    MenuOpenItem().IsEnabled(file_ops_ready && WorkspaceMutable());
+    MenuSaveItem().IsEnabled(file_ops_ready && WorkspaceMutable() && editor_ready);
+    MenuSaveAsItem().IsEnabled(file_ops_ready && WorkspaceMutable() && editor_ready);
+    MenuSaveAllItem().IsEnabled(file_ops_ready && WorkspaceMutable());
+    MenuCloseTabItem().IsEnabled(file_ops_ready && WorkspaceMutable() && document != nullptr);
+    MenuCloseSavedItem().IsEnabled(file_ops_ready && WorkspaceMutable());
+    MenuExportSnapshotItem().IsEnabled(file_ops_ready && editor_ready);
+    MenuUndoItem().IsEnabled(editor_ready && WorkspaceMutable() && document->adapter->can_undo());
+    MenuRedoItem().IsEnabled(editor_ready && WorkspaceMutable() && document->adapter->can_redo());
+    MenuWordWrapItem().IsEnabled(initialized_ && WorkspaceMutable());
+    MenuAutoPairItem().IsEnabled(initialized_ && WorkspaceMutable());
+    MenuSettingsItem().IsEnabled(initialized_ && !shutting_down_);
+
     for (auto const& value : documents_) {
         value->tab.IsClosable(WorkspaceMutable());
         if (value->adapter) value->adapter->set_workspace_read_only(!WorkspaceMutable());
         const bool mutable_tests = TestsMutable(value);
         for (auto const& test : value->tests) {
-            test->input.IsReadOnly(test->input_binary || !mutable_tests); test->expected.IsReadOnly(test->expected_binary || !mutable_tests);
-            test->enabled.IsEnabled(mutable_tests); test->has_expected.IsEnabled(mutable_tests); test->remove.IsEnabled(mutable_tests);
+            test->input.IsReadOnly(test->input_binary || !mutable_tests);
+            test->expected.IsReadOnly(test->expected_binary || !mutable_tests);
+            test->enabled.IsEnabled(mutable_tests);
+            test->has_expected.IsEnabled(mutable_tests);
+            test->duplicate_btn.IsEnabled(mutable_tests);
+            test->remove.IsEnabled(mutable_tests);
         }
     }
-    RunButton().IsEnabled(initialized_ && core_ready_ && !shutting_down_ && !persistence_gate_.final_active() && editor_ready &&
-        !document->test_text_tracking_failed && !document->run_active && document->run_capability == cpn::windows::CompanionRunCapability::ordinary);
+
+    auto const* tc = document ? FindToolchain(document->toolchain) : nullptr;
+    bool const compiled_tc = tc && RunnerConfiguration::is_compiled_toolchain(tc->profile);
+    if (tc) {
+        auto const* probe = FindProbe(tc->id);
+        if (probe && !probe->available) {
+            ToolchainAvailabilityText().Text(strings_.get(L"ToolchainMissingHint"));
+            ToolchainAvailabilityText().Visibility(Visibility::Visible);
+        } else {
+            ToolchainAvailabilityText().Visibility(Visibility::Collapsed);
+        }
+    } else {
+        ToolchainAvailabilityText().Visibility(Visibility::Collapsed);
+    }
+
+    bool const can_run_base = initialized_ && core_ready_ && !shutting_down_ && !persistence_gate_.final_active() &&
+                              editor_ready && !document->test_text_tracking_failed && !document->run_active &&
+                              document->run_capability == cpn::windows::CompanionRunCapability::ordinary;
+    bool const has_artifact = compiled_tc && document && document->compiled_artifact &&
+                              document->compiled_artifact->toolchain_id == document->toolchain &&
+                              tc && document->compiled_artifact->toolchain_dump == tc->profile.dump() &&
+                              std::filesystem::is_regular_file(document->compiled_artifact->path);
+
+    CompileButton().Visibility(compiled_tc ? Visibility::Visible : Visibility::Collapsed);
+    CompileButton().IsEnabled(can_run_base && compiled_tc);
+    RunOnlyButton().IsEnabled(can_run_base && (!compiled_tc || has_artifact));
+    RunButton().IsEnabled(can_run_base);
     CancelButton().IsEnabled(!shutting_down_ && document && document->run_active && !document->cancel_requested);
+
+    MenuCompileItem().IsEnabled(can_run_base && compiled_tc);
+    MenuRunOnlyItem().IsEnabled(can_run_base && (!compiled_tc || has_artifact));
+    MenuCompileAndRunItem().IsEnabled(can_run_base);
+    MenuStopItem().IsEnabled(!shutting_down_ && document && document->run_active && !document->cancel_requested);
+    MenuAddSampleItem().IsEnabled(metadata_mutable);
     AddTestButton().IsEnabled(metadata_mutable);
+    MoreSamplesButton().IsEnabled(metadata_mutable && document && !document->tests.empty());
+
     UpdateRecoveryControls();
     UpdateCompanionControls();
 }
+
 void MainWindow::SubmitPendingRun(std::shared_ptr<Document> const& document) {
     if (!document->pending_run || !document->adapter) return;
     if (document->run_capability != cpn::windows::CompanionRunCapability::ordinary)
@@ -586,36 +896,126 @@ void MainWindow::SubmitPendingRun(std::shared_ptr<Document> const& document) {
     try {
         auto snapshot = document->adapter->snapshot();
         auto request = std::move(*document->pending_run);
-        request.document_id = to_string(hstring{snapshot.document_id}); request.revision = snapshot.revision;
+        request.document_id = to_string(hstring{snapshot.document_id});
+        request.revision = snapshot.revision;
         request.source = std::move(snapshot.utf8);
         if (!document->path.empty()) request.original_path = to_string(hstring{document->path.wstring()});
-        runner_->submit(std::move(request)); document->pending_run.reset(); document->run_state = "Queued";
+        runner_->submit(std::move(request));
+        document->pending_run.reset();
+        document->run_state = "Queued";
     } catch (...) {
         document->pending_run.reset(); document->run_active = false; document->run_token.clear(); document->run_state = "Failed"; throw;
     }
 }
-fire_and_forget MainWindow::Run_Click(IInspectable const&, RoutedEventArgs const&) {
-    auto lifetime = get_strong(); auto document = CurrentDocument(); hstring error;
-    if (!document || !document->adapter || !core_ready_ || shutting_down_ || document->run_active || persistence_gate_.final_active()) co_return;
+
+void MainWindow::StartRunWithMode(std::shared_ptr<Document> const& document, std::string const& mode) {
+    if (!document || !document->adapter || !core_ready_ || shutting_down_ || document->run_active || persistence_gate_.final_active()) return;
+    hstring error;
     try {
         if (document->run_capability != cpn::windows::CompanionRunCapability::ordinary)
             throw hresult_error{E_NOTIMPL, strings_.get(document->run_capability == cpn::windows::CompanionRunCapability::unsupported ? L"CompanionRunUnsupported" : L"CompanionRunUnavailable")};
         if (!document->adapter->tracking_available()) throw hresult_error{E_FAIL, strings_.get(L"SnapshotTrackingFailed")};
         if (document->test_text_tracking_failed) throw hresult_error{E_FAIL, strings_.get(L"TestTextTrackingFailed")};
-        cpn::windows::RunRequest request; request.token = identity(); request.comparison = document->comparison;
-        auto const choice = std::find_if(runner_configuration_.toolchains.begin(), runner_configuration_.toolchains.end(),
-            [&](auto const& value) { return value.id == document->toolchain; });
-        if (choice == runner_configuration_.toolchains.end()) throw_hresult(E_INVALIDARG);
+        auto const* choice = FindToolchain(document->toolchain);
+        if (!choice) throw_hresult(E_INVALIDARG);
+
+        bool const compiled_tc = RunnerConfiguration::is_compiled_toolchain(choice->profile);
+        std::string effective_mode = mode;
+        if (!compiled_tc) {
+            if (effective_mode == "compile_only") return;
+            effective_mode = "compile_and_run";
+        }
+
+        if (view_mode_ == ViewMode::EditorOnly) SetViewMode(ViewMode::Split);
+        if (companion_pane_open_) ToggleCompanionPane_Click(nullptr, nullptr);
+
+        cpn::windows::RunRequest request;
+        request.token = identity();
+        request.comparison = document->comparison;
         request.toolchain = choice->profile;
-        for (auto const& test : document->tests) request.tests.push_back({test->id, test->input_bytes,
-            test->has_expected_value ? std::optional<std::string>{test->expected_bytes} : std::nullopt, test->enabled_value});
-        document->run_token = request.token; document->pending_run = std::move(request);
-        document->run_active = true; document->cancel_requested = false; document->last_sequence = 0;
-        document->run_test_revision = document->test_revision; document->run_state = "AwaitingCommittedText"; document->notice.clear();
-        SubmitPendingRun(document); UpdateDocument(document); UpdateControls();
-    } catch (...) { error = CurrentError(); CancelRun(document); document->run_state = "Failed"; UpdateDocument(document); UpdateControls(); }
-    if (!error.empty()) co_await ShowErrorAsync(L"RunError", error);
+        request.mode = effective_mode;
+        if (compiled_tc) {
+            if (effective_mode == "run_only") {
+                if (!document->compiled_artifact || document->compiled_artifact->toolchain_id != document->toolchain ||
+                    document->compiled_artifact->toolchain_dump != choice->profile.dump() ||
+                    !std::filesystem::is_regular_file(document->compiled_artifact->path)) {
+                    throw hresult_error{E_FAIL, strings_.get(L"RunMissingArtifact")};
+                }
+                request.artifact_path = cpn::path_to_utf8(document->compiled_artifact->path);
+                document->pending_artifact_path.reset();
+                if (document->adapter->committed_available() && document->compiled_artifact->revision != document->adapter->revision()) {
+                    document->notice = std::wstring{strings_.get(L"RunBuildStale")};
+                } else {
+                    document->notice.clear();
+                }
+            } else {
+                auto const artifact_name = choice->profile.value("artifact_name", std::string{"solution.exe"});
+                auto const target = ManagedArtifactPath(document, artifact_name);
+                request.artifact_path = cpn::path_to_utf8(target);
+                document->pending_artifact_path = target;
+                document->notice.clear();
+            }
+        } else {
+            document->pending_artifact_path.reset();
+            document->notice.clear();
+        }
+
+        if (checker_settings_.enabled && effective_mode != "compile_only") {
+            auto const json_str = checker_settings_.json_text.empty()
+                ? checker_configuration_.default_checker.dump()
+                : checker_settings_.json_text;
+            request.external_checker = CheckerModel::validate_json(json_str, checker_configuration_.max_checker_json_bytes);
+        }
+
+        for (auto const& test : document->tests) {
+            request.tests.push_back({test->id, test->input_bytes,
+                test->has_expected_value ? std::optional<std::string>{test->expected_bytes} : std::nullopt,
+                test->enabled_value});
+        }
+
+        document->run_token = request.token;
+        document->run_mode = effective_mode;
+        document->run_toolchain_dump = choice->profile.dump();
+        document->run_comparison = document->comparison;
+        document->run_checker_fingerprint = CheckerModel::fingerprint(checker_settings_, checker_configuration_.max_checker_json_bytes);
+        document->pending_run = std::move(request);
+        document->run_active = true;
+        document->cancel_requested = false;
+        document->last_sequence = 0;
+        document->run_test_revision = document->test_revision;
+        document->run_state = "AwaitingCommittedText";
+        SubmitPendingRun(document);
+        UpdateDocument(document);
+        UpdateControls();
+    } catch (...) {
+        error = CurrentError();
+        CancelRun(document);
+        document->run_state = "Failed";
+        UpdateDocument(document);
+        UpdateControls();
+    }
+    if (!error.empty()) {
+        auto show = ShowErrorAsync(L"RunError", error);
+        (void)show;
+    }
 }
+
+fire_and_forget MainWindow::Compile_Click(IInspectable const&, RoutedEventArgs const&) {
+    auto lifetime = get_strong();
+    if (auto doc = CurrentDocument()) StartRunWithMode(doc, "compile_only");
+    co_return;
+}
+fire_and_forget MainWindow::RunOnly_Click(IInspectable const&, RoutedEventArgs const&) {
+    auto lifetime = get_strong();
+    if (auto doc = CurrentDocument()) StartRunWithMode(doc, "run_only");
+    co_return;
+}
+fire_and_forget MainWindow::Run_Click(IInspectable const&, RoutedEventArgs const&) {
+    auto lifetime = get_strong();
+    if (auto doc = CurrentDocument()) StartRunWithMode(doc, "compile_and_run");
+    co_return;
+}
+
 void MainWindow::CancelRun(std::shared_ptr<Document> const& document) {
     if (!document->run_active) return;
     if (document->pending_run) {
@@ -628,6 +1028,7 @@ fire_and_forget MainWindow::Cancel_Click(IInspectable const&, RoutedEventArgs co
     try { if (auto document = CurrentDocument()) CancelRun(document); } catch (...) { error = CurrentError(); }
     if (!error.empty()) co_await ShowErrorAsync(L"RunError", error);
 }
+
 void MainWindow::ReceiveCoreEvent(cpn::windows::RunEvent event) {
     if (event.kind == cpn::windows::RunEvent::Kind::ready) { core_ready_ = true; UpdateControls(); return; }
     if (event.kind == cpn::windows::RunEvent::Kind::engine_error) {
@@ -643,12 +1044,31 @@ void MainWindow::ReceiveCoreEvent(cpn::windows::RunEvent event) {
         document->last_sequence = event.sequence; document->run_state = event.state;
         if (!event.error.empty()) document->notice = std::wstring{to_hstring(event.error)};
         if (event.result) {
-            document->result = std::move(event.result); document->result_test_revision = document->run_test_revision; RenderResult(document);
+            if (event.result->build_outcome == "Succeeded" && document->pending_artifact_path &&
+                std::filesystem::is_regular_file(*document->pending_artifact_path)) {
+                document->compiled_artifact = CompiledArtifact{
+                    event.result->revision,
+                    event.result->source_digest,
+                    document->toolchain,
+                    document->run_toolchain_dump,
+                    *document->pending_artifact_path
+                };
+            }
+            document->pending_artifact_path.reset();
+            document->result = std::move(event.result);
+            document->result_test_revision = document->run_test_revision;
+            document->result_toolchain_dump = document->run_toolchain_dump;
+            document->result_comparison = document->run_comparison;
+            document->result_checker_fingerprint = document->run_checker_fingerprint;
+            document->result_mode = document->run_mode;
+            document->compiler_expanded = document->result->build_outcome == "CompilationError" || document->result->build_outcome == "Failed";
+            RenderResult(document);
         }
         if (event.terminal) { document->run_active = false; document->cancel_requested = false; document->run_token.clear(); }
         UpdateDocument(document); UpdateControls(); return;
     }
 }
+
 hstring MainWindow::RenderBytes(std::string_view value) const {
     const auto length = std::min(value.size(), runner_configuration_.display_output_bytes);
     auto const visible = value.substr(0, length); std::wstring result;
@@ -662,44 +1082,60 @@ hstring MainWindow::RenderBytes(std::string_view value) const {
     if (length < value.size()) result += L"\n" + UiStrings::format(strings_.get(L"DisplayOutputTruncated"), {std::to_wstring(value.size())});
     return hstring{result};
 }
-void MainWindow::RenderResult(std::shared_ptr<Document> const& document) {
-    if (!document->result) return;
-    auto const& output = *document->result;
-    const auto build_label = runner_configuration_.build_labels.find(output.build_outcome);
-    const auto build_text = build_label == runner_configuration_.build_labels.end() ? strings_.get(L"RunUnknown") : strings_.get(to_hstring(build_label->second));
-    auto build_details = UiStrings::format(strings_.get(L"BuildOutputFormat"), {std::wstring{build_text},
-        std::wstring{RenderBytes(output.build_output)}, std::wstring{RenderBytes(output.build_error)}, std::wstring{to_hstring(output.error)}});
-    if (output.build_stdout_truncated || output.build_stderr_truncated) build_details += L"\n" + std::wstring{strings_.get(L"CoreOutputTruncated")};
-    document->run_details.Text(hstring{build_details});
-    for (auto const& test : document->tests) {
-        const auto result = std::find_if(output.tests.begin(), output.tests.end(), [&](auto const& value) { return value.id == test->id; });
-        if (result == output.tests.end()) { test->result.Text(strings_.get(L"VerdictNotRun")); continue; }
-        auto const label = runner_configuration_.verdict_labels.find(result->verdict);
-        auto const verdict = label == runner_configuration_.verdict_labels.end() ? strings_.get(L"RunUnknown") : strings_.get(to_hstring(label->second));
-        auto text = UiStrings::format(strings_.get(L"TestResultFormat"), {std::wstring{verdict}, std::to_wstring(result->elapsed_ms),
-            std::wstring{RenderBytes(result->standard_output)}, std::wstring{RenderBytes(result->standard_error)}, std::wstring{to_hstring(result->detail)}});
-        if (result->stdout_truncated || result->stderr_truncated) text += L"\n" + std::wstring{strings_.get(L"CoreOutputTruncated")};
-        test->result.Text(hstring{text});
+
+void MainWindow::Undo_Click(IInspectable const&, RoutedEventArgs const&) {
+    if (auto doc = CurrentDocument(); doc && doc->adapter && WorkspaceMutable()) {
+        doc->adapter->undo();
+        UpdateControls();
     }
 }
-void MainWindow::UpdateRecoveryControls() {
-    RecoveryStatus().Text(hstring{recovery_notice_});
-    RetryRecoveryButton().IsEnabled(recovery_initialized_ && recovery_retry_allowed_ && !busy_ && !shutting_down_ && !recovery_saving_ && !recovery_copying_);
-    SaveRecoveryAsButton().IsEnabled(recovery_initialized_ && !busy_ && !shutting_down_ && !recovery_copying_);
+void MainWindow::Redo_Click(IInspectable const&, RoutedEventArgs const&) {
+    if (auto doc = CurrentDocument(); doc && doc->adapter && WorkspaceMutable()) {
+        doc->adapter->redo();
+        UpdateControls();
+    }
 }
+void MainWindow::ToggleWordWrap_Click(IInspectable const&, RoutedEventArgs const&) {
+    if (!initialized_ || !WorkspaceMutable()) return;
+    ui_preferences_.word_wrap = !ui_preferences_.word_wrap;
+    ApplyWorkspaceUiPreferences();
+    ScheduleRecoverySave();
+}
+void MainWindow::ToggleAutoPair_Click(IInspectable const&, RoutedEventArgs const&) {
+    if (!initialized_ || !WorkspaceMutable()) return;
+    ui_preferences_.auto_pair = !ui_preferences_.auto_pair;
+    ApplyWorkspaceUiPreferences();
+    ScheduleRecoverySave();
+}
+
+void MainWindow::UpdateRecoveryControls() {
+    bool const show_bar = !recovery_notice_.empty() &&
+        (recovery_blocked_ || recovery_preferences_limited_ || !WorkspaceMutable());
+    RecoveryInfoBar().IsOpen(show_bar);
+    RecoveryInfoBar().Message(hstring{recovery_notice_});
+    RecoveryInfoBar().Severity(recovery_blocked_ ? InfoBarSeverity::Error : InfoBarSeverity::Warning);
+    bool const retry_ok = recovery_initialized_ && recovery_retry_allowed_ && !busy_ && !shutting_down_ && !recovery_saving_ && !recovery_copying_;
+    bool const save_as_ok = recovery_initialized_ && !busy_ && !shutting_down_ && !recovery_copying_;
+    RetryRecoveryButton().IsEnabled(retry_ok);
+    SaveRecoveryAsButton().IsEnabled(save_as_ok);
+    MenuRetryRecoveryItem().IsEnabled(retry_ok);
+    MenuSaveRecoveryAsItem().IsEnabled(save_as_ok);
+}
+
 void MainWindow::ScheduleRecoverySave(bool immediate) {
     recovery_pending_ = true;
     if (!recovery_initialized_ || recovery_blocked_ || shutting_down_ || recovery_copying_ || recovery_saving_ || recovery_flushing_) return;
     if (immediate) { SaveRecoveryAsync(); return; }
-    // This timer merges writes. Only the editor's committed barrier decides whether text may be captured.
     if (!recovery_timer_.IsRunning()) recovery_timer_.Start();
 }
+
 std::optional<cpn::WorkspaceSession> MainWindow::CaptureWorkspace() {
     cpn::WorkspaceSession session; session.workspace_id = workspace_id_; session.revision = recovery_revision_;
     if (!WorkspaceRevisionAvailable()) session.selected_document_id = recovery_selected_baseline_;
     session.editor_preferences = workspace_preserved_preferences_;
+    ui_preferences_.checker = checker_settings_;
     bool preferences_limited = !cpn::windows::RecoveryModel::merge_preferences(session.editor_preferences,
-        cpn::windows::RecoveryModel::workspace_preferences(runner_configuration_.toolchains, recovery_configuration_.workspace_namespace));
+        cpn::windows::RecoveryModel::workspace_preferences(runner_configuration_.toolchains, ui_preferences_, recovery_configuration_.workspace_namespace));
     const auto selected = CurrentDocument();
     for (auto const& document : documents_) {
         if (document->test_text_tracking_failed) throw hresult_error{E_FAIL, strings_.get(L"TestTextTrackingFailed")};
@@ -711,7 +1147,6 @@ std::optional<cpn::WorkspaceSession> MainWindow::CaptureWorkspace() {
             record.revision = snapshot.revision; record.source_text = std::move(snapshot.utf8);
             if (WorkspaceRevisionAvailable()) { prefs.caret_byte = snapshot.caret_byte; prefs.anchor_byte = snapshot.anchor_byte; }
         } else {
-            // An unloaded/failed editor remains disabled and its immutable record is authoritative.
             if (!document->initial_record || document->control.IsEnabled()) throw hresult_error{E_FAIL, strings_.get(L"SnapshotTrackingFailed")};
             record.document_id = document->initial_record->document_id; record.revision = document->initial_record->revision;
             record.source_text = document->initial_record->source_text;
@@ -731,6 +1166,7 @@ std::optional<cpn::WorkspaceSession> MainWindow::CaptureWorkspace() {
     recovery_preferences_limited_ = preferences_limited;
     return session;
 }
+
 fire_and_forget MainWindow::SaveRecoveryAsync() {
     auto lifetime = get_strong();
     if (!recovery_initialized_ || recovery_blocked_ || recovery_saving_ || recovery_copying_ || shutting_down_) co_return;
@@ -746,7 +1182,6 @@ fire_and_forget MainWindow::SaveRecoveryAsync() {
     try {
         if (WorkspaceCommittedAvailable()) {
             if (!TryBeginFinalRevision(false, final_lease)) throw hresult_error{E_PENDING, strings_.get(L"FinalRevisionAwaitingOperations")};
-            // No await separates capability freeze from this owned candidate capture.
             candidate = CaptureWorkspace();
         }
     } catch (...) { error = CurrentError(); }
@@ -774,7 +1209,6 @@ fire_and_forget MainWindow::SaveRecoveryAsync() {
         auto logical = *candidate; logical.revision = 0; content = cpn::serialize_workspace_session(logical);
         const bool same = previous && *previous == content;
         if (same && !force_write) {
-            // A logical match is insufficient: the persisted file may have been changed externally.
             const auto observed = cpn::windows::RecoveryModel::load_response(worker->load(cpn::path_to_utf8(paths.recovery_file)).get());
             unchanged = observed.status == cpn::SessionLoadStatus::loaded && observed.disk_digest == expected;
             if (!unchanged) result = {observed.status == cpn::SessionLoadStatus::invalid || observed.status == cpn::SessionLoadStatus::unsupported_schema ?
@@ -806,12 +1240,13 @@ fire_and_forget MainWindow::SaveRecoveryAsync() {
         try { if (failure) std::rethrow_exception(failure); } catch (...) { error = CurrentError(); }
         recovery_notice_ += L" " + std::wstring{error.empty() ? to_hstring(result.detail) : error};
     } else {
-        recovery_notice_ = std::wstring{strings_.get(recovery_preferences_limited_ ? L"RecoveryPreferencesLimited" : L"RecoverySaved")};
+        recovery_notice_ = recovery_preferences_limited_ ? std::wstring{strings_.get(L"RecoveryPreferencesLimited")} : std::wstring{};
     }
     if (final_lease.capability.acquired()) { final_lease.capability.release(); UpdateControls(); }
     recovery_saving_ = false; check_bool(SetEvent(recovery_idle_.get())); UpdateRecoveryControls();
     if (recovery_pending_ && !recovery_blocked_ && !shutting_down_ && !recovery_copying_ && !recovery_flushing_ && !recovery_timer_.IsRunning()) recovery_timer_.Start();
 }
+
 IAsyncOperation<bool> MainWindow::FlushRecoveryAsync() {
     if (!recovery_initialized_ || recovery_blocked_ || recovery_copying_) co_return false;
     if (recovery_timer_) recovery_timer_.Stop();
@@ -825,12 +1260,13 @@ IAsyncOperation<bool> MainWindow::FlushRecoveryAsync() {
     current->revision = 0;
     co_return cpn::serialize_workspace_session(*current) == *recovery_saved_content_;
 }
+
 fire_and_forget MainWindow::RetryRecovery_Click(IInspectable const&, RoutedEventArgs const&) {
     auto lifetime = get_strong();
     if (busy_ || shutting_down_ || recovery_saving_ || recovery_copying_ || !recovery_initialized_ || !recovery_retry_allowed_) co_return;
-    // Retrying never adopts an externally changed file's digest. A conflict must be resolved by a new recovery location.
     recovery_blocked_ = false; recovery_force_write_ = true; ScheduleRecoverySave(true);
 }
+
 fire_and_forget MainWindow::SaveRecoveryAs_Click(IInspectable const&, RoutedEventArgs const&) {
     auto lifetime = get_strong();
     if (busy_ || shutting_down_ || recovery_copying_ || !recovery_initialized_) co_return;
@@ -906,7 +1342,7 @@ fire_and_forget MainWindow::SaveRecoveryAs_Click(IInspectable const&, RoutedEven
                 recovery_blocked_ = true; recovery_retry_allowed_ = false;
                 throw hresult_error{E_FAIL, hstring{std::wstring{strings_.get(L"RecoveryPreserved")} + L" " + std::wstring{to_hstring(result.detail)}}};
             }
-            recovery_blocked_ = false; recovery_retry_allowed_ = true; recovery_notice_ = std::wstring{strings_.get(L"RecoverySaved")};
+            recovery_blocked_ = false; recovery_retry_allowed_ = true; recovery_notice_.clear();
             recovery_pending_ = true;
         }
     } catch (...) { error = CurrentError(); recovery_notice_ += L" " + std::wstring{error}; }
@@ -914,16 +1350,17 @@ fire_and_forget MainWindow::SaveRecoveryAs_Click(IInspectable const&, RoutedEven
     recovery_copying_ = false; SetBusy(false); ScheduleRecoverySave();
     if (!error.empty()) co_await ShowErrorAsync(L"RecoveryError", error);
 }
+
 IAsyncAction MainWindow::ShowErrorAsync(std::wstring_view action, hstring details) {
     ContentDialog dialog; dialog.XamlRoot(Root().XamlRoot()); dialog.Title(box_value(strings_.get(UiStrings::error_title)));
     dialog.Content(box_value(hstring{UiStrings::format(strings_.get(UiStrings::error_details), {std::wstring{strings_.get(action)}, std::wstring{details}})}));
     dialog.CloseButtonText(strings_.get(UiStrings::close_button));
     try { co_await ShowNativeDialogAsync(dialog); }
     catch (...) {
-        // A presentation failure keeps the original diagnostic visible without failing the event handler.
         Status().Text(hstring{UiStrings::format(strings_.get(UiStrings::error_details), {std::wstring{strings_.get(action)}, std::wstring{details}})});
     }
 }
+
 IAsyncOperation<ContentDialogResult> MainWindow::ShowNativeDialogAsync(ContentDialog dialog) {
     auto lifetime = get_strong();
     auto ticket = std::make_shared<DialogTicket>();
@@ -941,6 +1378,7 @@ IAsyncOperation<ContentDialogResult> MainWindow::ShowNativeDialogAsync(ContentDi
     if (failure) std::rethrow_exception(failure);
     co_return result;
 }
+
 IAsyncOperation<bool> MainWindow::ConfirmDiscardAsync(std::shared_ptr<Document> document) {
     if (document->adapter && !document->adapter->tracking_available()) throw hresult_error{E_FAIL, strings_.get(L"SnapshotTrackingFailed")};
     if (document->adapter && !document->adapter->committed_available()) throw hresult_error{E_PENDING, strings_.get(L"FinishCompositionBeforeSaving")};
@@ -948,7 +1386,7 @@ IAsyncOperation<bool> MainWindow::ConfirmDiscardAsync(std::shared_ptr<Document> 
     if (!document->adapter && document->initial_record && document->save_point &&
         cpn::sha256(document->initial_record->source_text) == document->save_point->source_digest) co_return true;
     ContentDialog dialog; dialog.XamlRoot(Root().XamlRoot()); dialog.Title(box_value(strings_.get(UiStrings::confirm_title)));
-    const auto name = document->path.empty() ? std::wstring{strings_.get(UiStrings::untitled)} : document->path.filename().wstring();
+    const auto name = ComputeTabTitle(document);
     dialog.Content(box_value(hstring{UiStrings::format(strings_.get(UiStrings::confirm_content), {name})}));
     dialog.PrimaryButtonText(strings_.get(UiStrings::save_button)); dialog.SecondaryButtonText(strings_.get(UiStrings::discard_button));
     dialog.CloseButtonText(strings_.get(UiStrings::cancel_button)); dialog.DefaultButton(ContentDialogButton::Primary);
@@ -959,6 +1397,7 @@ IAsyncOperation<bool> MainWindow::ConfirmDiscardAsync(std::shared_ptr<Document> 
     }
     co_return result == ContentDialogResult::Secondary;
 }
+
 bool MainWindow::IsReservedSourcePath(std::filesystem::path const& path) const {
     const auto candidate = cpn::windows::SourceStore::resolve(path);
     if (!source_lock_directory_.empty()) {
@@ -981,6 +1420,7 @@ bool MainWindow::IsReservedSourcePath(std::filesystem::path const& path) const {
     }
     return false;
 }
+
 std::optional<std::filesystem::path> MainWindow::PickSavePath(hstring label, std::filesystem::path filename, std::wstring extension) {
     com_ptr<IFileSaveDialog> picker;
     check_hresult(CoCreateInstance(__uuidof(FileSaveDialog), nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(picker.put())));
@@ -997,6 +1437,7 @@ std::optional<std::filesystem::path> MainWindow::PickSavePath(hstring label, std
     const auto release = std::unique_ptr<wchar_t, decltype(&CoTaskMemFree)>{raw, &CoTaskMemFree};
     return std::filesystem::path{raw};
 }
+
 IAsyncAction MainWindow::OpenDocumentAsync() {
     PersistentOperation operation{*this};
     FileOpenPicker picker; check_hresult(picker.as<IInitializeWithWindow>()->Initialize(WindowHandle()));
@@ -1013,6 +1454,7 @@ IAsyncAction MainWindow::OpenDocumentAsync() {
         throw hresult_error{E_PENDING, strings_.get(L"PersistentOperationUnavailable")};
     AddDocument(std::move(loaded.path), {std::move(loaded.utf8), loaded.utf8_bom}, std::move(loaded.disk_digest));
 }
+
 IAsyncOperation<bool> MainWindow::SaveDocumentAsync(std::shared_ptr<Document> document, bool save_as) {
     if (!document || !document->adapter) co_return false;
     PersistentOperation operation{*this};
@@ -1037,7 +1479,6 @@ IAsyncOperation<bool> MainWindow::SaveDocumentAsync(std::shared_ptr<Document> do
     apartment_context ui; std::exception_ptr failure; cpn::windows::SourceSaveResult result;
     co_await resume_background();
     try {
-        // The user's Save As selection authorizes this target; normal Save retains the prior disk token.
         if (different_target) expected = store->disk_digest(path);
         result = store->save(path, snapshot.utf8, bom, expected);
     } catch (...) { failure = std::current_exception(); }
@@ -1051,7 +1492,6 @@ IAsyncOperation<bool> MainWindow::SaveDocumentAsync(std::shared_ptr<Document> do
     document->notice = std::wstring{strings_.get(current ? L"Saved" : L"SavedEarlierRevision")};
     UpdateDocument(document);
     if (!admission_valid) {
-        // Keep an actual completed write's token/baseline observable rather than discarding its result.
         recovery_blocked_ = true; recovery_notice_ = std::wstring{strings_.get(L"PersistentOperationUnavailable")};
         throw hresult_error{E_FAIL, strings_.get(L"PersistentOperationUnavailable")};
     }
@@ -1059,6 +1499,18 @@ IAsyncOperation<bool> MainWindow::SaveDocumentAsync(std::shared_ptr<Document> do
         throw hresult_error{E_FAIL, hstring{std::wstring{strings_.get(L"SourceDurabilityUnknown")} + L" " + std::wstring{to_hstring(result.detail)}}};
     co_return true;
 }
+
+IAsyncAction MainWindow::SaveAllDocumentsAsync() {
+    auto snapshot_docs = documents_;
+    for (auto const& doc : snapshot_docs) {
+        if (doc->closed || !doc->adapter) continue;
+        if (doc->adapter->dirty()) {
+            Tabs().SelectedItem(doc->tab);
+            if (!(co_await SaveDocumentAsync(doc, false))) break;
+        }
+    }
+}
+
 IAsyncAction MainWindow::ExportSnapshotAsync(std::shared_ptr<Document> document) {
     if (!document || !document->adapter) co_return;
     if (!document->adapter->tracking_available()) throw hresult_error{E_FAIL, strings_.get(L"SnapshotTrackingFailed")};
@@ -1073,6 +1525,7 @@ IAsyncAction MainWindow::ExportSnapshotAsync(std::shared_ptr<Document> document)
     co_await resume_background(); try { FileStore::write_atomic(path, bytes); } catch (...) { failure = std::current_exception(); }
     co_await ui; if (failure) std::rethrow_exception(failure);
 }
+
 IAsyncAction MainWindow::ExecuteAsync(Command command) {
     auto lifetime = get_strong(); if (!initialized_ || busy_ || shutting_down_ || persistence_gate_.final_active()) co_return;
     if (!WorkspaceMutable() && command != Command::Export) co_return;
@@ -1083,16 +1536,21 @@ IAsyncAction MainWindow::ExecuteAsync(Command command) {
         case Command::Open: co_await OpenDocumentAsync(); break;
         case Command::Save: (void)(co_await SaveDocumentAsync(document, false)); break;
         case Command::SaveAs: (void)(co_await SaveDocumentAsync(document, true)); break;
+        case Command::SaveAll: co_await SaveAllDocumentsAsync(); break;
         case Command::Export: co_await ExportSnapshotAsync(document); break;
         }
     } catch (...) { error = CurrentError(); }
     if (!error.empty()) co_await ShowErrorAsync(command == Command::Open ? UiStrings::error_open : UiStrings::error_save, error);
     SetBusy(false);
 }
+
 void MainWindow::RemoveDocument(std::shared_ptr<Document> const& document) {
     if (!WorkspaceMutable()) throw hresult_error{E_PENDING, strings_.get(L"PersistentOperationUnavailable")};
+    auto doc_id = document->adapter ? to_string(hstring{document->adapter->document_id()})
+        : (document->initial_record ? document->initial_record->document_id : std::string{});
     CancelRun(document); document->closed = true; document->loaded.revoke();
     if (document->adapter) document->adapter->dispose(); document->adapter.reset();
+    CleanupDocumentArtifacts(doc_id);
     std::uint32_t index{};
     if (EditorDeck().Children().IndexOf(document->control, index)) EditorDeck().Children().RemoveAt(index);
     if (TestDeck().Children().IndexOf(document->test_view, index)) TestDeck().Children().RemoveAt(index);
@@ -1102,17 +1560,45 @@ void MainWindow::RemoveDocument(std::shared_ptr<Document> const& document) {
     if (documents_.empty()) AddDocument({}, {});
     else { if (!CurrentDocument()) Tabs().SelectedItem(documents_.front()->tab); SelectDocument(CurrentDocument()); }
 }
-fire_and_forget MainWindow::Tabs_CloseRequested(TabView const&, TabViewTabCloseRequestedEventArgs const& args) {
+
+IAsyncAction MainWindow::CloseDocumentTabAsync(std::shared_ptr<Document> document) {
+    auto lifetime = get_strong(); if (busy_ || shutting_down_ || !WorkspaceMutable() || !document) co_return;
+    SetBusy(true); hstring error;
+    try { if (co_await ConfirmDiscardAsync(document)) RemoveDocument(document); } catch (...) { error = CurrentError(); }
+    if (!error.empty()) co_await ShowErrorAsync(UiStrings::error_save, error);
+    SetBusy(false);
+}
+
+IAsyncAction MainWindow::CloseSavedTabsAsync() {
     auto lifetime = get_strong(); if (busy_ || shutting_down_ || !WorkspaceMutable()) co_return;
+    SetBusy(true); hstring error;
+    try {
+        auto copy = documents_;
+        for (auto const& doc : copy) {
+            if (doc->closed || !doc->adapter) continue;
+            if (doc->adapter->tracking_available() && doc->adapter->committed_available() && !doc->adapter->dirty()) {
+                RemoveDocument(doc);
+            }
+        }
+    } catch (...) { error = CurrentError(); }
+    if (!error.empty()) co_await ShowErrorAsync(UiStrings::error_save, error);
+    SetBusy(false);
+}
+
+fire_and_forget MainWindow::Tabs_CloseRequested(TabView const&, TabViewTabCloseRequestedEventArgs const& args) {
     std::shared_ptr<Document> document;
     for (auto const& value : documents_) if (value->tab == args.Tab()) { document = value; break; }
-    if (!document) co_return; SetBusy(true); hstring error;
-    try { if (co_await ConfirmDiscardAsync(document)) RemoveDocument(document); } catch (...) { error = CurrentError(); }
-    if (!error.empty()) co_await ShowErrorAsync(UiStrings::error_save, error); SetBusy(false);
+    if (document) co_await CloseDocumentTabAsync(std::move(document));
 }
+fire_and_forget MainWindow::CloseTab_Click(IInspectable const&, RoutedEventArgs const&) {
+    if (auto doc = CurrentDocument()) co_await CloseDocumentTabAsync(std::move(doc));
+}
+fire_and_forget MainWindow::CloseSavedTabs_Click(IInspectable const&, RoutedEventArgs const&) {
+    co_await CloseSavedTabsAsync();
+}
+
 fire_and_forget MainWindow::OnClosing(Microsoft::UI::Windowing::AppWindow const&, Microsoft::UI::Windowing::AppWindowClosingEventArgs const& args) {
     auto lifetime = get_strong(); if (closing_allowed_) co_return; args.Cancel(true);
-    // Pending Open/Save owns live documents. Its completion must run before another close attempt.
     if (busy_ || shutting_down_ || companion_operating_ || persistence_gate_.operation_active()) co_return;
     recovery_flushing_ = true;
     SetBusy(true); hstring error; bool proceed = false; bool workers_stopped = false;
@@ -1131,7 +1617,6 @@ fire_and_forget MainWindow::OnClosing(Microsoft::UI::Windowing::AppWindow const&
             try {
                 if (companion) companion->close();
                 if (runner) runner->close();
-                // Check persistence after the potentially slow runner shutdown, before closing the Session worker.
                 persisted = cpn::windows::RecoveryModel::load_response(worker->load(cpn::path_to_utf8(recovery_file)).get());
             } catch (...) { failure = std::current_exception(); }
             try { if (worker) worker->close(); } catch (...) { if (!failure) failure = std::current_exception(); }
@@ -1171,5 +1656,6 @@ fire_and_forget MainWindow::New_Click(IInspectable const&, RoutedEventArgs const
 fire_and_forget MainWindow::Open_Click(IInspectable const&, RoutedEventArgs const&) { co_await ExecuteAsync(Command::Open); }
 fire_and_forget MainWindow::Save_Click(IInspectable const&, RoutedEventArgs const&) { co_await ExecuteAsync(Command::Save); }
 fire_and_forget MainWindow::SaveAs_Click(IInspectable const&, RoutedEventArgs const&) { co_await ExecuteAsync(Command::SaveAs); }
+fire_and_forget MainWindow::SaveAll_Click(IInspectable const&, RoutedEventArgs const&) { co_await ExecuteAsync(Command::SaveAll); }
 fire_and_forget MainWindow::Export_Click(IInspectable const&, RoutedEventArgs const&) { co_await ExecuteAsync(Command::Export); }
 }
