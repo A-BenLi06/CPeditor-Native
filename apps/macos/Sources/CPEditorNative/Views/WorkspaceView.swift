@@ -35,8 +35,6 @@ struct WorkspaceView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            DocumentTabBar(workspace: workspace)
-
             if let notice = workspace.preferenceNotice {
                 NoticeBannerView(kind: .info, message: notice)
             }
@@ -53,6 +51,8 @@ struct WorkspaceView: View {
                     .disabled(workspace.isBusy)
                 }
             }
+
+            Divider()
 
             WorkspaceSplitContainer(
                 layoutMode: workspace.layoutMode,
@@ -228,6 +228,9 @@ struct WorkspaceView: View {
 
     private var leftEditorPane: some View {
         VStack(spacing: 0) {
+            DocumentTabBar(workspace: workspace)
+            Divider().opacity(0.45)
+
             ZStack {
                 NativeEditorDeck(
                     sessions: workspace.editorDeckSessions,
@@ -308,6 +311,28 @@ struct WorkspaceView: View {
     }
 }
 
+internal struct WorkspaceSplitMetrics: Equatable {
+    static let dividerWidth: CGFloat = 1
+
+    let totalWidth: CGFloat
+    let leftWidth: CGFloat
+    let rightWidth: CGFloat
+
+    init(totalWidth: CGFloat, splitRatio: CGFloat) {
+        let clampedTotal = totalWidth.isFinite ? max(0, totalWidth) : 0
+        let safeRatio = splitRatio.isFinite ? splitRatio : 0.57
+        let available = max(0, clampedTotal - Self.dividerWidth)
+        let minLeft = min(300, available * 0.45)
+        let minRight = min(320, available * 0.45)
+        let clampedLeft = min(max(available * safeRatio, minLeft), max(minLeft, available - minRight))
+        let computedRight = max(0, available - clampedLeft)
+
+        self.totalWidth = clampedTotal
+        self.leftWidth = clampedLeft
+        self.rightWidth = computedRight
+    }
+}
+
 private struct WorkspaceSplitContainer<Left: View, Right: View>: View {
     let layoutMode: WorkspaceLayoutMode
     @Binding var splitRatio: CGFloat
@@ -328,18 +353,21 @@ private struct WorkspaceSplitContainer<Left: View, Right: View>: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let totalWidth = max(0, proxy.size.width)
+            let metrics = WorkspaceSplitMetrics(totalWidth: proxy.size.width, splitRatio: splitRatio)
             let totalHeight = max(0, proxy.size.height)
-            let dividerWidth: CGFloat = 1
-            let available = max(0, totalWidth - dividerWidth)
+            let available = max(0, metrics.totalWidth - WorkspaceSplitMetrics.dividerWidth)
             let minLeft = min(300, available * 0.45)
             let minRight = min(320, available * 0.45)
-            let clampedLeft = min(max(available * splitRatio, minLeft), max(minLeft, available - minRight))
-            let rightWidth = max(0, available - clampedLeft)
+            let resolvedLeftWidth: CGFloat = switch layoutMode {
+            case .editorOnly: metrics.totalWidth
+            case .split: metrics.leftWidth
+            case .ioOnly: max(300, metrics.leftWidth)
+            }
 
             ZStack(alignment: .topLeading) {
                 left
-                    .frame(width: layoutMode == .editorOnly ? totalWidth : max(300, clampedLeft), height: totalHeight)
+                    .frame(width: resolvedLeftWidth, height: totalHeight)
+                    .clipped()
                     .opacity(layoutMode == .ioOnly ? 0 : 1)
                     .allowsHitTesting(layoutMode != .ioOnly)
                     .accessibilityHidden(layoutMode == .ioOnly)
@@ -348,7 +376,7 @@ private struct WorkspaceSplitContainer<Left: View, Right: View>: View {
                     HStack(spacing: 0) {
                         if layoutMode == .split {
                             Color.clear
-                                .frame(width: clampedLeft)
+                                .frame(width: metrics.leftWidth)
                                 .allowsHitTesting(false)
                             SplitResizeHandle(
                                 splitRatio: $splitRatio,
@@ -358,12 +386,12 @@ private struct WorkspaceSplitContainer<Left: View, Right: View>: View {
                             )
                         }
                         right
-                            .frame(width: layoutMode == .ioOnly ? totalWidth : rightWidth, height: totalHeight)
+                            .frame(width: layoutMode == .ioOnly ? metrics.totalWidth : metrics.rightWidth, height: totalHeight)
                             .background(Color(nsColor: .windowBackgroundColor))
                     }
                 }
             }
-            .frame(width: totalWidth, height: totalHeight, alignment: .topLeading)
+            .frame(width: metrics.totalWidth, height: totalHeight, alignment: .topLeading)
         }
     }
 }
@@ -421,10 +449,12 @@ private struct SplitResizeHandle: View {
 }
 
 internal enum DocumentTabBarMetrics {
-    static let barHeight: CGFloat = 34
-    static let tabCapsuleHeight: CGFloat = 24
-    static let horizontalInset: CGFloat = 8
-    static let minimumTabWidth: CGFloat = 140
+    static let barHeight: CGFloat = 38
+    static let tabCapsuleHeight: CGFloat = 28
+    static let horizontalInset: CGFloat = 6
+    static let minimumTabWidth: CGFloat = 120
+    static let dragHysteresis: CGFloat = 8
+    static let trackCoordinateSpace = "documentTabBarTrack"
 
     static func tabWidth(forViewportWidth viewportWidth: CGFloat, tabCount: Int) -> CGFloat {
         guard tabCount > 0, viewportWidth.isFinite else { return minimumTabWidth }
@@ -439,37 +469,94 @@ internal enum DocumentTabBarMetrics {
         return CGFloat(tabCount) * minimumTabWidth > usableWidth
     }
 
-    static func trackBackgroundColor(for colorScheme: ColorScheme) -> Color {
-        colorScheme == .dark
-            ? Color(red: 0.13, green: 0.13, blue: 0.145)
-            : Color(red: 0.915, green: 0.915, blue: 0.928)
+    static func clampedDragTranslation(
+        rawTranslationX: CGFloat,
+        startIndex: Int,
+        tabWidth: CGFloat,
+        tabCount: Int
+    ) -> CGFloat {
+        guard tabCount > 1,
+              startIndex >= 0,
+              startIndex < tabCount,
+              tabWidth > 0,
+              tabWidth.isFinite,
+              rawTranslationX.isFinite
+        else { return 0 }
+        let minOffset = -CGFloat(startIndex) * tabWidth
+        let maxOffset = CGFloat(tabCount - 1 - startIndex) * tabWidth
+        return min(max(rawTranslationX, minOffset), maxOffset)
     }
 
-    static func activeCapsuleBackgroundColor(for colorScheme: ColorScheme) -> Color {
-        colorScheme == .dark
-            ? Color(red: 0.285, green: 0.285, blue: 0.31)
-            : .white
+    static func draggedTabTargetIndex(
+        startIndex: Int,
+        translationX: CGFloat,
+        tabWidth: CGFloat,
+        tabCount: Int,
+        currentTargetIndex: Int,
+        hysteresis: CGFloat = dragHysteresis
+    ) -> Int {
+        guard tabCount > 1,
+              startIndex >= 0,
+              startIndex < tabCount,
+              tabWidth > 0,
+              tabWidth.isFinite
+        else { return 0 }
+        let clampedCurrent = min(max(0, currentTargetIndex), tabCount - 1)
+        let clampedX = clampedDragTranslation(
+            rawTranslationX: translationX,
+            startIndex: startIndex,
+            tabWidth: tabWidth,
+            tabCount: tabCount
+        )
+        let center = (CGFloat(startIndex) + 0.5) * tabWidth + clampedX
+        let rawIndex = min(max(0, Int(floor(center / tabWidth))), tabCount - 1)
+        let safeHysteresis = hysteresis.isFinite ? max(0, hysteresis) : 0
+        let band = min(safeHysteresis, tabWidth * 0.2)
+        if rawIndex > clampedCurrent {
+            return center >= CGFloat(clampedCurrent + 1) * tabWidth + band ? rawIndex : clampedCurrent
+        }
+        if rawIndex < clampedCurrent {
+            return center <= CGFloat(clampedCurrent) * tabWidth - band ? rawIndex : clampedCurrent
+        }
+        return clampedCurrent
     }
 
-    static func activeCapsuleBorderColor(for colorScheme: ColorScheme) -> Color {
-        colorScheme == .dark
-            ? Color.white.opacity(0.14)
-            : Color.black.opacity(0.08)
+    static func tabDisplacementOffset(
+        forIndex index: Int,
+        dragStartIndex: Int,
+        dragTargetIndex: Int,
+        tabWidth: CGFloat
+    ) -> CGFloat {
+        guard tabWidth > 0, tabWidth.isFinite, index != dragStartIndex else { return 0 }
+        if dragTargetIndex > dragStartIndex && index > dragStartIndex && index <= dragTargetIndex {
+            return -tabWidth
+        }
+        if dragTargetIndex < dragStartIndex && index >= dragTargetIndex && index < dragStartIndex {
+            return tabWidth
+        }
+        return 0
     }
 
     static func hoverCapsuleBackgroundColor(for colorScheme: ColorScheme) -> Color {
         colorScheme == .dark
-            ? Color.white.opacity(0.075)
-            : Color.black.opacity(0.05)
+            ? Color.white.opacity(0.08)
+            : Color.black.opacity(0.055)
+    }
+
+    static func trackOverlayColor(for colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark
+            ? Color.black.opacity(0.14)
+            : Color.black.opacity(0.035)
     }
 
     static func shouldShowTrailingSeparator(
         at index: Int,
         documentIDs: [RawIdentifier],
         selectedID: RawIdentifier?,
-        hoveredID: RawIdentifier?
+        hoveredID: RawIdentifier?,
+        draggingID: RawIdentifier? = nil
     ) -> Bool {
-        guard index >= 0, index + 1 < documentIDs.count else { return false }
+        guard draggingID == nil, index >= 0, index + 1 < documentIDs.count else { return false }
         let current = documentIDs[index]
         let next = documentIDs[index + 1]
         return current != selectedID
@@ -477,114 +564,256 @@ internal enum DocumentTabBarMetrics {
             && current != hoveredID
             && next != hoveredID
     }
+
+    static func showsCompactVerdictText(label: String, tabWidth: CGFloat) -> Bool {
+        label.count <= 4 || tabWidth >= 170
+    }
 }
 
 private struct DocumentTabBar: View {
     @Environment(\.colorScheme) private var colorScheme
     @Bindable var workspace: Workspace
     @State private var hoveredTabID: RawIdentifier?
+    @State private var draggingTabID: RawIdentifier?
+    @State private var dragStartIndex: Int?
+    @State private var dragTargetIndex: Int?
+    @State private var dragTranslation: CGFloat = 0
+    @State private var isSettlingDrag = false
+    @State private var pendingCommit: (id: RawIdentifier, startIndex: Int, destinationIndex: Int)?
 
     private var canMutateWorkspace: Bool {
         !workspace.isBusy && workspace.persistentChangesAllowed
+    }
+
+    private var canReorderTabs: Bool {
+        canMutateWorkspace && workspace.sessions.count > 1
+    }
+
+    private func resetDragState() {
+        draggingTabID = nil
+        dragStartIndex = nil
+        dragTargetIndex = nil
+        dragTranslation = 0
+        isSettlingDrag = false
+        pendingCommit = nil
+    }
+
+    private func commitPendingDragIfNeeded() {
+        guard let pending = pendingCommit else {
+            resetDragState()
+            return
+        }
+        pendingCommit = nil
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            if pending.destinationIndex != pending.startIndex {
+                workspace.moveDocument(id: pending.id, toIndex: pending.destinationIndex)
+            }
+            draggingTabID = nil
+            dragStartIndex = nil
+            dragTargetIndex = nil
+            dragTranslation = 0
+            isSettlingDrag = false
+        }
+    }
+
+    private func handleDragChanged(
+        id: RawIdentifier,
+        rawTranslationX: CGFloat,
+        tabWidth: CGFloat,
+        scrollable: Bool,
+        proxy: ScrollViewProxy
+    ) {
+        guard canReorderTabs else { return }
+        if isSettlingDrag {
+            commitPendingDragIfNeeded()
+        }
+        if draggingTabID == nil {
+            guard let liveIndex = workspace.sessions.firstIndex(where: { $0.document.id == id }) else { return }
+            draggingTabID = id
+            dragStartIndex = liveIndex
+            dragTargetIndex = liveIndex
+            workspace.selection = id
+        }
+        guard draggingTabID == id, let start = dragStartIndex else { return }
+        let tabCount = workspace.sessions.count
+        let clamped = DocumentTabBarMetrics.clampedDragTranslation(
+            rawTranslationX: rawTranslationX,
+            startIndex: start,
+            tabWidth: tabWidth,
+            tabCount: tabCount
+        )
+        dragTranslation = clamped
+        let nextTarget = DocumentTabBarMetrics.draggedTabTargetIndex(
+            startIndex: start,
+            translationX: clamped,
+            tabWidth: tabWidth,
+            tabCount: tabCount,
+            currentTargetIndex: dragTargetIndex ?? start
+        )
+        if nextTarget != dragTargetIndex {
+            dragTargetIndex = nextTarget
+            if scrollable, workspace.sessions.indices.contains(nextTarget) {
+                let targetSlotID = workspace.sessions[nextTarget].document.id
+                withAnimation(.easeOut(duration: 0.15)) {
+                    proxy.scrollTo(targetSlotID)
+                }
+            }
+        }
+    }
+
+    private func handleDragEnded(id: RawIdentifier, tabWidth: CGFloat) {
+        guard draggingTabID == id, let start = dragStartIndex else { return }
+        let finalIndex = dragTargetIndex ?? start
+        let finalTranslation = CGFloat(finalIndex - start) * tabWidth
+        isSettlingDrag = true
+        pendingCommit = (id: id, startIndex: start, destinationIndex: finalIndex)
+        withAnimation(.snappy(duration: 0.18, extraBounce: 0)) {
+            dragTranslation = finalTranslation
+        } completion: {
+            guard pendingCommit?.id == id else { return }
+            commitPendingDragIfNeeded()
+        }
     }
 
     var body: some View {
         let documentIDs = workspace.sessions.map(\.document.id)
         let separatorColor = Color(nsColor: .separatorColor).opacity(colorScheme == .dark ? 0.72 : 0.6)
 
-        HStack(spacing: 0) {
-            GeometryReader { geometry in
-                let viewportWidth = geometry.size.width
-                let tabCount = workspace.sessions.count
-                let resolvedTabWidth = DocumentTabBarMetrics.tabWidth(
-                    forViewportWidth: viewportWidth,
-                    tabCount: tabCount
-                )
-                let scrollable = DocumentTabBarMetrics.needsHorizontalScroll(
-                    forViewportWidth: viewportWidth,
-                    tabCount: tabCount
-                )
+        GlassEffectContainer(spacing: 4) {
+            HStack(spacing: 0) {
+                GeometryReader { geometry in
+                    let viewportWidth = geometry.size.width
+                    let tabCount = workspace.sessions.count
+                    let resolvedTabWidth = DocumentTabBarMetrics.tabWidth(
+                        forViewportWidth: viewportWidth,
+                        tabCount: tabCount
+                    )
+                    let scrollable = DocumentTabBarMetrics.needsHorizontalScroll(
+                        forViewportWidth: viewportWidth,
+                        tabCount: tabCount
+                    )
 
-                ScrollViewReader { proxy in
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 0) {
-                            ForEach(Array(workspace.sessions.enumerated()), id: \.element.document.id) { index, session in
-                                let id = session.document.id
-                                let showsSeparator = DocumentTabBarMetrics.shouldShowTrailingSeparator(
-                                    at: index,
-                                    documentIDs: documentIDs,
-                                    selectedID: workspace.selection,
-                                    hoveredID: hoveredTabID
-                                )
-
-                                DocumentTabItem(
-                                    workspace: workspace,
-                                    session: session,
-                                    tabWidth: resolvedTabWidth,
-                                    isSelected: workspace.selection == id,
-                                    isHovered: hoveredTabID == id,
-                                    showsTrailingSeparator: showsSeparator,
-                                    separatorColor: separatorColor,
-                                    onHoverChanged: { hovering in
-                                        if hovering {
-                                            hoveredTabID = id
-                                        } else if hoveredTabID == id {
-                                            hoveredTabID = nil
-                                        }
+                    ScrollViewReader { proxy in
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 0) {
+                                ForEach(Array(workspace.sessions.enumerated()), id: \.element.document.id) { index, session in
+                                    let id = session.document.id
+                                    let isDragging = draggingTabID == id
+                                    let showsSeparator = DocumentTabBarMetrics.shouldShowTrailingSeparator(
+                                        at: index,
+                                        documentIDs: documentIDs,
+                                        selectedID: workspace.selection,
+                                        hoveredID: hoveredTabID,
+                                        draggingID: draggingTabID
+                                    )
+                                    let offsetX: CGFloat = if isDragging {
+                                        dragTranslation
+                                    } else if let start = dragStartIndex, let target = dragTargetIndex {
+                                        DocumentTabBarMetrics.tabDisplacementOffset(
+                                            forIndex: index,
+                                            dragStartIndex: start,
+                                            dragTargetIndex: target,
+                                            tabWidth: resolvedTabWidth
+                                        )
+                                    } else {
+                                        0
                                     }
-                                )
-                                .id(id)
+
+                                    DocumentTabItem(
+                                        workspace: workspace,
+                                        session: session,
+                                        tabWidth: resolvedTabWidth,
+                                        isSelected: workspace.selection == id,
+                                        isHovered: hoveredTabID == id,
+                                        isDragging: isDragging,
+                                        canReorder: canReorderTabs,
+                                        showsTrailingSeparator: showsSeparator,
+                                        separatorColor: separatorColor,
+                                        onHoverChanged: { hovering in
+                                            if hovering {
+                                                hoveredTabID = id
+                                            } else if hoveredTabID == id {
+                                                hoveredTabID = nil
+                                            }
+                                        },
+                                        onDragChanged: { translationX in
+                                            handleDragChanged(
+                                                id: id,
+                                                rawTranslationX: translationX,
+                                                tabWidth: resolvedTabWidth,
+                                                scrollable: scrollable,
+                                                proxy: proxy
+                                            )
+                                        },
+                                        onDragEnded: {
+                                            handleDragEnded(id: id, tabWidth: resolvedTabWidth)
+                                        }
+                                    )
+                                    .offset(x: offsetX)
+                                    .zIndex(isDragging ? 10 : (workspace.selection == id ? 2 : 0))
+                                    .animation(
+                                        isDragging ? nil : .snappy(duration: 0.22, extraBounce: 0),
+                                        value: dragTargetIndex
+                                    )
+                                    .id(id)
+                                }
                             }
+                            .coordinateSpace(name: DocumentTabBarMetrics.trackCoordinateSpace)
+                            .padding(.horizontal, DocumentTabBarMetrics.horizontalInset)
+                            .frame(
+                                minWidth: viewportWidth,
+                                minHeight: DocumentTabBarMetrics.barHeight,
+                                maxHeight: DocumentTabBarMetrics.barHeight,
+                                alignment: .leading
+                            )
+                            .accessibilityAddTraits(.isTabBar)
                         }
-                        .padding(.horizontal, DocumentTabBarMetrics.horizontalInset)
-                        .frame(
-                            minWidth: viewportWidth,
-                            minHeight: DocumentTabBarMetrics.barHeight,
-                            maxHeight: DocumentTabBarMetrics.barHeight,
-                            alignment: .leading
-                        )
-                    }
-                    .scrollDisabled(!scrollable)
-                    .onChange(of: workspace.selection) { _, newID in
-                        guard let newID else { return }
-                        withAnimation(.easeOut(duration: 0.15)) {
-                            proxy.scrollTo(newID)
+                        .scrollDisabled(!scrollable)
+                        .onChange(of: workspace.selection) { _, newID in
+                            guard let newID else { return }
+                            withAnimation(.easeOut(duration: 0.15)) {
+                                proxy.scrollTo(newID)
+                            }
                         }
                     }
                 }
-            }
-            .frame(height: DocumentTabBarMetrics.barHeight)
+                .frame(height: DocumentTabBarMetrics.barHeight)
 
-            Rectangle()
-                .fill(separatorColor)
-                .frame(width: 1, height: 15)
-                .padding(.horizontal, 6)
+                Rectangle()
+                    .fill(separatorColor)
+                    .frame(width: 1, height: 15)
+                    .padding(.horizontal, 6)
 
-            PanelIconButton(
-                systemImage: "plus",
-                helpKey: "help_new_document",
-                accessibilityKey: "new_file",
-                size: 24,
-                font: .system(size: 12, weight: .semibold),
-                isDisabled: !canMutateWorkspace
-            ) {
-                workspace.createDocument()
+                PanelIconButton(
+                    systemImage: "plus",
+                    helpKey: "help_new_document",
+                    accessibilityKey: "new_file",
+                    size: 24,
+                    font: .system(size: 12, weight: .semibold),
+                    isDisabled: !canMutateWorkspace
+                ) {
+                    workspace.createDocument()
+                }
+                .padding(.trailing, 8)
             }
-            .padding(.trailing, 8)
         }
         .frame(height: DocumentTabBarMetrics.barHeight)
         .background {
-            DocumentTabBarMetrics.trackBackgroundColor(for: colorScheme)
-                .overlay(alignment: .top) {
-                    Rectangle()
-                        .fill(separatorColor)
-                        .frame(height: 1)
-                }
-                .overlay(alignment: .bottom) {
-                    Rectangle()
-                        .fill(separatorColor)
-                        .frame(height: 1)
-                }
+            Rectangle()
+                .fill(.bar)
+                .overlay(DocumentTabBarMetrics.trackOverlayColor(for: colorScheme))
+        }
+        .onChange(of: documentIDs) { _, updatedIDs in
+            if let draggingTabID, !updatedIDs.contains(draggingTabID), pendingCommit == nil {
+                resetDragState()
+            }
+        }
+        .onChange(of: canMutateWorkspace) { _, allowed in
+            if !allowed, draggingTabID != nil {
+                resetDragState()
+            }
         }
         .disabled(workspace.isLoading || workspace.isClosing || workspace.closingDocumentID != nil || workspace.decidingCloseID != nil)
     }
@@ -597,9 +826,13 @@ private struct DocumentTabItem: View {
     let tabWidth: CGFloat
     let isSelected: Bool
     let isHovered: Bool
+    let isDragging: Bool
+    let canReorder: Bool
     let showsTrailingSeparator: Bool
     let separatorColor: Color
     let onHoverChanged: (Bool) -> Void
+    let onDragChanged: (CGFloat) -> Void
+    let onDragEnded: () -> Void
 
     private var iconName: String {
         if workspace.companionProblemTitle(for: session) != nil {
@@ -623,12 +856,67 @@ private struct DocumentTabItem: View {
         !workspace.isBusy && workspace.persistentChangesAllowed
     }
 
-    var body: some View {
-        let capsuleShape = Capsule(style: .continuous)
+    private var showsCloseButton: Bool {
+        isHovered && !isDragging && canCloseTab
+    }
 
+    private var showsReadOnlyLock: Bool {
+        !showsCloseButton && !session.canMutatePersistence
+    }
+
+    private var showsLeadingAccessory: Bool {
+        showsCloseButton || showsReadOnlyLock
+    }
+
+    private var showsDirtyDot: Bool {
+        session.document.isDirty
+    }
+
+    private var centerCluster: some View {
         HStack(spacing: 4) {
-            ZStack {
-                if isHovered && canCloseTab {
+            Image(systemName: iconName)
+                .font(.caption.weight(isSelected ? .semibold : .regular))
+                .foregroundStyle(isSelected ? Color.accentColor : Color.secondary.opacity(0.85))
+                .fixedSize()
+
+            Text(workspace.title(for: session))
+                .font(.callout.weight(isSelected ? .semibold : .regular))
+                .foregroundStyle(isSelected ? Color.primary : Color.secondary.opacity(0.85))
+                .lineLimit(1)
+
+            if let state = runState, !state.isTerminal {
+                ProgressView()
+                    .controlSize(.mini)
+                    .fixedSize()
+            } else if let result = runResult {
+                let descriptor = VerdictDescriptor.summary(for: result)
+                let resultIsCurrent = workspace.runner.resultIsCurrent(for: session)
+                if DocumentTabBarMetrics.showsCompactVerdictText(label: descriptor.label, tabWidth: tabWidth) {
+                    VerdictBadge(
+                        descriptor: descriptor,
+                        compact: true,
+                        dimmed: !resultIsCurrent
+                    )
+                    .fixedSize()
+                    .help(resultIsCurrent ? "" : L10n.string("run_result_outdated_help"))
+                } else {
+                    Image(systemName: descriptor.symbol)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(descriptor.tone.color.opacity(resultIsCurrent ? 0.9 : 0.45))
+                        .fixedSize()
+                        .help(resultIsCurrent ? descriptor.label : "\(descriptor.label) — \(L10n.string("run_result_outdated_help"))")
+                }
+            }
+        }
+    }
+
+    private var tabRowContent: some View {
+        centerCluster
+            .padding(.leading, showsLeadingAccessory ? 22 : 8)
+            .padding(.trailing, showsDirtyDot ? 16 : 8)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            .overlay(alignment: .leading) {
+                if showsCloseButton {
                     Button {
                         Task { await workspace.closeDocument(session) }
                     } label: {
@@ -639,92 +927,65 @@ private struct DocumentTabItem: View {
                     }
                     .buttonStyle(.borderless)
                     .help(L10n.string("close_tab"))
-                } else if !session.canMutatePersistence {
+                    .padding(.leading, 5)
+                } else if showsReadOnlyLock {
                     Image(systemName: "lock.fill")
                         .font(.system(size: 9))
                         .foregroundStyle(.secondary)
                         .accessibilityLabel(L10n.string("readonly_status"))
+                        .padding(.leading, 6)
                 }
             }
-            .frame(width: 18, height: 18)
-
-            Spacer(minLength: 4)
-
-            HStack(spacing: 5) {
-                Image(systemName: iconName)
-                    .font(.caption.weight(isSelected ? .semibold : .regular))
-                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary.opacity(0.85))
-
-                Text(workspace.title(for: session))
-                    .font(.callout.weight(isSelected ? .semibold : .regular))
-                    .foregroundStyle(isSelected ? Color.primary : Color.secondary.opacity(0.85))
-                    .lineLimit(1)
-
-                if let state = runState, !state.isTerminal {
-                    ProgressView()
-                        .controlSize(.mini)
-                } else if let result = runResult {
-                    let resultIsCurrent = workspace.runner.resultIsCurrent(for: session)
-                    VerdictBadge(
-                        descriptor: .summary(for: result),
-                        compact: true,
-                        dimmed: !resultIsCurrent
-                    )
-                    .help(resultIsCurrent ? "" : L10n.string("run_result_outdated_help"))
-                }
-            }
-
-            Spacer(minLength: 4)
-
-            ZStack {
-                if session.document.isDirty {
+            .overlay(alignment: .trailing) {
+                if showsDirtyDot {
                     Circle()
                         .fill(Color.orange)
                         .frame(width: 6, height: 6)
                         .accessibilityLabel(L10n.string("unsaved_changes"))
+                        .padding(.trailing, 7)
                 }
             }
-            .frame(width: 18, height: 18)
+    }
+
+    var body: some View {
+        let dragGesture = DragGesture(
+            minimumDistance: 6,
+            coordinateSpace: .named(DocumentTabBarMetrics.trackCoordinateSpace)
+        )
+        .onChanged { value in
+            onDragChanged(value.translation.width)
         }
-        .padding(.horizontal, 8)
-        .frame(width: tabWidth, height: DocumentTabBarMetrics.tabCapsuleHeight)
-        .background {
-            if isSelected {
-                capsuleShape
-                    .fill(DocumentTabBarMetrics.activeCapsuleBackgroundColor(for: colorScheme))
-                    .overlay {
-                        capsuleShape
-                            .strokeBorder(
-                                DocumentTabBarMetrics.activeCapsuleBorderColor(for: colorScheme),
-                                lineWidth: 1
-                            )
-                    }
-                    .shadow(
-                        color: colorScheme == .light ? Color.black.opacity(0.10) : .clear,
-                        radius: 2.5,
-                        x: 0,
-                        y: 0.5
-                    )
-                    .padding(.horizontal, 2)
-            } else if isHovered {
-                capsuleShape
-                    .fill(DocumentTabBarMetrics.hoverCapsuleBackgroundColor(for: colorScheme))
-                    .padding(.horizontal, 2)
+        .onEnded { _ in
+            onDragEnded()
+        }
+
+        tabRowContent
+            .frame(width: max(0, tabWidth - 4), height: DocumentTabBarMetrics.tabCapsuleHeight)
+            .background {
+                if !isSelected && isHovered {
+                    Capsule(style: .continuous)
+                        .fill(DocumentTabBarMetrics.hoverCapsuleBackgroundColor(for: colorScheme))
+                }
             }
-        }
-        .overlay(alignment: .trailing) {
-            if showsTrailingSeparator {
-                Rectangle()
-                    .fill(separatorColor)
-                    .frame(width: 1, height: 13)
+            .glassEffect(
+                isSelected ? .regular.interactive() : .identity,
+                in: Capsule(style: .continuous)
+            )
+            .frame(width: tabWidth, height: DocumentTabBarMetrics.barHeight)
+            .overlay(alignment: .trailing) {
+                if showsTrailingSeparator {
+                    Rectangle()
+                        .fill(separatorColor)
+                        .frame(width: 1, height: 13)
+                }
             }
-        }
-        .contentShape(Rectangle())
-        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : [.isButton])
-        .onTapGesture {
-            workspace.selection = session.document.id
-        }
-        .onHover(perform: onHoverChanged)
+            .contentShape(Rectangle())
+            .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : [.isButton])
+            .onTapGesture {
+                workspace.selection = session.document.id
+            }
+            .onHover(perform: onHoverChanged)
+            .gesture(dragGesture, isEnabled: canReorder)
         .contextMenu {
             Button(L10n.string("save")) {
                 Task { await workspace.save(session) }

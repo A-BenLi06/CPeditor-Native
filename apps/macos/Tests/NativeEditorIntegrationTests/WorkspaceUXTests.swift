@@ -272,37 +272,50 @@ import NativeCoreBridge
     }
 
     @Test func tabBarMetricsAndSeparatorVisibility() {
-        #expect(DocumentTabBarMetrics.barHeight == 34)
-        #expect(DocumentTabBarMetrics.tabCapsuleHeight == 24)
-        #expect(DocumentTabBarMetrics.horizontalInset == 8)
-        #expect(DocumentTabBarMetrics.minimumTabWidth == 140)
+        #expect(DocumentTabBarMetrics.barHeight == 38)
+        #expect(DocumentTabBarMetrics.tabCapsuleHeight == 28)
+        #expect(DocumentTabBarMetrics.horizontalInset == 6)
+        #expect(DocumentTabBarMetrics.minimumTabWidth == 120)
+        #expect(DocumentTabBarMetrics.dragHysteresis == 8)
         #expect(DocumentTabBarMetrics.tabCapsuleHeight < DocumentTabBarMetrics.barHeight)
 
         // 无标签或无效宽度时回退到最小宽度且不触发横向滚动。
-        #expect(DocumentTabBarMetrics.tabWidth(forViewportWidth: 800, tabCount: 0) == 140)
-        #expect(DocumentTabBarMetrics.tabWidth(forViewportWidth: .nan, tabCount: 3) == 140)
+        #expect(DocumentTabBarMetrics.tabWidth(forViewportWidth: 800, tabCount: 0) == 120)
+        #expect(DocumentTabBarMetrics.tabWidth(forViewportWidth: .nan, tabCount: 3) == 120)
         #expect(!DocumentTabBarMetrics.needsHorizontalScroll(forViewportWidth: 800, tabCount: 0))
         #expect(!DocumentTabBarMetrics.needsHorizontalScroll(forViewportWidth: .infinity, tabCount: 3))
 
-        // 等宽自适应分配：viewport 916 -> usable 900；1 个标签占满 900，3 个标签各 300，5 个标签各 180。
-        #expect(DocumentTabBarMetrics.tabWidth(forViewportWidth: 916, tabCount: 1) == 900)
-        #expect(DocumentTabBarMetrics.tabWidth(forViewportWidth: 916, tabCount: 3) == 300)
-        #expect(DocumentTabBarMetrics.tabWidth(forViewportWidth: 916, tabCount: 5) == 180)
-        #expect(!DocumentTabBarMetrics.needsHorizontalScroll(forViewportWidth: 916, tabCount: 1))
-        #expect(!DocumentTabBarMetrics.needsHorizontalScroll(forViewportWidth: 916, tabCount: 3))
-        #expect(!DocumentTabBarMetrics.needsHorizontalScroll(forViewportWidth: 916, tabCount: 5))
+        // 宽屏等宽自适应：viewport 912 -> usable 900；1 个占 900，3 个各 300，5 个各 180。
+        #expect(DocumentTabBarMetrics.tabWidth(forViewportWidth: 912, tabCount: 1) == 900)
+        #expect(DocumentTabBarMetrics.tabWidth(forViewportWidth: 912, tabCount: 3) == 300)
+        #expect(DocumentTabBarMetrics.tabWidth(forViewportWidth: 912, tabCount: 5) == 180)
+        #expect(!DocumentTabBarMetrics.needsHorizontalScroll(forViewportWidth: 912, tabCount: 1))
+        #expect(!DocumentTabBarMetrics.needsHorizontalScroll(forViewportWidth: 912, tabCount: 3))
+        #expect(!DocumentTabBarMetrics.needsHorizontalScroll(forViewportWidth: 912, tabCount: 5))
 
-        // 溢出与临界宽度：3 个标签在 usable = 420 (viewport = 436) 时恰好平铺，少 1 pt 即触发滚动并钳制为 140。
-        #expect(DocumentTabBarMetrics.tabWidth(forViewportWidth: 436, tabCount: 3) == 140)
-        #expect(!DocumentTabBarMetrics.needsHorizontalScroll(forViewportWidth: 436, tabCount: 3))
-        #expect(DocumentTabBarMetrics.tabWidth(forViewportWidth: 435, tabCount: 3) == 140)
-        #expect(DocumentTabBarMetrics.needsHorizontalScroll(forViewportWidth: 435, tabCount: 3))
+        // 分屏默认宽度与挤压窄宽边界：usable 660 (viewport 672) 时 5 个各 132 不滚动；usable 360 (viewport 372) 时 3 个恰好 120 不滚动，少 1 pt 即触发滚动。
+        #expect(DocumentTabBarMetrics.tabWidth(forViewportWidth: 672, tabCount: 5) == 132)
+        #expect(!DocumentTabBarMetrics.needsHorizontalScroll(forViewportWidth: 672, tabCount: 5))
+        #expect(DocumentTabBarMetrics.tabWidth(forViewportWidth: 372, tabCount: 3) == 120)
+        #expect(!DocumentTabBarMetrics.needsHorizontalScroll(forViewportWidth: 372, tabCount: 3))
+        #expect(DocumentTabBarMetrics.tabWidth(forViewportWidth: 371, tabCount: 3) == 120)
+        #expect(DocumentTabBarMetrics.needsHorizontalScroll(forViewportWidth: 371, tabCount: 3))
 
-        // 10 个标签在 916 宽度下受 minimumTabWidth=140 保护并启用滚动；窄窗 5 个标签同理。
-        #expect(DocumentTabBarMetrics.tabWidth(forViewportWidth: 916, tabCount: 10) == 140)
-        #expect(DocumentTabBarMetrics.needsHorizontalScroll(forViewportWidth: 916, tabCount: 10))
-        #expect(DocumentTabBarMetrics.tabWidth(forViewportWidth: 680, tabCount: 5) == 140)
-        #expect(DocumentTabBarMetrics.needsHorizontalScroll(forViewportWidth: 680, tabCount: 5))
+        // Test 展开挤压与多标签溢出时钳制在 120 并开启横向滚动。
+        #expect(DocumentTabBarMetrics.tabWidth(forViewportWidth: 400, tabCount: 5) == 120)
+        #expect(DocumentTabBarMetrics.needsHorizontalScroll(forViewportWidth: 400, tabCount: 5))
+        #expect(DocumentTabBarMetrics.tabWidth(forViewportWidth: 912, tabCount: 10) == 120)
+        #expect(DocumentTabBarMetrics.needsHorizontalScroll(forViewportWidth: 912, tabCount: 10))
+
+        // 分栏挤占度量：右侧展开／缩窄时左右列严格守恒（left + divider + right == total）。
+        let expandedSplit = WorkspaceSplitMetrics(totalWidth: 1240, splitRatio: 0.57)
+        let squeezedSplit = WorkspaceSplitMetrics(totalWidth: 1240, splitRatio: 0.30)
+        let compactSplit = WorkspaceSplitMetrics(totalWidth: 780, splitRatio: 0.50)
+        #expect(expandedSplit.leftWidth + WorkspaceSplitMetrics.dividerWidth + expandedSplit.rightWidth == 1240)
+        #expect(squeezedSplit.leftWidth + WorkspaceSplitMetrics.dividerWidth + squeezedSplit.rightWidth == 1240)
+        #expect(compactSplit.leftWidth + WorkspaceSplitMetrics.dividerWidth + compactSplit.rightWidth == 780)
+        #expect(squeezedSplit.leftWidth < expandedSplit.leftWidth)
+        #expect(squeezedSplit.rightWidth > expandedSplit.rightWidth)
 
         let ids = [RawIdentifier("doc-1"), RawIdentifier("doc-2"), RawIdentifier("doc-3"), RawIdentifier("doc-4")]
         // 选中 doc-2 时，doc-1|doc-2 与 doc-2|doc-3 隐藏分隔线，仅 doc-3|doc-4 显示。
@@ -312,14 +325,83 @@ import NativeCoreBridge
         #expect(!DocumentTabBarMetrics.shouldShowTrailingSeparator(at: 3, documentIDs: ids, selectedID: ids[1], hoveredID: nil))
         #expect(!DocumentTabBarMetrics.shouldShowTrailingSeparator(at: -1, documentIDs: ids, selectedID: ids[1], hoveredID: nil))
 
-        // 悬停相邻标签时同样隐藏分隔线。
+        // 悬停相邻标签时隐藏分隔线；拖动重排期间隐藏全部内部分隔线。
         #expect(!DocumentTabBarMetrics.shouldShowTrailingSeparator(at: 2, documentIDs: ids, selectedID: ids[0], hoveredID: ids[3]))
         #expect(!DocumentTabBarMetrics.shouldShowTrailingSeparator(at: 2, documentIDs: ids, selectedID: ids[0], hoveredID: ids[2]))
         #expect(DocumentTabBarMetrics.shouldShowTrailingSeparator(at: 1, documentIDs: ids, selectedID: ids[0], hoveredID: ids[3]))
+        #expect(!DocumentTabBarMetrics.shouldShowTrailingSeparator(at: 1, documentIDs: ids, selectedID: ids[0], hoveredID: nil, draggingID: ids[0]))
 
-        #expect(DocumentTabBarMetrics.activeCapsuleBackgroundColor(for: .light) == .white)
-        #expect(DocumentTabBarMetrics.activeCapsuleBackgroundColor(for: .dark) != DocumentTabBarMetrics.trackBackgroundColor(for: .dark))
-        #expect(DocumentTabBarMetrics.trackBackgroundColor(for: .light) != DocumentTabBarMetrics.trackBackgroundColor(for: .dark))
+        // 拖动排序位移钳制、迟滞防抖与邻接让位偏移。
+        #expect(DocumentTabBarMetrics.clampedDragTranslation(rawTranslationX: -50, startIndex: 0, tabWidth: 120, tabCount: 4) == 0)
+        #expect(DocumentTabBarMetrics.clampedDragTranslation(rawTranslationX: 500, startIndex: 1, tabWidth: 120, tabCount: 4) == 240)
+        // center = 60 + 65 = 125（刚过 120 边界但未跨过 +8 pt 迟滞），仍保持在 0；到达 128（translation 68）进入 1。
+        #expect(DocumentTabBarMetrics.draggedTabTargetIndex(startIndex: 0, translationX: 65, tabWidth: 120, tabCount: 4, currentTargetIndex: 0) == 0)
+        #expect(DocumentTabBarMetrics.draggedTabTargetIndex(startIndex: 0, translationX: 68, tabWidth: 120, tabCount: 4, currentTargetIndex: 0) == 1)
+        // 回退同样受迟滞保护：center = 115（translation 55）保持在 1；center = 112（translation 52）退回 0。
+        #expect(DocumentTabBarMetrics.draggedTabTargetIndex(startIndex: 0, translationX: 55, tabWidth: 120, tabCount: 4, currentTargetIndex: 1) == 1)
+        #expect(DocumentTabBarMetrics.draggedTabTargetIndex(startIndex: 0, translationX: 52, tabWidth: 120, tabCount: 4, currentTargetIndex: 1) == 0)
+
+        #expect(DocumentTabBarMetrics.tabDisplacementOffset(forIndex: 0, dragStartIndex: 0, dragTargetIndex: 2, tabWidth: 120) == 0)
+        #expect(DocumentTabBarMetrics.tabDisplacementOffset(forIndex: 1, dragStartIndex: 0, dragTargetIndex: 2, tabWidth: 120) == -120)
+        #expect(DocumentTabBarMetrics.tabDisplacementOffset(forIndex: 2, dragStartIndex: 0, dragTargetIndex: 2, tabWidth: 120) == -120)
+        #expect(DocumentTabBarMetrics.tabDisplacementOffset(forIndex: 3, dragStartIndex: 0, dragTargetIndex: 2, tabWidth: 120) == 0)
+        #expect(DocumentTabBarMetrics.tabDisplacementOffset(forIndex: 0, dragStartIndex: 2, dragTargetIndex: 0, tabWidth: 120) == 120)
+        #expect(DocumentTabBarMetrics.tabDisplacementOffset(forIndex: 1, dragStartIndex: 2, dragTargetIndex: 0, tabWidth: 120) == 120)
+        #expect(DocumentTabBarMetrics.tabDisplacementOffset(forIndex: 2, dragStartIndex: 2, dragTargetIndex: 0, tabWidth: 120) == 0)
+
+        // 窄标签下仅保留短判题徽章全文（AC/WA/CE），较长标签在 >=170 pt 时才展示全文。
+        #expect(DocumentTabBarMetrics.showsCompactVerdictText(label: "AC", tabWidth: 120))
+        #expect(DocumentTabBarMetrics.showsCompactVerdictText(label: "WA", tabWidth: 120))
+        #expect(DocumentTabBarMetrics.showsCompactVerdictText(label: "CE", tabWidth: 120))
+        #expect(!DocumentTabBarMetrics.showsCompactVerdictText(label: "Unchecked", tabWidth: 130))
+        #expect(DocumentTabBarMetrics.showsCompactVerdictText(label: "Unchecked", tabWidth: 170))
+    }
+
+    @Test func reorderingTabsPersistsOrderAndPreservesEditorsAndSelection() async throws {
+        _ = NSApplication.shared
+        let directory = try folder()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let recoveryFile = directory.appendingPathComponent("reorder-recovery.json")
+        let workspace = Workspace(arguments: ["--editor", "sttextview"], recoveryURL: recoveryFile)
+        await workspace.bootstrap()
+
+        let docA = try #require(workspace.activeSession)
+        let docB = try #require(workspace.createDocument(editor: .stTextView))
+        let docC = try #require(workspace.createDocument(editor: .stTextView))
+        workspace.selection = docB.document.id
+
+        let stViewB = try #require(docB.stView)
+        docB.container.history.groupsByEvent = false
+        docB.container.history.beginUndoGrouping()
+        stViewB.insertText("// keep undoable buffer", replacementRange: NSRange(location: 0, length: 0))
+        docB.container.history.endUndoGrouping()
+        await Task.yield()
+        docB.capture()
+
+        #expect(workspace.moveDocument(id: docA.document.id, toIndex: 2))
+        #expect(workspace.sessions.map(\.document.id) == [docB.document.id, docC.document.id, docA.document.id])
+        #expect(workspace.selection == docB.document.id)
+        #expect(docB.document.text == "// keep undoable buffer")
+        #expect(docB.container.history.canUndo)
+
+        #expect(!workspace.moveDocument(id: docA.document.id, toIndex: 99))
+        #expect(!workspace.moveDocument(id: RawIdentifier("missing"), toIndex: 1))
+        #expect(workspace.moveDocument(id: docC.document.id, toIndex: -5))
+        #expect(workspace.sessions.map(\.document.id) == [docC.document.id, docB.document.id, docA.document.id])
+        #expect(!workspace.moveDocument(id: docC.document.id, toIndex: 0))
+
+        #expect(await workspace.recovery?.flush() == true)
+        await dispose(workspace)
+
+        let reopened = Workspace(recoveryURL: recoveryFile)
+        await reopened.bootstrap()
+        #expect(reopened.sessions.map(\.document.id) == [docC.document.id, docB.document.id, docA.document.id])
+        #expect(reopened.selection == docB.document.id)
+
+        reopened.persistence.freezeRestored()
+        #expect(!reopened.moveDocument(id: docA.document.id, toIndex: 0))
+        #expect(reopened.sessions.map(\.document.id) == [docC.document.id, docB.document.id, docA.document.id])
+        await dispose(reopened)
     }
 
     @Test func renderLayoutAuditSnapshotsWhenRequested() async throws {

@@ -328,6 +328,19 @@ struct WorkspaceConfiguration: Decodable {
         }
     }
 
+    @discardableResult
+    func moveDocument(id: RawIdentifier, toIndex destinationIndex: Int) -> Bool {
+        guard !isBusy, persistence.canMutate else { return false }
+        guard let sourceIndex = sessions.firstIndex(where: { $0.document.id == id }) else { return false }
+        let clampedDestination = min(max(0, destinationIndex), sessions.count - 1)
+        guard sourceIndex != clampedDestination else { return false }
+        var updated = sessions
+        let moved = updated.remove(at: sourceIndex)
+        updated.insert(moved, at: clampedDestination)
+        sessions = updated
+        return true
+    }
+
     func revealInFinder(_ session: NativeEditorSession? = nil) {
         guard let url = (session ?? activeSession)?.document.url else { return }
         NSWorkspace.shared.activateFileViewerSelecting([url])

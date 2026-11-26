@@ -664,3 +664,18 @@ Core 规则区分空输入、缺少预期输出与预期输出为空、checker �
   - 全量执行 `CPN_REQUIRE_GNU_CPP=1 ./script/test_macos.sh`：**18 个测试套共 112 项测试全部通过**（32.517s）。
   - 通过 `CPN_LAYOUT_AUDIT_DIR="$PWD/out/macos/xcode-tabbar-audit" ./script/test_macos.sh --filter WorkspaceUXTests/renderLayoutAuditSnapshotsWhenRequested` 导出布局快照（`7.702s`），人工核验 `01-cev-split-ac-wa-light.png`、`02-cev-split-ac-wa-dark.png`、`03-st-split-ce-dark.png`、`04-cev-compact-780x520.png`、`05-cev-io-only-light.png`、`11-window-toolbar-light.png` 与 `12-window-toolbar-dark.png`，确认等宽胶囊铺满轨道、明暗对比突出、`WA`/`CE`/`Unchecked` 徽章清晰可读且无分隔线冗余或文本裁剪异常。
   - 检查本机已有 `out/macos/CPEditorNative.app`（PID 85132）处于运行中并保留未打扰；在隔离路径 `out/macos/xcode-tabbar-audit/CPEditorNative.app` 完成 Debug 增量编译、Mach-O 校验（`verify_macos_build.py` 核对 `15` 个 Core 对象、`SDK 27.2`、`macOS 26.0`）、`plutil -lint`、`codesign --force --sign -` 与 `codesign --verify --strict`，随后以 `--recovery-file out/macos/xcode-tabbar-audit/workspace.json` 启动（`PID 90388`、`AppLifecycle verify`）并在 3 秒后执行 `AppLifecycle quit` 干净退出。
+
+## 2026-11-26T21:41:34+08:00 — 采用 macOS 原生 Liquid Glass 标签栏并支持拖动排序与分栏挤压
+
+- **设计思路与主要改动**：
+  - **标签拖动排序与持久化（`Workspace.swift`）**：在 `Workspace` 新增 `moveDocument(id:toIndex:)`，非忙且允许持久化变更时对 `sessions` 原子重排（触发 `RecoveryController` 观察保存顺序），同时保持 `NativeEditorDeck` 已挂载编辑器容器、撤销历史与当前 `selection` 完整不变。
+  - **分栏左侧限定与测试面板对齐（`WorkspaceView.swift`、`RunPanelView.swift`）**：将 `DocumentTabBar(workspace:)` 从顶层外置通栏移入 `leftEditorPane` 顶部、统一顶部全宽 `Divider()` 并新增 `WorkspaceSplitMetrics`（在 `WorkspaceSplitContainer` 内为左侧应用 `.clipped()`）；同步将 `RunPanelView.headerBar` 高度固定为 `DocumentTabBarMetrics.barHeight`（`38 pt`），确保标签栏绝不延伸到右侧 `Test Cases` 区域上方，且展开或拖宽 `Test Cases` 时左右分栏底线像素级对齐、标签栏随左侧空间实时挤压（仅测试输出模式完全随左侧隐藏）。
+  - **macOS 26/27 原生 Liquid Glass 材质与平滑重排（`WorkspaceView.swift`）**：
+    - 在 `DocumentTabBar` 内采用 `GlassEffectContainer(spacing: 4)` 与 `.accessibilityAddTraits(.isTabBar)`，选中标签胶囊使用 `.glassEffect(.regular.interactive(), in: Capsule(style: .continuous))` 取代静态填充描边；轨高 `38 pt`、胶囊高 `28 pt`、水平内边距 `6 pt`、最小标签宽 `120 pt`、迟滞防抖 `8 pt`。
+    - 在 `DocumentTabBar` 通过 `clampedDragTranslation`、`draggedTabTargetIndex`（迟滞区间保护）与 `tabDisplacementOffset` 实现水平 `DragGesture(minimumDistance: 6, coordinateSpace: .named(trackCoordinateSpace))` 跟随与邻接标签让位动效，并在动画 settle 回调内以无动画事务一次性提交 `moveDocument`。
+    - 根据首次实机截图反馈优化 `DocumentTabItem` 内部空间：回收未悬停／未修改时的空占位，改用居中 `centerCluster` 搭配仅按需出现的 `.overlay(alignment: .leading/.trailing)` 关闭 `×`／只读锁与橙色未保存圆点，并通过 `showsCompactVerdictText` 与 `.fixedSize()` 保护 `AC`/`WA`/`CE` 短徽章在挤压窄宽度下不退化为 `(...)` 省略号，较长状态（如 `Unchecked`）在 `< 170 pt` 窄标签下以对应状态图标+悬浮提示呈现。
+- **测试与验证**：
+  - 实际执行主机为 `macOS` arm64、`Xcode 27.2 Build version 27B52`、`SDK 27.2`、`macOS 目标 26.0`（本次未在 Windows 主机执行或验证，`references/cpeditor` 子模块保持干净未修改）。
+  - 更新 `WorkspaceUXTests.swift` 中 `tabBarMetricsAndSeparatorVisibility()`（新增 `WorkspaceSplitMetrics` 守恒、拖动位移钳制、迟滞边界、让位偏移、拖动期分隔线隐藏与 `showsCompactVerdictText` 断言），并新增 `reorderingTabsPersistsOrderAndPreservesEditorsAndSelection()` 测试重排后顺序、编辑缓冲区／撤销栈、`selection` 保留、恢复持久化重开与冻结保护。
+  - 全量执行 `CPN_REQUIRE_GNU_CPP=1 ./script/test_macos.sh`：**18 个测试套共 113 项测试全部通过**（`32.967s`）。
+  - 重新导出 `out/macos/native-tabbar-audit/` 快照（`8.263s`），人工核验 `01-cev-split-ac-wa-light.png`、`04-cev-compact-780x520.png`、`05-cev-io-only-light.png`、`11-window-toolbar-light.png`、`12-window-toolbar-dark.png`；并执行 `./script/build_and_run.sh --verify` 编译、校验（`15` 个 Core 对象、`plutil -lint`、`codesign`）与启动真实 [CPEditorNative.app](file:///Volumes/WD-Blue-SN580-1TB/本地文件/CPEditor-Native/out/macos/CPEditorNative.app)（`PID 11351`），通过 `screencapture` 实机窗口截图 `out/macos/native-tabbar-audit/live-window.png` 核验系统 Liquid Glass 胶囊质感、5 标签 `Untitled`–`Untitled 5` 无截断显示及分栏边界对齐效果（保留运行供用户交互测试）。

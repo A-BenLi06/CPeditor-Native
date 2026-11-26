@@ -243,7 +243,7 @@ struct RunPanelView: View {
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 7)
+        .frame(height: DocumentTabBarMetrics.barHeight)
     }
 
     private var checkerModeSummary: String {
