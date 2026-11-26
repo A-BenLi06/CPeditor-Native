@@ -272,13 +272,37 @@ import NativeCoreBridge
     }
 
     @Test func tabBarMetricsAndSeparatorVisibility() {
-        #expect(DocumentTabBarMetrics.barHeight == 36)
-        #expect(DocumentTabBarMetrics.topInset == 5)
-        #expect(DocumentTabBarMetrics.activeTabHeight == 31)
-        #expect(DocumentTabBarMetrics.topInset + DocumentTabBarMetrics.activeTabHeight == DocumentTabBarMetrics.barHeight)
-        #expect(DocumentTabBarMetrics.tabCornerRadius == 7)
-        #expect(DocumentTabBarMetrics.topAccentHeight == 2)
-        #expect(DocumentTabBarMetrics.minimumTabWidth == 96)
+        #expect(DocumentTabBarMetrics.barHeight == 34)
+        #expect(DocumentTabBarMetrics.tabCapsuleHeight == 24)
+        #expect(DocumentTabBarMetrics.horizontalInset == 8)
+        #expect(DocumentTabBarMetrics.minimumTabWidth == 140)
+        #expect(DocumentTabBarMetrics.tabCapsuleHeight < DocumentTabBarMetrics.barHeight)
+
+        // 无标签或无效宽度时回退到最小宽度且不触发横向滚动。
+        #expect(DocumentTabBarMetrics.tabWidth(forViewportWidth: 800, tabCount: 0) == 140)
+        #expect(DocumentTabBarMetrics.tabWidth(forViewportWidth: .nan, tabCount: 3) == 140)
+        #expect(!DocumentTabBarMetrics.needsHorizontalScroll(forViewportWidth: 800, tabCount: 0))
+        #expect(!DocumentTabBarMetrics.needsHorizontalScroll(forViewportWidth: .infinity, tabCount: 3))
+
+        // 等宽自适应分配：viewport 916 -> usable 900；1 个标签占满 900，3 个标签各 300，5 个标签各 180。
+        #expect(DocumentTabBarMetrics.tabWidth(forViewportWidth: 916, tabCount: 1) == 900)
+        #expect(DocumentTabBarMetrics.tabWidth(forViewportWidth: 916, tabCount: 3) == 300)
+        #expect(DocumentTabBarMetrics.tabWidth(forViewportWidth: 916, tabCount: 5) == 180)
+        #expect(!DocumentTabBarMetrics.needsHorizontalScroll(forViewportWidth: 916, tabCount: 1))
+        #expect(!DocumentTabBarMetrics.needsHorizontalScroll(forViewportWidth: 916, tabCount: 3))
+        #expect(!DocumentTabBarMetrics.needsHorizontalScroll(forViewportWidth: 916, tabCount: 5))
+
+        // 溢出与临界宽度：3 个标签在 usable = 420 (viewport = 436) 时恰好平铺，少 1 pt 即触发滚动并钳制为 140。
+        #expect(DocumentTabBarMetrics.tabWidth(forViewportWidth: 436, tabCount: 3) == 140)
+        #expect(!DocumentTabBarMetrics.needsHorizontalScroll(forViewportWidth: 436, tabCount: 3))
+        #expect(DocumentTabBarMetrics.tabWidth(forViewportWidth: 435, tabCount: 3) == 140)
+        #expect(DocumentTabBarMetrics.needsHorizontalScroll(forViewportWidth: 435, tabCount: 3))
+
+        // 10 个标签在 916 宽度下受 minimumTabWidth=140 保护并启用滚动；窄窗 5 个标签同理。
+        #expect(DocumentTabBarMetrics.tabWidth(forViewportWidth: 916, tabCount: 10) == 140)
+        #expect(DocumentTabBarMetrics.needsHorizontalScroll(forViewportWidth: 916, tabCount: 10))
+        #expect(DocumentTabBarMetrics.tabWidth(forViewportWidth: 680, tabCount: 5) == 140)
+        #expect(DocumentTabBarMetrics.needsHorizontalScroll(forViewportWidth: 680, tabCount: 5))
 
         let ids = [RawIdentifier("doc-1"), RawIdentifier("doc-2"), RawIdentifier("doc-3"), RawIdentifier("doc-4")]
         // 选中 doc-2 时，doc-1|doc-2 与 doc-2|doc-3 隐藏分隔线，仅 doc-3|doc-4 显示。
@@ -293,14 +317,9 @@ import NativeCoreBridge
         #expect(!DocumentTabBarMetrics.shouldShowTrailingSeparator(at: 2, documentIDs: ids, selectedID: ids[0], hoveredID: ids[2]))
         #expect(DocumentTabBarMetrics.shouldShowTrailingSeparator(at: 1, documentIDs: ids, selectedID: ids[0], hoveredID: ids[3]))
 
-        for scheme in [ColorScheme.light, .dark] {
-            let expectedCanvas = CodeEditorSurface.canvasBackgroundColor(for: scheme)
-            #expect(DocumentTabBarMetrics.activeTabSurfaceColor(editorKind: .codeEditorView, layoutMode: .split, colorScheme: scheme) == expectedCanvas)
-            #expect(DocumentTabBarMetrics.activeTabSurfaceColor(editorKind: .codeEditorView, layoutMode: .editorOnly, colorScheme: scheme) == expectedCanvas)
-            #expect(DocumentTabBarMetrics.activeTabSurfaceColor(editorKind: nil, layoutMode: .split, colorScheme: scheme) == expectedCanvas)
-            #expect(DocumentTabBarMetrics.activeTabSurfaceColor(editorKind: .stTextView, layoutMode: .ioOnly, colorScheme: scheme) == expectedCanvas)
-            #expect(DocumentTabBarMetrics.activeTabSurfaceColor(editorKind: .stTextView, layoutMode: .split, colorScheme: scheme) == Color(nsColor: .textBackgroundColor))
-        }
+        #expect(DocumentTabBarMetrics.activeCapsuleBackgroundColor(for: .light) == .white)
+        #expect(DocumentTabBarMetrics.activeCapsuleBackgroundColor(for: .dark) != DocumentTabBarMetrics.trackBackgroundColor(for: .dark))
+        #expect(DocumentTabBarMetrics.trackBackgroundColor(for: .light) != DocumentTabBarMetrics.trackBackgroundColor(for: .dark))
     }
 
     @Test func renderLayoutAuditSnapshotsWhenRequested() async throws {

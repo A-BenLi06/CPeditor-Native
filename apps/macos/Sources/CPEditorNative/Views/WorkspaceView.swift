@@ -421,28 +421,46 @@ private struct SplitResizeHandle: View {
 }
 
 internal enum DocumentTabBarMetrics {
-    static let barHeight: CGFloat = 36
-    static let topInset: CGFloat = 5
-    static let activeTabHeight: CGFloat = 31
-    static let tabCornerRadius: CGFloat = 7
-    static let topAccentHeight: CGFloat = 2
-    static let minimumTabWidth: CGFloat = 96
+    static let barHeight: CGFloat = 34
+    static let tabCapsuleHeight: CGFloat = 24
+    static let horizontalInset: CGFloat = 8
+    static let minimumTabWidth: CGFloat = 140
 
-    @MainActor static func activeTabSurfaceColor(
-        editorKind: EditorKind?,
-        layoutMode: WorkspaceLayoutMode,
-        colorScheme: ColorScheme
-    ) -> Color {
-        if layoutMode != .ioOnly && editorKind == .stTextView {
-            return Color(nsColor: .textBackgroundColor)
-        }
-        return CodeEditorSurface.canvasBackgroundColor(for: colorScheme)
+    static func tabWidth(forViewportWidth viewportWidth: CGFloat, tabCount: Int) -> CGFloat {
+        guard tabCount > 0, viewportWidth.isFinite else { return minimumTabWidth }
+        let usableWidth = max(0, viewportWidth - 2 * horizontalInset)
+        let evenWidth = floor(usableWidth / CGFloat(tabCount))
+        return max(minimumTabWidth, evenWidth)
+    }
+
+    static func needsHorizontalScroll(forViewportWidth viewportWidth: CGFloat, tabCount: Int) -> Bool {
+        guard tabCount > 0, viewportWidth.isFinite else { return false }
+        let usableWidth = max(0, viewportWidth - 2 * horizontalInset)
+        return CGFloat(tabCount) * minimumTabWidth > usableWidth
     }
 
     static func trackBackgroundColor(for colorScheme: ColorScheme) -> Color {
         colorScheme == .dark
-            ? Color(red: 0.11, green: 0.11, blue: 0.125)
-            : Color(red: 0.925, green: 0.925, blue: 0.935)
+            ? Color(red: 0.13, green: 0.13, blue: 0.145)
+            : Color(red: 0.915, green: 0.915, blue: 0.928)
+    }
+
+    static func activeCapsuleBackgroundColor(for colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark
+            ? Color(red: 0.285, green: 0.285, blue: 0.31)
+            : .white
+    }
+
+    static func activeCapsuleBorderColor(for colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark
+            ? Color.white.opacity(0.14)
+            : Color.black.opacity(0.08)
+    }
+
+    static func hoverCapsuleBackgroundColor(for colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark
+            ? Color.white.opacity(0.075)
+            : Color.black.opacity(0.05)
     }
 
     static func shouldShowTrailingSeparator(
@@ -461,33 +479,6 @@ internal enum DocumentTabBarMetrics {
     }
 }
 
-private struct OpenBottomTabBorderShape: Shape {
-    let cornerRadius: CGFloat
-
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        let clampedRadius = min(cornerRadius, rect.width / 2, max(0, rect.height - 1))
-        let leftX = rect.minX + 0.5
-        let rightX = rect.maxX - 0.5
-        let topY = rect.minY + 0.5
-        let bottomY = rect.maxY
-
-        path.move(to: CGPoint(x: leftX, y: bottomY))
-        path.addArc(
-            tangent1End: CGPoint(x: leftX, y: topY),
-            tangent2End: CGPoint(x: rect.midX, y: topY),
-            radius: clampedRadius
-        )
-        path.addArc(
-            tangent1End: CGPoint(x: rightX, y: topY),
-            tangent2End: CGPoint(x: rightX, y: bottomY),
-            radius: clampedRadius
-        )
-        path.addLine(to: CGPoint(x: rightX, y: bottomY))
-        return path
-    }
-}
-
 private struct DocumentTabBar: View {
     @Environment(\.colorScheme) private var colorScheme
     @Bindable var workspace: Workspace
@@ -497,68 +488,76 @@ private struct DocumentTabBar: View {
         !workspace.isBusy && workspace.persistentChangesAllowed
     }
 
-    private var activeTabSurfaceColor: Color {
-        DocumentTabBarMetrics.activeTabSurfaceColor(
-            editorKind: workspace.activeSession?.document.editorKind,
-            layoutMode: workspace.layoutMode,
-            colorScheme: colorScheme
-        )
-    }
-
     var body: some View {
         let documentIDs = workspace.sessions.map(\.document.id)
-        let separatorColor = Color(nsColor: .separatorColor).opacity(colorScheme == .dark ? 0.75 : 0.65)
+        let separatorColor = Color(nsColor: .separatorColor).opacity(colorScheme == .dark ? 0.72 : 0.6)
 
         HStack(spacing: 0) {
-            ScrollViewReader { proxy in
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 0) {
-                        ForEach(Array(workspace.sessions.enumerated()), id: \.element.document.id) { index, session in
-                            let id = session.document.id
-                            DocumentTabItem(
-                                workspace: workspace,
-                                session: session,
-                                isSelected: workspace.selection == id,
-                                isHovered: hoveredTabID == id,
-                                activeSurfaceColor: activeTabSurfaceColor,
-                                onHoverChanged: { hovering in
-                                    if hovering {
-                                        hoveredTabID = id
-                                    } else if hoveredTabID == id {
-                                        hoveredTabID = nil
-                                    }
-                                }
-                            )
-                            .id(id)
+            GeometryReader { geometry in
+                let viewportWidth = geometry.size.width
+                let tabCount = workspace.sessions.count
+                let resolvedTabWidth = DocumentTabBarMetrics.tabWidth(
+                    forViewportWidth: viewportWidth,
+                    tabCount: tabCount
+                )
+                let scrollable = DocumentTabBarMetrics.needsHorizontalScroll(
+                    forViewportWidth: viewportWidth,
+                    tabCount: tabCount
+                )
 
-                            if DocumentTabBarMetrics.shouldShowTrailingSeparator(
-                                at: index,
-                                documentIDs: documentIDs,
-                                selectedID: workspace.selection,
-                                hoveredID: hoveredTabID
-                            ) {
-                                Rectangle()
-                                    .fill(separatorColor)
-                                    .frame(width: 1, height: 14)
-                                    .padding(.top, DocumentTabBarMetrics.topInset)
-                                    .padding(.bottom, 1)
+                ScrollViewReader { proxy in
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 0) {
+                            ForEach(Array(workspace.sessions.enumerated()), id: \.element.document.id) { index, session in
+                                let id = session.document.id
+                                let showsSeparator = DocumentTabBarMetrics.shouldShowTrailingSeparator(
+                                    at: index,
+                                    documentIDs: documentIDs,
+                                    selectedID: workspace.selection,
+                                    hoveredID: hoveredTabID
+                                )
+
+                                DocumentTabItem(
+                                    workspace: workspace,
+                                    session: session,
+                                    tabWidth: resolvedTabWidth,
+                                    isSelected: workspace.selection == id,
+                                    isHovered: hoveredTabID == id,
+                                    showsTrailingSeparator: showsSeparator,
+                                    separatorColor: separatorColor,
+                                    onHoverChanged: { hovering in
+                                        if hovering {
+                                            hoveredTabID = id
+                                        } else if hoveredTabID == id {
+                                            hoveredTabID = nil
+                                        }
+                                    }
+                                )
+                                .id(id)
                             }
                         }
+                        .padding(.horizontal, DocumentTabBarMetrics.horizontalInset)
+                        .frame(
+                            minWidth: viewportWidth,
+                            minHeight: DocumentTabBarMetrics.barHeight,
+                            maxHeight: DocumentTabBarMetrics.barHeight,
+                            alignment: .leading
+                        )
                     }
-                    .padding(.horizontal, 8)
-                    .frame(height: DocumentTabBarMetrics.barHeight, alignment: .bottom)
-                }
-                .onChange(of: workspace.selection) { _, newID in
-                    guard let newID else { return }
-                    withAnimation(.easeOut(duration: 0.15)) {
-                        proxy.scrollTo(newID)
+                    .scrollDisabled(!scrollable)
+                    .onChange(of: workspace.selection) { _, newID in
+                        guard let newID else { return }
+                        withAnimation(.easeOut(duration: 0.15)) {
+                            proxy.scrollTo(newID)
+                        }
                     }
                 }
             }
+            .frame(height: DocumentTabBarMetrics.barHeight)
 
             Rectangle()
                 .fill(separatorColor)
-                .frame(width: 1, height: 16)
+                .frame(width: 1, height: 15)
                 .padding(.horizontal, 6)
 
             PanelIconButton(
@@ -595,9 +594,11 @@ private struct DocumentTabItem: View {
     @Environment(\.colorScheme) private var colorScheme
     let workspace: Workspace
     let session: NativeEditorSession
+    let tabWidth: CGFloat
     let isSelected: Bool
     let isHovered: Bool
-    let activeSurfaceColor: Color
+    let showsTrailingSeparator: Bool
+    let separatorColor: Color
     let onHoverChanged: (Bool) -> Void
 
     private var iconName: String {
@@ -622,44 +623,10 @@ private struct DocumentTabItem: View {
         !workspace.isBusy && workspace.persistentChangesAllowed
     }
 
-    private var activeShape: UnevenRoundedRectangle {
-        UnevenRoundedRectangle(
-            topLeadingRadius: DocumentTabBarMetrics.tabCornerRadius,
-            bottomLeadingRadius: 0,
-            bottomTrailingRadius: 0,
-            topTrailingRadius: DocumentTabBarMetrics.tabCornerRadius,
-            style: .continuous
-        )
-    }
-
     var body: some View {
-        let bodyHeight = isSelected
-            ? DocumentTabBarMetrics.activeTabHeight
-            : DocumentTabBarMetrics.activeTabHeight - 1
+        let capsuleShape = Capsule(style: .continuous)
 
-        HStack(spacing: 6) {
-            Image(systemName: iconName)
-                .font(.caption.weight(isSelected ? .semibold : .regular))
-                .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
-
-            Text(workspace.title(for: session))
-                .font(.callout.weight(isSelected ? .semibold : .regular))
-                .foregroundStyle(isSelected ? Color.primary : Color.secondary)
-                .lineLimit(1)
-
-            if let state = runState, !state.isTerminal {
-                ProgressView()
-                    .controlSize(.mini)
-            } else if let result = runResult {
-                let resultIsCurrent = workspace.runner.resultIsCurrent(for: session)
-                VerdictBadge(
-                    descriptor: .summary(for: result),
-                    compact: true,
-                    dimmed: !resultIsCurrent
-                )
-                .help(resultIsCurrent ? "" : L10n.string("run_result_outdated_help"))
-            }
-
+        HStack(spacing: 4) {
             ZStack {
                 if isHovered && canCloseTab {
                     Button {
@@ -668,7 +635,7 @@ private struct DocumentTabItem: View {
                         Image(systemName: "xmark")
                             .font(.system(size: 9, weight: .bold))
                             .foregroundStyle(.secondary)
-                            .panelIconHoverChrome(size: 16, cornerRadius: 4, enabled: canCloseTab)
+                            .panelIconHoverChrome(size: 16, cornerRadius: 8, enabled: canCloseTab)
                     }
                     .buttonStyle(.borderless)
                     .help(L10n.string("close_tab"))
@@ -677,51 +644,81 @@ private struct DocumentTabItem: View {
                         .font(.system(size: 9))
                         .foregroundStyle(.secondary)
                         .accessibilityLabel(L10n.string("readonly_status"))
-                } else if session.document.isDirty {
+                }
+            }
+            .frame(width: 18, height: 18)
+
+            Spacer(minLength: 4)
+
+            HStack(spacing: 5) {
+                Image(systemName: iconName)
+                    .font(.caption.weight(isSelected ? .semibold : .regular))
+                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary.opacity(0.85))
+
+                Text(workspace.title(for: session))
+                    .font(.callout.weight(isSelected ? .semibold : .regular))
+                    .foregroundStyle(isSelected ? Color.primary : Color.secondary.opacity(0.85))
+                    .lineLimit(1)
+
+                if let state = runState, !state.isTerminal {
+                    ProgressView()
+                        .controlSize(.mini)
+                } else if let result = runResult {
+                    let resultIsCurrent = workspace.runner.resultIsCurrent(for: session)
+                    VerdictBadge(
+                        descriptor: .summary(for: result),
+                        compact: true,
+                        dimmed: !resultIsCurrent
+                    )
+                    .help(resultIsCurrent ? "" : L10n.string("run_result_outdated_help"))
+                }
+            }
+
+            Spacer(minLength: 4)
+
+            ZStack {
+                if session.document.isDirty {
                     Circle()
                         .fill(Color.orange)
                         .frame(width: 6, height: 6)
                         .accessibilityLabel(L10n.string("unsaved_changes"))
                 }
             }
-            .frame(width: 16, height: 16)
+            .frame(width: 18, height: 18)
         }
-        .padding(.horizontal, 10)
-        .frame(minWidth: DocumentTabBarMetrics.minimumTabWidth, minHeight: bodyHeight, maxHeight: bodyHeight)
+        .padding(.horizontal, 8)
+        .frame(width: tabWidth, height: DocumentTabBarMetrics.tabCapsuleHeight)
         .background {
             if isSelected {
-                activeShape
-                    .fill(activeSurfaceColor)
-                    .overlay(alignment: .top) {
-                        Rectangle()
-                            .fill(Color.accentColor)
-                            .frame(height: DocumentTabBarMetrics.topAccentHeight)
+                capsuleShape
+                    .fill(DocumentTabBarMetrics.activeCapsuleBackgroundColor(for: colorScheme))
+                    .overlay {
+                        capsuleShape
+                            .strokeBorder(
+                                DocumentTabBarMetrics.activeCapsuleBorderColor(for: colorScheme),
+                                lineWidth: 1
+                            )
                     }
-                    .clipShape(activeShape)
                     .shadow(
-                        color: colorScheme == .light ? Color.black.opacity(0.06) : .clear,
-                        radius: 2,
+                        color: colorScheme == .light ? Color.black.opacity(0.10) : .clear,
+                        radius: 2.5,
                         x: 0,
-                        y: -1
+                        y: 0.5
                     )
-            } else if isHovered {
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(Color.primary.opacity(colorScheme == .dark ? 0.08 : 0.06))
                     .padding(.horizontal, 2)
-                    .padding(.vertical, 2)
+            } else if isHovered {
+                capsuleShape
+                    .fill(DocumentTabBarMetrics.hoverCapsuleBackgroundColor(for: colorScheme))
+                    .padding(.horizontal, 2)
             }
         }
-        .overlay {
-            if isSelected {
-                OpenBottomTabBorderShape(cornerRadius: DocumentTabBarMetrics.tabCornerRadius)
-                    .stroke(
-                        Color(nsColor: .separatorColor).opacity(colorScheme == .dark ? 0.9 : 0.8),
-                        lineWidth: 1
-                    )
+        .overlay(alignment: .trailing) {
+            if showsTrailingSeparator {
+                Rectangle()
+                    .fill(separatorColor)
+                    .frame(width: 1, height: 13)
             }
         }
-        .padding(.top, DocumentTabBarMetrics.topInset)
-        .padding(.bottom, isSelected ? 0 : 1)
         .contentShape(Rectangle())
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : [.isButton])
         .onTapGesture {
