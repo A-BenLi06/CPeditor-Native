@@ -6,7 +6,7 @@
   "artifact_name": "solution.exe",
   "build": {
     "executable": "cl.exe",
-    "arguments": ["/nologo", "/std:c++20", "/EHsc", "/O2", "/I", "${source_dir}", "${source}", "/Fe:${artifact}"]
+    "arguments": ["/nologo", "/std:c++20", "/EHsc", "/utf-8", "/O2", "/I", "${source_dir}", "${source}", "/Fe:${artifact}"]
   },
   "run": { "executable": "${artifact}", "arguments": [] },
   "build_limits": { "wall_timeout_ms": 30000 },

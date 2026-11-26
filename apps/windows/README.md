@@ -87,17 +87,20 @@ runner 回调在协调线程调用。接收者必须将 owned packet 派发到 U
 | Microsoft.Web.WebView2 | 1.0.4022.49 | WinUI XAML 元数据引用的 WinRT SDK |
 | Microsoft.Windows.ImplementationLibrary | 1.0.260126.7 | 上游控件使用的 WIL |
 
-目标机需要 PowerShell 7、Visual Studio 2022 17.8 或更新版本的 v143 C++、完整 Windows SDK、C++/WinRT 和单项目 MSIX / WinUI 工具。ARM64 输出需要相应 C++ 工具。框架依赖部署需要匹配架构的 Windows App SDK 1.7 运行时及本地开发注册权限。
+目标机需要 PowerShell 7、Visual Studio 2022（17.8+，v143）或 VS 2026（v145）的 C++ 工具链、完整 Windows SDK、C++/WinRT 和单项目 MSIX / WinUI 工具。ARM64 输出需要相应 C++ 工具。框架依赖部署需要匹配架构的 Windows App SDK 1.7 运行时及本地开发注册权限。
+
+在 Build Tools 版 Installer 中选择 WinUI 应用开发构建工具（`Microsoft.VisualStudio.Workload.UniversalBuildTools`）及可选的 C++ WinUI 组件（`Microsoft.VisualStudio.ComponentGroup.WindowsAppDevelopment.VC.BuildTools`）。本机仅安装桌面 C++ 时，Core 能构建，但控件的 `TargetPath` 只解析成目录；此时应检查 Windows Store 10.0 的 C++ MSBuild 目标。组件名称见 [微软 Build Tools 组件表](https://learn.microsoft.com/en-us/visualstudio/install/workload-component-id-vs-build-tools?view=vs-2026)。
 
 项目根目录执行：
 
 ```powershell
+git submodule update --init -- third_party/json third_party/WinUIEdit
 pwsh -File ./tools/windows/verify.ps1 -Configuration Debug -Platform x64 -Deploy -Launch
 ```
 
 脚本先确认真实主机，再通过 vswhere 和 Windows Kits 注册项发现 Visual Studio / SDK，导入官方 Developer PowerShell 环境，构建共享 Core、列出并执行 CTest、构建和执行 committed 状态测试、正式运行桥接测试与会话桥接/持久化测试，再构建控件及应用。桥接测试与 Core 使用一致的 Debug / Release CRT。输出架构与主机不一致时仅记录构建，不将交叉编译声明为运行验证。
 
-支持 `-MSBuildPath`、`-CMakePath`、`-NinjaPath`、`-WindowsSdkVersion` 与 `-Parallelism`。发现 Ninja 时使用单配置生成器，否则使用 Visual Studio 2022。工程默认 SDK 为 10.0.22621.0，脚本选用实际安装版本；最低 OS 为 10.0.17763.0，目标验收为 10.0.19045 / SKU 161。
+支持 `-MSBuildPath`、`-CMakePath`、`-NinjaPath`、`-WindowsSdkVersion` 与 `-Parallelism`。发现 Ninja 时使用单配置生成器，否则使用所选实例对应的 Visual Studio 生成器（VS 2026 需要支持该生成器的 CMake）。工程默认 SDK 为 10.0.22621.0，脚本选用实际安装版本；最低 OS 为 10.0.17763.0，目标验收为 10.0.19045 / SKU 161。
 
 输出位于 `out/windows/<Platform>/<Configuration>/`，包含各阶段退出码与日志、Core 测试名称、归档及控件 SHA256、MSBuild binlog、MSIX layout、`build-result.json`、`verification-report.json` 和中文 `measurement-template.md`。非 Windows 主机执行会以失败退出并生成失败报告，全部 Windows 构建、执行和人工验收标记保持未执行。
 

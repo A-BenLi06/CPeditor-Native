@@ -41,7 +41,8 @@ try {
                         "-DCMAKE_CXX_COMPILER=$($toolchain.compiler)", "-DCMAKE_C_COMPILER=$($toolchain.compiler)")
     } else {
         $cmakePlatform = if ($Platform -eq 'arm64') { 'ARM64' } else { 'x64' }
-        $configure += @('-A', $cmakePlatform, "-DCMAKE_SYSTEM_VERSION=$($toolchain.windowsSdkVersion)")
+        $configure += @('-A', $cmakePlatform, '-T', $toolchain.platformToolset,
+                        "-DCMAKE_GENERATOR_INSTANCE=$($toolchain.vsInstallation)", "-DCMAKE_SYSTEM_VERSION=$($toolchain.windowsSdkVersion)")
     }
     Invoke-CpnNativeStage -Name 'core-configure' -Executable $toolchain.cmake -Arguments $configure -Report $report -OutputRoot $outputRoot
     Invoke-CpnNativeStage -Name 'core-build' -Executable $toolchain.cmake `
@@ -145,7 +146,7 @@ try {
     $editorObject = Join-Path $outputRoot 'editor/obj'
     $editorGenerated = Join-Path $editorObject 'Generated Files'
     $sourceArguments = @($prepared.project, '/nologo', "/m:$Parallelism", "/p:Configuration=$Configuration",
-        "/p:Platform=$Platform", '/p:WinUIEditorUseWinUI3=true', '/p:GenerateProjectSpecificOutputFolder=false',
+        "/p:Platform=$Platform", "/p:PlatformToolset=$($toolchain.platformToolset)", '/p:WinUIEditorUseWinUI3=true', '/p:GenerateProjectSpecificOutputFolder=false',
         "/p:WindowsTargetPlatformVersion=$($toolchain.windowsSdkVersion)",
         "/p:SolutionDir=$($prepared.root)\", "/p:OutDir=$editorBinary\", "/p:IntDir=$editorObject\", "/p:GeneratedFilesDir=$editorGenerated\")
     Invoke-CpnNativeStage -Name 'editor-restore' -Executable $toolchain.msbuild -Arguments ($sourceArguments + @(
@@ -183,7 +184,7 @@ try {
     $appExecutable = Join-Path $outputRoot 'CPEditorNativeWindows.exe'
     $appLayout = Join-Path $outputRoot 'layout'
     $appArguments = @($appProject, '/nologo', "/m:$Parallelism", "/p:Configuration=$Configuration", "/p:Platform=$Platform",
-        '/p:WinUIEditorUseWinUI3=true', '/p:GenerateProjectSpecificOutputFolder=false',
+        "/p:PlatformToolset=$($toolchain.platformToolset)", '/p:WinUIEditorUseWinUI3=true', '/p:GenerateProjectSpecificOutputFolder=false',
         "/p:WindowsTargetPlatformVersion=$($toolchain.windowsSdkVersion)",
         "/p:CPNWinUIEditProject=$($prepared.project)", "/p:CPNEditorBinaryDir=$editorBinary\",
         "/p:CPNEditorObjectDir=$editorObject\", "/p:CPNEditorGeneratedDir=$editorGenerated\",

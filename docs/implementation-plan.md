@@ -18,6 +18,21 @@ M0 固定编辑器适配契约，在完整 UI 开发前排除不适合的候选�
 
 ## 首个实现阶段
 
+### Windows 10 工作站核对（2026-11-26）
+
+本轮按 x64 Debug 验证。运行环境为 Windows 10 22H2 专业工作站版（19045，SKU 161）、PowerShell 7.6.9、VS 2026 Build Tools 18.6.2、MSVC 19.51.36246（v145）、Windows SDK 10.0.26100.0。Server 2022 CI 的 Debug／Release 宿主构建记录见 [实施状态](status.md)。
+
+| 顺序 | 链路与本机证据 | 验收条件 |
+| --- | --- | --- |
+| 1 | 工具发现、固定依赖、Core 构建通过。原脚本限定 VS 17.x，且本机 64 位注册表的 KitsRoot10 指向缺少 Include 的目录；32 位视图有完整 SDK。64 位 MSBuild 还会从失效路径寻找 ucrtd.lib；沿用开发环境的 UCRT 根目录后，VS 生成器也成功构建了 cpn_domain。 | 从普通 PowerShell 运行验证入口，检查报告中的 VS 实例、编译器、SDK 和目标架构。Core 与两个 MSBuild 工程使用同一代工具集。 |
+| 2 | Core CTest 17/17、committed 文本状态、Runner、Session、Companion 桥接均通过。普通 PowerShell 用本机生成的 MSVC 配置编译 `unicode.cpp`，三个仓库样例均为 AC；中文和 emoji 字符串也通过逐字节比较。 | 保留 CTest、桥接日志和 CLI 判题结果。Runner 的取消、会话的落盘与恢复、真实回环 HTTP 分别有自动测试。 |
+| 3 | WinUIEdit 固定源码、补丁、NuGet 还原通过。当前 Build Tools 缺少 Windows Store 10.0 C++ 项目目标：属性求值的 `TargetPath` 只有目录，`TargetPlatformVersion` 为 7.0；直接构建在 C++/WinRT 报 MSB8036。 | 补齐 WinUI 工作负载及 C++ 组件后重跑。检查控件 DLL、WinMD、PRI，继续构建引用它的宿主，核对 layout 中的清单、资源、工具链与可执行文件。 |
+| 4 | 本次尚未执行 layout 注册、窗口激活与应用内 Run All。CI 常规入口也未传入部署和启动参数。 | 在目标机以 `-Deploy -Launch` 注册，确认对应包的进程与窗口，再用未保存 C++ 文档执行 Run All、核对输出、取消长任务、重启恢复并核对文档和样例 ID。 |
+
+M1 的本机 Core 证据已取得。M0 的输入、焦点与性能，M2 的窗口内闭环，M6 的签名 MSIX 全新安装和更新仍分别验收。构建机生成的 MSVC 配置含本机编译器绝对路径和环境；跨机分发前需在另一台机器验证用户工具链的选择。复现命令与所需组件见 [Windows 构建入口](../apps/windows/README.md#windows-构建与验证入口)。
+
+### 原型实施顺序
+
 1. 添加 Windows C++/WinRT WinUI 3 宿主，固定 WinUIEdit 版本，并通过 PowerShell 7 发现 Visual Studio/MSBuild 工具。原生背景能力必须兼容 Windows 10。
 2. 打开与 CP Editor 相同的 C++ 测试文件。实现打开/保存、已提交编辑及版本上报、选择、滚动和焦点生命周期；此时先捕获文本快照，尚不接入编译引擎。
 3. 记录中文输入法、Unicode、混合 DPI、鼠标指针以及 UU/虚拟桌面的测试结果，并与空原生宿主和普通原生文本控件对照。包含用户受影响的 Qt 5 构建；条件允许时对比当前 Qt 6 上游构建。

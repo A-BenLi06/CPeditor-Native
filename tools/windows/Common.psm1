@@ -26,17 +26,31 @@ function Get-CpnWindowsToolchain {
           [string] $MSBuildPath, [string] $CMakePath, [string] $NinjaPath, [string] $WindowsSdkVersion)
     if (-not $IsWindows) { throw '构建工具发现仅支持 Windows；当前主机不是 Windows。' }
     $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
-    if (-not (Test-Path -LiteralPath $vswhere -PathType Leaf)) { throw '需要安装 Visual Studio 2022 和 vswhere。' }
-    $installationsJson = & $vswhere -latest -products '*' -version '[17.0,18.0)' `
-        -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -format json
+    if (-not (Test-Path -LiteralPath $vswhere -PathType Leaf)) { throw '需要 Visual Studio Installer 提供的 vswhere。' }
+    $components = @('Microsoft.VisualStudio.Component.VC.Tools.x86.x64')
+    if ($Platform -eq 'arm64') { $components += 'Microsoft.VisualStudio.Component.VC.Tools.ARM64' }
+    $installationsJson = & $vswhere -latest -products '*' -version '[17.8,19.0)' `
+        -requires @components -format json
     if ($LASTEXITCODE -ne 0) { throw "vswhere 失败：$LASTEXITCODE" }
     $installations = @($installationsJson -join "`n" | ConvertFrom-Json)
-    if ($installations.Count -ne 1) { throw '没有找到完整的 Visual Studio 2022 C++ 工具安装。' }
+    if ($installations.Count -ne 1) { throw "找不到提供 $Platform C++ 工具的 Visual Studio 2022 (17.8+) 或 2026。" }
     $installation = $installations[0]
     $vsRoot = $installation.installationPath
+    $vsMajor = ([version]$installation.installationVersion).Major
+    $generation = @{
+        17 = @{ generator = 'Visual Studio 17 2022'; toolset = 'v143' }
+        18 = @{ generator = 'Visual Studio 18 2026'; toolset = 'v145' }
+    }[$vsMajor]
     if ([string]::IsNullOrWhiteSpace($WindowsSdkVersion)) {
-        $kits = Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows Kits\Installed Roots'
-        $sdkDirectories = @(Get-ChildItem -LiteralPath (Join-Path $kits.KitsRoot10 'Include') -Directory |
+        $includeRoots = foreach ($key in @('HKLM:\SOFTWARE\Microsoft\Windows Kits\Installed Roots',
+                                            'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows Kits\Installed Roots')) {
+            $kitsRoot = Get-ItemPropertyValue -LiteralPath $key -Name KitsRoot10 -ErrorAction SilentlyContinue
+            if ($kitsRoot) {
+                $includeRoot = Join-Path $kitsRoot 'Include'
+                if (Test-Path -LiteralPath $includeRoot -PathType Container) { $includeRoot }
+            }
+        }
+        $sdkDirectories = @($includeRoots | Sort-Object -Unique | ForEach-Object { Get-ChildItem -LiteralPath $_ -Directory } |
             Where-Object { $_.Name -match '^10\.0\.\d+\.0$' -and
                 (Test-Path -LiteralPath (Join-Path $_.FullName 'um/windows.h')) -and
                 (Test-Path -LiteralPath (Join-Path $_.FullName 'winrt/windows.foundation.h')) } |
@@ -53,6 +67,10 @@ function Get-CpnWindowsToolchain {
     # DevCmdArguments is the supported module's validated option list, not an assembled shell command.
     Enter-VsDevShell -VsInstallPath $vsRoot -SkipAutomaticLocation `
         -DevCmdArguments "-arch=$targetArch -host_arch=$hostArch -winsdk=$WindowsSdkVersion" | Out-Null
+    # ucrt.props 的默认注册表视图取决于 MSBuild 的位数。沿用开发环境实际选定的 UCRT。
+    if ($env:UniversalCRTSdkDir -and -not $env:UCRTContentRoot) {
+        $env:UCRTContentRoot = [IO.Path]::TrimEndingDirectorySeparator($env:UniversalCRTSdkDir) + '\'
+    }
     if ([string]::IsNullOrWhiteSpace($MSBuildPath)) { $MSBuildPath = Join-Path $vsRoot 'MSBuild/Current/Bin/MSBuild.exe' }
     if ([string]::IsNullOrWhiteSpace($CMakePath)) {
         $bundledCMake = Join-Path $vsRoot 'Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe'
@@ -74,7 +92,8 @@ function Get-CpnWindowsToolchain {
         msbuild = $MSBuildPath; cmake = $CMakePath; ctest = $ctest; ninja = $NinjaPath
         compiler = $compiler; compilerVersion = (Get-Item -LiteralPath $compiler).VersionInfo.FileVersion
         windowsSdkVersion = $WindowsSdkVersion
-        generator = if ($NinjaPath) { 'Ninja' } else { 'Visual Studio 17 2022' }
+        platformToolset = $generation.toolset
+        generator = if ($NinjaPath) { 'Ninja' } else { $generation.generator }
     }
 }
 function Invoke-CpnNativeStage {

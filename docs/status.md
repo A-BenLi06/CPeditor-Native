@@ -1,6 +1,6 @@
 # 实施状态与证据
 
-更新时间：2026-11-26T16:02:26+08:00。目标仍为完成设计与实施，以下仅是当前进度，不代表全部里程碑已经通过。
+更新时间：2026-11-26T16:49:58+08:00。目标仍为完成设计与实施，以下仅是当前进度，不代表全部里程碑已经通过。
 
 | 阶段 | 状态 | 当前证据与剩余工作 |
 | --- | --- | --- |
@@ -13,7 +13,7 @@
 
 当前可运行的检查：在仓库根目录执行 `cmake --preset dev`、`cmake --build --preset dev` 和 `ctest --preset dev`。这些覆盖当前领域、真实进程与判题服务、并发生命周期和 C ABI，不证明完整产品／目标平台验收完成。准确请求格式见 [当前 Core API](core-api.md)。
 
-实际执行主机：macOS 27.0.1 arm64，Xcode 27.2，Swift 6.4.2，Apple Clang 21，CMake 4.4.3，Homebrew GCC 15.2.0_1（`/opt/homebrew/bin/g++-15`）。Windows 10 22H2/PowerShell 7 目标验证待执行。
+macOS 执行主机：macOS 27.0.1 arm64，Xcode 27.2，Swift 6.4.2，Apple Clang 21，CMake 4.4.3，Homebrew GCC 15.2.0_1（`/opt/homebrew/bin/g++-15`）。Windows 10 22H2 专业工作站版（19045 / SKU 161）已用 VS 2026 x64 Debug 通过 Core 17/17、三组原生桥接及 CLI 真实 MSVC 编译判题；本机控件构建缺少 WinUI C++ 工具组件。部署、激活和窗口内闭环仍待验收，详见 [工作站核对](implementation-plan.md#windows-10-工作站核对2026-11-26)。
 
 ## 本轮可复核证据
 

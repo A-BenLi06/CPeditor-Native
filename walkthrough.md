@@ -630,3 +630,11 @@ Core 规则区分空输入、缺少预期输出与预期输出为空、checker �
   6. `docs/screenshots/macos-compile-error-dark.png`：深色模式真实 `g++-15` 编译错误诊断（`Compiler Output` `CE` 横幅与 `Standard Error` 定位信息）。
   - 验证完成后两个演示实例均经 `terminate()` 正常退出，`defaults read org.cpeditor.native.macos workspaceAppearance` 确认恢复为 `system`。
 - **文档与发布材料更新**：全面重构根目录 `README.md`（融入 6 张真机运行截图、核心能力、校验下载指南、平台状态与 Mermaid 架构图、核对自 `EditorCommands.swift` 的 macOS 快捷键表、构建入口、`0.1.x` 版本规则与完整文档索引），同步更新 `docs/releases/v0.1.0.md`、`docs/status.md` 与 `out/releases/v0.1.0/release-notes.md`；`references/cpeditor` 子模块保持干净未修改。
+
+## 2026-11-26T16:53:49.6819793+08:00 Windows 10 工作站核对 WinUI 3 构建与运行计划
+
+- 在 19045 / SKU 161 x64、PowerShell 7.6.9、VS 2026 Build Tools 18.6.2 上从普通终端执行验证脚本。原入口只接受 VS 2022，且 64 位注册表的 KitsRoot10 指向缺少 Include 的路径。脚本现在在两个注册表视图查找 SDK，按 VS 实例为 Core、WinUIEdit 和宿主选择同代工具集。
+- 独立试跑 VS 18 生成器时，64 位 MSBuild 从错误的 KitsRoot10 寻找 ucrtd.lib，导致 CMake 识别编译器失败。让 ucrt.props 沿用开发环境中的 UCRT 根目录后，使用已校验的 Boost 源码重新配置成功，Debug cpn_domain.lib 构建通过。完整 Core 与测试使用 Ninja 生成器。
+- x64 Debug 构建并执行 Core CTest 17/17，committed 状态、Runner、Session 与 Companion 桥接测试通过。普通 PowerShell 使用捕获本机编译器及环境的配置调用 cpn-cli，仓库 unicode.cpp 的三个样例均为 AC。初测出现代码页 936 的 C4819；MSVC 配置显式采用 UTF-8 后编译警告消失，另用含空格与中文的路径验证中文和 emoji 字符串逐字节比较为 AC。
+- WinUIEdit 锁定的源码、补丁与 NuGet 还原通过。正式入口在 editor-output-properties 得到只有目录的 TargetPath，断言阻止继续；单独执行 Build 在 CppWinRTVerifyKitVersion 复现 MSB8036。实测 WindowsTargetPlatformVersion 为 10.0.26100.0，TargetPlatformVersion 却为 7.0，当前 VS 实例缺少 Windows Store 10.0 项目目标。已在实施计划和 Windows 构建说明补充组件名、复验顺序和签名分发前的工具链跨机检查。
+- 本轮机器证据位于 out/windows/x64/Debug/build-result.json、ctest.log、各桥接日志，以及 out/editor-probe-build.log、out/vs-ucrt-domain.log、out/cli-result-utf8.json 和 out/cli-literal-result.json。宿主部署、窗口激活和窗口内 Run All／取消／恢复待补齐主机组件后验收。

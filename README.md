@@ -146,7 +146,7 @@ ctest --preset dev
 
 ### 4. 构建与验证 Windows 原生应用（需在真实 Windows 主机执行）
 
-前提：Windows 10/11、PowerShell 7、Visual Studio 2022（v143 C++/WinRT）、Windows SDK 与 MSIX 工具。详见 [Windows 原生说明](apps/windows/README.md)。
+前提：Windows 10/11、PowerShell 7、Visual Studio 2022（17.8+，v143）或 2026（v145）C++ 工具链、Windows SDK 及 WinUI／MSIX 构建组件。详见 [Windows 原生说明](apps/windows/README.md)。
 
 ```powershell
 pwsh -File ./tools/windows/verify.ps1 -Configuration Debug -Platform x64 -Deploy -Launch
