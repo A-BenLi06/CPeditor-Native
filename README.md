@@ -1,19 +1,19 @@
 # CPEditor-Native
 
-[![Release v0.1.0](https://img.shields.io/badge/release-v0.1.0%20Pre--release-blue)](https://github.com/A-BenLi06/CPeditor-Native/releases/tag/v0.1.0)
+[![Release v0.1.1](https://img.shields.io/badge/release-v0.1.1%20Pre--release-blue)](https://github.com/A-BenLi06/CPeditor-Native/releases/tag/v0.1.1)
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-green)](LICENSE)
 [![macOS CI](https://github.com/A-BenLi06/CPeditor-Native/actions/workflows/macos.yml/badge.svg)](https://github.com/A-BenLi06/CPeditor-Native/actions/workflows/macos.yml)
 [![Windows CI](https://github.com/A-BenLi06/CPeditor-Native/actions/workflows/windows.yml/badge.svg)](https://github.com/A-BenLi06/CPeditor-Native/actions/workflows/windows.yml)
 
 **面向算法竞赛的原生桌面编辑器：** Windows 采用 **WinUI 3 + C++/WinRT**，macOS 采用 **SwiftUI + AppKit**，两端共享**不依赖 Qt 的 C++20 竞赛引擎（Core）**，通过版本化稳定 C ABI 协调编译、运行、判题、会话恢复与 Competitive Companion 导入。
 
-> **当前发布**：[`v0.1.0` Pre-release](https://github.com/A-BenLi06/CPeditor-Native/releases/tag/v0.1.0) 已提供 **macOS Apple Silicon（arm64）** 预览应用压缩包与校验文件；Windows WinUI 3 版本已完成功能接入并通过本机 Windows 10 22H2 Debug 部署启动与 Release x64 构建验证，交互桌面与手工验收矩阵仍在补全，暂不发布 Windows 安装包。
+> **当前发布**：[`v0.1.1` Pre-release](https://github.com/A-BenLi06/CPeditor-Native/releases/tag/v0.1.1) 已提供 **macOS Apple Silicon（arm64）** 预览应用压缩包与校验文件（升级 Xcode 风格全高 Inspector、Liquid Glass 拖动排序胶囊标签栏、单一右上角按钮与圆角测试卡片，并修复 CE 编译错误渲染空白问题）；Windows WinUI 3 版本已在主要目标机 Windows 10 22H2 完成功能接入与 Debug 部署启动／Release x64 构建验证，交互桌面与手工验收矩阵仍在补全，暂不发布 Windows 安装包。
 
 ---
 
 ## 真机与运行截图
 
-以下截图均在 **macOS 27.0.1（Apple Silicon arm64）** 真机上运行解压后的 `v0.1.0` Release `CPEditorNative.app` 实拍采集，编译器为真机安装的 **Homebrew GNU G++ 15**（`/opt/homebrew/bin/g++-15`），运行源码真实包含 `#include <bits/stdc++.h>`：
+以下截图均在 **macOS 27.0.1（Apple Silicon arm64）** 真机上运行解压后的 `v0.1.1` Release `CPEditorNative.app` 实拍采集，编译器为真机安装的 **Homebrew GNU G++ 15**（`/opt/homebrew/bin/g++-15`），运行源码真实包含 `#include <bits/stdc++.h>`：
 
 ### 主工作区（浅色 & 深色模式 · 真实 GNU G++ 运行对比）
 
@@ -33,27 +33,27 @@
 
 ---
 
-## 核心特性（v0.1.0 预览版）
+## 核心特性（v0.1.1 预览版）
 
-- **仿上游竞赛工作台与三视图布局**：顶部文档标签栏配合左编右测分栏，支持在 **Editor Only**（`⌃⌘1`）、**Split**（`⌃⌘2`）与 **Tests and Output Only**（`⌃⌘3`）之间无损切换，底层编辑器实例与原生 `UndoManager` 撤销栈始终保留。
+- **Xcode 风格全高 Inspector 与 Liquid Glass 胶囊标签栏**：macOS 端采用贯穿标题栏高度的原生 `.inspector` 分栏与右上角单一 `sidebar.trailing` 切换按钮；左侧编辑器上方配备原生 `GlassEffectContainer` 悬浮等宽胶囊标签栏（支持拖动排序并持久化到恢复文件，右侧展开时自然挤压让位），支持在 **Editor Only**（`⌃⌘1`）、**Split**（`⌃⌘2`）与 **Tests and Output Only**（`⌃⌘3`）之间无损切换，底层编辑器实例与原生 `UndoManager` 撤销栈始终保留。
 - **编译与运行分离 + 过期结果追踪**：支持独立 **Compile**（`⌘B`）、**Run Without Compiling**（`⌃⌘R`，仅增改样例时复用已编译产物）与 **Compile & Run**（`⌘R`）；任何源码、样例或运行配置修改都会自动将旧结果标为 **Outdated**。
 - **默认 GNU G++ 与 `bits/stdc++.h` 支持**：自动发现 Homebrew、MacPorts 及 `PATH` 中带版本号的 GNU `g++`，提供 `C++17 (GCC)` 与 `C++20 (GCC)` 配置档；缺少 GNU G++ 时明确提示安装，不将 Apple 的 `/usr/bin/g++`（Clang 别名）静默替代为 GNU 编译器，Clang 配置保留供显式选择。
-- **Output 先行的横向对照测试区**：在首次运行前即常显 **Input**、**Output** 与 **Expected Output**，按 `Input → Output → Expected Output` 顺序等高对照，窄分栏支持至少 `220 pt` 列宽横向滚动，仅 IO 宽视图下自动三栏铺满；取消期望输出校验时仍保留编辑框。
+- **Output 先行的横向对照卡片测试区**：以 `10 pt` 圆角卡片搭配左端判题色条展示 `Compiler Output` 与各测试样例，常显 `Input → Output → Expected Output` 等高对照；窄分栏支持至少 `220 pt` 列宽横向滚动，仅 IO 宽视图下自动三栏铺满；取消期望输出校验时仍保留编辑框。
 - **内置比较策略与外部 Checker**：支持 `Ignore Trailing Spaces`、`CP Editor Strict`、`Exact Bytes` 三种内置比较策略，也可启用自定义外部 Checker（独立进程诊断、自定义退出码映射、二进制 hex 有界预览）。
 - **低干扰竞赛编辑辅助**：支持 `()`/`[]`/`{}`/引号即时配对、选区包裹、匹配上下文闭合字符跳过、相邻空对删除、大括号内回车缩进与 `Tab`/`Shift-Tab` 行缩进；保留原生输入法（IME）组合输入边界与系统撤销／重做。
-- **原子会话恢复与文件保护**：源码正文、未保存修改、光标选区、样例原始字节与工具链选择在重启后恢复；使用协同文件摘要校验防止静默覆盖磁盘外部修改，支持 `Save Recovery As…` 与上一份备份恢复。
+- **原子会话恢复与文件保护**：源码正文、未保存修改、光标选区、标签顺序、样例原始字节与工具链选择在重启后恢复；使用协同文件摘要校验防止静默覆盖磁盘外部修改，支持 `Save Recovery As…` 与上一份备份恢复。
 - **Competitive Companion 文件收件箱（macOS）**：支持导入 Companion JSON 题面载荷，展示 Pending / Applied 状态与来源限制说明，对交互题或非 stdio 模式标识 `Special I/O` 并在确认应用后写入带防重放回执的会话记录。
 
 ---
 
-## 下载与安装（macOS v0.1.0 Pre-release）
+## 下载与安装（macOS v0.1.1 Pre-release）
 
-1. 前往 [Releases v0.1.0](https://github.com/A-BenLi06/CPeditor-Native/releases/tag/v0.1.0) 下载 `CPEditor-Native-v0.1.0-macos-arm64.zip` 与 `SHA256SUMS.txt`。
+1. 前往 [Releases v0.1.1](https://github.com/A-BenLi06/CPeditor-Native/releases/tag/v0.1.1) 下载 `CPEditor-Native-v0.1.1-macos-arm64.zip` 与 `SHA256SUMS.txt`。
 2. 校验压缩包完整性并解压：
 
 ```sh
 shasum -a 256 -c SHA256SUMS.txt
-ditto -x -k CPEditor-Native-v0.1.0-macos-arm64.zip ./CPEditor-Native-v0.1.0
+ditto -x -k CPEditor-Native-v0.1.1-macos-arm64.zip ./CPEditor-Native-v0.1.1
 ```
 
 3. 安装真正的 GNU GCC（用于默认 C++ 编译与 `bits/stdc++.h`），然后启动应用：
@@ -73,8 +73,8 @@ brew install gcc
 | 组件 / 平台 | 当前状态 | 说明与已验证证据 |
 | --- | --- | --- |
 | **共享 C++20 Core** | 已可独立构建并测试 | 不依赖 Qt 与 UI 框架；涵盖领域模型、文本比较、POSIX/Win32 子进程、外部 Checker、会话恢复、Companion 收件箱／回环 HTTP 与有界 C ABI 1；Release CTest **17/17** 通过 |
-| **macOS 原生应用** | **v0.1.0 预览可用** | SwiftUI + AppKit 双编辑器适配器；macOS 27.0.1 arm64 Release 测试 **18 套件 111/111** 通过（含 `bits/stdc++.h` 真实 G++ 编译运行）、严格签名通过、6 场景实机截图核验；macOS 26 / Intel / 系统中文 IME 候选窗待验 |
-| **Windows 原生应用** | **WinUI 3 版本已接入并通过本机部署启动/构建** | **主要目标平台为 Windows 10 22H2 专业工作站版**（WinUI 3 + C++/WinRT + WinUIEdit）；已对齐 macOS `v0.1.0` 工作台能力（分栏三视图、Compile/Run 分离、Output 先行对照、外部 Checker、运行时编译器发现、Fluent Settings、编辑辅助与 Companion 筛选）；在本机 Windows 10 19045/161 x64（VS 2026 Build Tools v145）通过 Debug 部署启动、Release 0 警告 0 错误构建及全部 Core 17/17 + 原生桥接测试；交互桌面视觉、系统中文 IME、高 DPI 与 UU 远程实测待人工执行，本轮不提供安装包 |
+| **macOS 原生应用** | **v0.1.1 预览可用** | SwiftUI + AppKit 双编辑器适配器；macOS 27.0.1 arm64 Release 测试 **18 套件 114/114** 通过（含 `bits/stdc++.h` 真实 G++ 编译运行与 CE Inspector 非空白像素回归）、严格签名通过、6 场景实机截图核验；macOS 26 / Intel / 系统中文 IME 候选窗待验 |
+| **Windows 原生应用** | **WinUI 3 版本已接入并通过本机部署启动/构建** | **主要目标平台为 Windows 10 22H2 专业工作站版**（WinUI 3 + C++/WinRT + WinUIEdit）；已对齐基础竞赛工作台能力（分栏三视图、Compile/Run 分离、Output 先行对照、外部 Checker、运行时编译器发现、Fluent Settings、编辑辅助与 Companion 筛选）；此前已在 Windows 10 19045/161 x64（VS 2026 Build Tools v145）通过 Debug 部署启动、Release 0 警告 0 错误构建及 Core 17/17 + 原生桥接测试；交互桌面视觉、系统中文 IME、高 DPI 与 UU 远程实测待人工执行，本轮不提供安装包 |
 
 ```mermaid
 flowchart TB
@@ -164,6 +164,7 @@ pwsh -File ./tools/windows/verify.ps1 -Configuration Debug -Platform x64 -Deploy
 
 | 文档 | 内容 |
 | --- | --- |
+| [v0.1.1 发布说明](docs/releases/v0.1.1.md) | `v0.1.1` 预览版变更、CE 渲染修复、实机截图、校验值与已知边界 |
 | [v0.1.0 发布说明](docs/releases/v0.1.0.md) | `v0.1.0` 预览版构建、测试、实机截图、校验值与已知边界 |
 | [实施状态与证据](docs/status.md) | 各阶段最新完成进度、CI 链接、实机测试证据与剩余工作 |
 | [v0.1.0 发布后回归](docs/regressions/macos-post-v0.1.0.md) | 选区缩进、括号/引号配对、换行保留与 G++ 升级路径恢复回归记录 |

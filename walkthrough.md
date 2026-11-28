@@ -737,3 +737,16 @@ Core 规则区分空输入、缺少预期输出与预期输出为空、checker �
   - 实际执行主机为 `macOS` arm64、`Xcode 27.2 Build version 27B52`、`SDK 27.2`、`macOS 目标 26.0`（未在 Windows 主机执行或验证，`references/cpeditor` 子模块保持未修改）。
   - 更新 `WorkspaceUXTests.tabBarMetricsAndSeparatorVisibility()` 中 `idealWidth == 510`、`maxWidth == 700` 断言，全量执行 `CPN_REQUIRE_GNU_CPP=1 ./script/test_macos.sh`：**18 个测试套共 113 项测试全部通过**（`33.654s`）。
   - 导出 `out/macos/inspector-polish-audit/` 快照（`11.401s`）核验 `01`、`02`、`04`、`05`（卡片分组、明暗对照、窄屏控件与全宽单行 `.ioOnly`）；随后运行 `./script/build_and_run.sh --verify` 启动 [CPEditorNative.app](file:///Volumes/WD-Blue-SN580-1TB/本地文件/CPEditor-Native/out/macos/CPEditorNative.app)（`PID 30134`，保留运行在桌面），通过 `screencapture` 检查 `out/macos/inspector-polish-audit/live-window.png`，确认操作栏齐平、`Output` 复制按钮完整可见、`Exp` 右侧自然露出且测试卡片层次分明舒适。
+
+
+## 2026-11-28T12:35:12+08:00 — 修复 CE 编译错误 `.inspector` 空白渲染并发布 v0.1.1 预览版
+
+- **版本同步与发布策略**：按 `AGENTS.md` 规定 `0.1.x` 补丁号递增规则，将 `CMakeLists.txt`（`PROJECT_VERSION 0.1.1`）、`apps/macos/AppMetadata.plist`（`CFBundleShortVersionString 0.1.1`、`CFBundleVersion 2`）与 `apps/windows/CPEditorNativeWindows/Package.appxmanifest`（`Version="0.1.1.0"`）同步至 `0.1.1`，并新建中文发布说明 `docs/releases/v0.1.1.md`。
+- **CE 编译错误卡片空白渲染根因排查与修复（`RunPanelView.swift`、`WorkspaceUXTests.swift`）**：
+  - 在采集 `v0.1.1` 实机 `macos-compile-error-dark.png` 并目视审查时，发现当编译失败（`CE`）产生输出横幅时，主窗口内容区与右侧 `.inspector` 整片空白（仅留顶部工具栏与垂直分割线），回查确认自 `7255d98` 引入原生 `.inspector(isPresented:)` 起的 `03-st-split-ce-dark.png` 亦存在同一现象。
+  - 将 `CompilerOutputBanner` 从 `RunPanelView` 根 `VStack`（`ScrollView` 外部）迁入右侧 `LazyVStack` 列表顶部（新增 `compilerOutputBuild` 判定），并彻底移除导致 `.inspector` 布局渲染塌陷的 SwiftUI `DisclosureGroup`，改以标准 `VStack` + 全宽可折叠 `Button` 与 `InspectorCardChrome` 实现，在 `buildSucceeded` 转为失败时自动展开。
+  - 在 `WorkspaceUXTests.swift` 新增离屏像素采样防回归测试 `compileErrorInspectorRendersVisibleLeftAndRightContent`，同时校验左编右测两个区域在暗色 `CE` 场景下均存在真实对比像素绘制；经 `CPN_LAYOUT_AUDIT_DIR="$PWD/out/macos/ce-fix-audit"` 验证 `03-st-split-ce-dark.png` 完全恢复正常。
+- **v0.1.1 macOS arm64 Release 构建、校验、打包与实机截图核验**：
+  - 实际执行主机为 `macOS 27.0.1（26A434）arm64`、`Xcode 27.2（27B52）`、`SDK 27.2`、`Swift 6.4.2`、`Apple Clang 21`、`Homebrew GCC 15.2.0_1`（本次未在 Windows 主机执行新验证或打包）。
+  - 在 `out/releases/v0.1.1/` 执行 `build.sh` 与 `package.sh`：Core Release CTest **17/17** 通过（`4.51s`）；`CPN_REQUIRE_GNU_CPP=1` 条件下 SwiftPM Release 全量测试 **18 个套件 114/114** 通过（`15.569s`，含 `compileErrorInspectorRendersVisibleLeftAndRightContent` 0.726s）；`script/verify_macos_build.py` 核对 15 个 Core 对象与 `CPEditorNative` 可执行文件均为 `arm64`、`minos 26.0`、`sdk 27.2`，`otool -L` 仅链接系统动态库；`plutil -lint`、打包前与解压后 `codesign --verify --strict` 及 `Info.plist` 版本校验（`0.1.1` / `2`）全部通过；生成 `CPEditor-Native-v0.1.1-macos-arm64.zip`（`2,572,961` 字节）与 `SHA256SUMS.txt`（`83eb8ff9bf2a718c478136bafced6721685a16117d9e107147b303ed6b256e80`）。
+  - 通过 `out/releases/v0.1.1/showcase_build/run_capture.sh` 以隔离 `--recovery-file` 启动解压后的 `v0.1.1` `.app`，实机运行 `g++-15` 并重采全部 6 张截图至 `docs/screenshots/`（目视验收 `macos-light-run-split.png`、`macos-dark-run-split.png` 与修复后的 `macos-compile-error-dark.png` 均清晰完整），结束后实例正常退出并恢复 `workspaceAppearance == system`。同步更新 `README.md`、`docs/status.md` 与 `out/releases/v0.1.1/release-notes.md`，`references/cpeditor` 等子模块保持干净未修改。

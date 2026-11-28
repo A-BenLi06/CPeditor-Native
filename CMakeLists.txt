@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.25)
 if(APPLE AND (NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET OR CMAKE_OSX_DEPLOYMENT_TARGET STREQUAL ""))
     set(CMAKE_OSX_DEPLOYMENT_TARGET "14.0" CACHE STRING "Minimum macOS deployment target" FORCE)
 endif()
-project(CPEditorNative VERSION 0.1.0 LANGUAGES C CXX)
+project(CPEditorNative VERSION 0.1.1 LANGUAGES C CXX)
 
 include(CTest)
 find_package(Threads REQUIRED)

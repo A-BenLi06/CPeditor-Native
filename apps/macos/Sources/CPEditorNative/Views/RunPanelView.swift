@@ -60,8 +60,19 @@ struct RunPanelView: View {
         return result.tests.filter { !activeIDs.contains(RawIdentifier($0.testcaseID)) }
     }
 
+    private var compilerOutputBuild: (report: ProcessReport, succeeded: Bool)? {
+        guard let result = latestResult,
+              let build = result.build,
+              (result.buildOutcome != "Succeeded" && result.buildOutcome != "NotRequired")
+                || !build.stderr.data.isEmpty || !build.stdout.data.isEmpty else {
+            return nil
+        }
+        return (build, result.buildOutcome == "Succeeded" || result.buildOutcome == "NotRequired")
+    }
+
     var body: some View {
         let resultIsStale = latestResult != nil && !runner.resultIsCurrent(for: session)
+        let compilerOutput = compilerOutputBuild
         VStack(alignment: .leading, spacing: 0) {
             headerBar(resultIsStale: resultIsStale)
             checkerControlBar
@@ -76,29 +87,24 @@ struct RunPanelView: View {
             if let notice = session.companionRunNotice {
                 NoticeBannerView(kind: .warning, message: notice)
             }
-            if let result = latestResult {
-                if !result.error.isEmpty {
-                    NoticeBannerView(kind: .error, message: result.error)
-                }
-                if let build = result.build,
-                   (result.buildOutcome != "Succeeded" && result.buildOutcome != "NotRequired")
-                    || !build.stderr.data.isEmpty || !build.stdout.data.isEmpty {
-                    CompilerOutputBanner(
-                        build: build,
-                        buildSucceeded: result.buildOutcome == "Succeeded" || result.buildOutcome == "NotRequired",
-                        binaryPreviewBytes: runner.binaryPreviewBytes
-                    )
-                    .padding(.horizontal, 12)
-                    .padding(.top, 10)
-                }
+            if let result = latestResult, !result.error.isEmpty {
+                NoticeBannerView(kind: .error, message: result.error)
             }
 
-            if session.testCases.isEmpty && removedTestResults.isEmpty {
+            if compilerOutput == nil && session.testCases.isEmpty && removedTestResults.isEmpty {
                 emptyTestsPlaceholder
             } else {
                 GeometryReader { proxy in
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 10) {
+                            if let compilerOutput {
+                                CompilerOutputBanner(
+                                    build: compilerOutput.report,
+                                    buildSucceeded: compilerOutput.succeeded,
+                                    binaryPreviewBytes: runner.binaryPreviewBytes
+                                )
+                            }
+
                             if session.testCases.isEmpty {
                                 emptyTestsPlaceholder
                                     .frame(minHeight: 140)
@@ -479,29 +485,47 @@ private struct CompilerOutputBanner: View {
     }
 
     var body: some View {
-        DisclosureGroup(isExpanded: $isExpanded) {
-            ProcessOutputView(report: build, binaryPreviewBytes: binaryPreviewBytes)
-                .padding(.top, 8)
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: buildSucceeded ? "terminal" : "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(buildSucceeded ? Color.secondary : Color.orange)
-                Text(L10n.string("compiler_output"))
-                    .font(.caption.weight(.semibold))
-                if !buildSucceeded {
-                    VerdictBadge(verdict: "CE", compact: true)
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                isExpanded.toggle()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 12)
+                    Image(systemName: buildSucceeded ? "terminal" : "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(buildSucceeded ? Color.secondary : Color.orange)
+                    Text(L10n.string("compiler_output"))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    if !buildSucceeded {
+                        VerdictBadge(verdict: "CE", compact: true)
+                    }
+                    Spacer(minLength: 4)
+                    Text(String(format: L10n.string("elapsed_format"), build.elapsedMS))
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
                 }
-                Spacer(minLength: 4)
-                Text(String(format: L10n.string("elapsed_format"), build.elapsedMS))
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if isExpanded {
+                ProcessOutputView(report: build, binaryPreviewBytes: binaryPreviewBytes)
+                    .padding(.top, 8)
             }
         }
         .padding(.leading, buildSucceeded ? 12 : 14)
         .padding(.trailing, 12)
         .padding(.vertical, 9)
         .modifier(InspectorCardChrome(accentColor: buildSucceeded ? nil : .orange))
+        .onChange(of: buildSucceeded) { _, succeeded in
+            if !succeeded {
+                isExpanded = true
+            }
+        }
     }
 }
 

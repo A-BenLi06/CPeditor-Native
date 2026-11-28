@@ -605,4 +605,82 @@ import NativeCoreBridge
 
         await dispose(workspace)
     }
+
+    @Test func compileErrorInspectorRendersVisibleLeftAndRightContent() async throws {
+        let tempDir = try folder()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let recoveryFile = tempDir.appendingPathComponent("ce-render-recovery.json")
+        let workspace = Workspace(arguments: ["--editor", "codeeditorview"], recoveryURL: recoveryFile)
+        await workspace.bootstrap()
+
+        let doc = try #require(workspace.createDocument(text: "", editor: .stTextView))
+        doc.stView?.insertText("int main() { broken_identifier; }\n", replacementRange: NSRange(location: 0, length: 0))
+        doc.capture()
+        doc.testCases = [TestCaseInput(id: "ce-case", input: "1\n", expected: "1\n")]
+
+        workspace.runner.runAll(doc)
+        await workspace.runner.waitForCurrentRun()
+
+        let result = try #require(workspace.runner.result(for: doc.document.id))
+        #expect(result.buildOutcome != "Succeeded")
+        #expect(workspace.layoutMode == .split)
+
+        let size = NSSize(width: 1240, height: 780)
+        let window = NSWindow(
+            contentRect: NSRect(origin: .zero, size: size),
+            styleMask: [.titled, .closable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.appearance = NSAppearance(named: .darkAqua)
+        let host = NSHostingView(rootView: WorkspaceView(workspace: workspace).frame(width: size.width, height: size.height))
+        host.sizingOptions = []
+        host.frame = NSRect(origin: .zero, size: size)
+        window.contentView = host
+        window.orderBack(nil)
+        defer {
+            window.orderOut(nil)
+            window.contentView = nil
+        }
+        window.displayIfNeeded()
+        host.layoutSubtreeIfNeeded()
+        try await Task.sleep(for: .milliseconds(120))
+        host.layoutSubtreeIfNeeded()
+
+        let rep = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: rep)
+
+        func contrastingSampleCount(xRange: ClosedRange<Double>, yRange: ClosedRange<Double>, baselineX: Double, baselineY: Double) -> Int {
+            let bx = min(max(Int(Double(rep.pixelsWide) * baselineX), 0), max(0, rep.pixelsWide - 1))
+            let by = min(max(Int(Double(rep.pixelsHigh) * baselineY), 0), max(0, rep.pixelsHigh - 1))
+            guard let base = rep.colorAt(x: bx, y: by)?.usingColorSpace(.sRGB) else { return 0 }
+            let startX = Int(Double(rep.pixelsWide) * xRange.lowerBound)
+            let endX = Int(Double(rep.pixelsWide) * xRange.upperBound)
+            let startY = Int(Double(rep.pixelsHigh) * yRange.lowerBound)
+            let endY = Int(Double(rep.pixelsHigh) * yRange.upperBound)
+            let stepX = max(1, (endX - startX) / 80)
+            let stepY = max(1, (endY - startY) / 80)
+            var count = 0
+            for y in stride(from: startY, to: endY, by: stepY) {
+                for x in stride(from: startX, to: endX, by: stepX) {
+                    guard let c = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
+                    let diff = max(
+                        abs(c.redComponent - base.redComponent),
+                        max(abs(c.greenComponent - base.greenComponent), abs(c.blueComponent - base.blueComponent))
+                    )
+                    if diff > 0.04 {
+                        count += 1
+                    }
+                }
+            }
+            return count
+        }
+
+        let leftContrastCount = contrastingSampleCount(xRange: 0.04...0.52, yRange: 0.06...0.95, baselineX: 0.50, baselineY: 0.90)
+        let rightContrastCount = contrastingSampleCount(xRange: 0.64...0.96, yRange: 0.06...0.95, baselineX: 0.98, baselineY: 0.90)
+        #expect(leftContrastCount >= 150)
+        #expect(rightContrastCount >= 150)
+
+        await dispose(workspace)
+    }
 }

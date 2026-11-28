@@ -3,7 +3,7 @@
          xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
          xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
          IgnorableNamespaces="uap rescap">
-  <Identity Name="CPEditorNative.Windows.M0" Publisher="CN=CPEditorNative" Version="0.1.0.0" />
+  <Identity Name="CPEditorNative.Windows.M0" Publisher="CN=CPEditorNative" Version="0.1.1.0" />
   <Properties>
     <DisplayName>ms-resource:PackageDisplayName</DisplayName>
     <PublisherDisplayName>CPEditorNative</PublisherDisplayName>
