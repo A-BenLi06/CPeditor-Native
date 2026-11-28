@@ -11,6 +11,7 @@ using namespace Windows::Foundation;
 using namespace Microsoft::UI::Xaml;
 using namespace Microsoft::UI::Xaml::Controls;
 using namespace Microsoft::UI::Xaml::Media;
+using cpn::windows::CheckerModel;
 using cpn::windows::FileStore;
 using cpn::windows::UiStrings;
 
@@ -33,9 +34,28 @@ bool is_binary_bytes(std::string_view bytes) {
     if (bytes.find('\0') != std::string_view::npos) return true;
     try { FileStore::validate_utf8(bytes); return false; } catch (...) { return true; }
 }
+Style lookup_style(wchar_t const* key) {
+    return Application::Current().Resources().Lookup(box_value(key)).as<Style>();
+}
+Brush lookup_brush(wchar_t const* key) {
+    return Application::Current().Resources().Lookup(box_value(key)).as<Brush>();
+}
+Button make_compact_icon_button(wchar_t const* glyph, hstring const& tip, int size = 24) {
+    Button btn;
+    btn.Style(lookup_style(L"FluentIconButtonStyle"));
+    btn.Width(size);
+    btn.Height(size);
+    btn.Padding(Thickness{0});
+    FontIcon icon;
+    icon.Glyph(glyph);
+    icon.FontSize(12);
+    btn.Content(icon);
+    ToolTipService::SetToolTip(btn, box_value(tip));
+    return btn;
+}
 Border make_column_header(hstring const& title, TextBlock& bytes_label, FrameworkElement const& right_control) {
     Grid header_grid;
-    header_grid.Padding(Thickness{8, 3, 6, 3});
+    header_grid.Padding(Thickness{10, 4, 6, 4});
     ColumnDefinition c0, c1;
     c0.Width(GridLength{1, GridUnitType::Star});
     c1.Width(GridLength{0, GridUnitType::Auto});
@@ -51,7 +71,8 @@ Border make_column_header(hstring const& title, TextBlock& bytes_label, Framewor
     label.FontSize(11);
     label.FontWeight(Microsoft::UI::Text::FontWeights::SemiBold());
     bytes_label.FontSize(11);
-    bytes_label.Opacity(0.72);
+    bytes_label.Opacity(0.68);
+    bytes_label.VerticalAlignment(VerticalAlignment::Center);
     left.Children().Append(label);
     left.Children().Append(bytes_label);
     Grid::SetColumn(left, 0);
@@ -65,8 +86,8 @@ Border make_column_header(hstring const& title, TextBlock& bytes_label, Framewor
     Border bar;
     bar.Child(header_grid);
     bar.BorderThickness(Thickness{0, 0, 0, 1});
-    bar.BorderBrush(Application::Current().Resources().Lookup(box_value(L"CardStrokeColorDefaultBrush")).as<Brush>());
-    bar.Background(Application::Current().Resources().Lookup(box_value(L"LayerFillColorDefaultBrush")).as<Brush>());
+    bar.BorderBrush(lookup_brush(L"CardStrokeColorDefaultBrush"));
+    bar.Background(lookup_brush(L"LayerFillColorDefaultBrush"));
     return bar;
 }
 }
@@ -92,15 +113,15 @@ SolidColorBrush MainWindow::VerdictBrush(std::string_view verdict) {
 SolidColorBrush MainWindow::VerdictBackgroundBrush(std::string_view verdict) {
     bool const dark = Root().ActualTheme() == ElementTheme::Dark;
     if (verdict == "AC" || verdict == "Accepted" || verdict == "Succeeded") {
-        return SolidColorBrush{dark ? Windows::UI::Color{64, 108, 203, 95} : Windows::UI::Color{36, 16, 124, 16}};
+        return SolidColorBrush{dark ? Windows::UI::Color{56, 108, 203, 95} : Windows::UI::Color{32, 16, 124, 16}};
     }
     if (verdict == "WA" || verdict == "CompilationError" || verdict == "Failed") {
-        return SolidColorBrush{dark ? Windows::UI::Color{64, 255, 100, 110} : Windows::UI::Color{36, 196, 43, 28}};
+        return SolidColorBrush{dark ? Windows::UI::Color{56, 255, 100, 110} : Windows::UI::Color{32, 196, 43, 28}};
     }
     if (verdict == "TLE" || verdict == "RE" || verdict == "OLE" || verdict == "CheckerError" || verdict == "InfrastructureError") {
-        return SolidColorBrush{dark ? Windows::UI::Color{64, 252, 200, 0} : Windows::UI::Color{36, 202, 80, 16}};
+        return SolidColorBrush{dark ? Windows::UI::Color{56, 252, 200, 0} : Windows::UI::Color{32, 202, 80, 16}};
     }
-    return SolidColorBrush{dark ? Windows::UI::Color{40, 255, 255, 255} : Windows::UI::Color{24, 0, 0, 0}};
+    return SolidColorBrush{dark ? Windows::UI::Color{36, 255, 255, 255} : Windows::UI::Color{20, 0, 0, 0}};
 }
 
 void MainWindow::CopyTextToClipboard(hstring const& text) {
@@ -108,6 +129,37 @@ void MainWindow::CopyTextToClipboard(hstring const& text) {
     pkg.SetText(text);
     Windows::ApplicationModel::DataTransfer::Clipboard::SetContent(pkg);
     Status().Text(strings_.get(L"CopiedNotice"));
+}
+
+void MainWindow::UpdateCheckerMenuState(std::shared_ptr<Document> const& document) {
+    updating_ui_ = true;
+    MenuUseExternalCheckerItem().IsChecked(checker_settings_.enabled);
+    std::string const cmp = document ? document->comparison : runner_configuration_.default_comparison;
+    MenuCompareTrailingItem().IsChecked(cmp == "trailing");
+    MenuCompareStrictItem().IsChecked(cmp == "strict");
+    MenuCompareByteItem().IsChecked(cmp == "byte");
+    updating_ui_ = false;
+
+    if (checker_settings_.enabled) {
+        CheckerMenuIcon().Glyph(L"\xE83D");
+        std::wstring name;
+        try {
+            auto const json_str = checker_settings_.json_text.empty()
+                ? checker_configuration_.default_checker.dump()
+                : checker_settings_.json_text;
+            auto const draft = CheckerModel::visual_from_json(json_str, checker_configuration_.max_checker_json_bytes);
+            name = std::filesystem::path{to_hstring(draft.executable).c_str()}.filename().wstring();
+        } catch (...) {}
+        if (name.empty()) name = std::wstring{strings_.get(L"CheckerToggleText")};
+        CheckerMenuLabel().Text(hstring{UiStrings::format(strings_.get(L"CheckerModeExternalFormat"), {name})});
+    } else {
+        CheckerMenuIcon().Glyph(L"\xE9E9");
+        hstring cmp_text = strings_.get(L"ComparisonTrailing");
+        for (auto const& c : runner_configuration_.comparisons) {
+            if (c.id == cmp) { cmp_text = strings_.get(to_hstring(c.label_resource)); break; }
+        }
+        CheckerMenuLabel().Text(cmp_text);
+    }
 }
 
 void MainWindow::AddTest(std::shared_ptr<Document> const& document, std::optional<cpn::TestCase> restored) {
@@ -124,32 +176,37 @@ void MainWindow::AddTest(std::shared_ptr<Document> const& document, std::optiona
     test->enabled_value = !restored || restored->enabled;
     test->has_expected_value = restored && restored->expected.has_value();
 
-    // Flattened section container with 3px left semantic stripe
+    // Fluent Card Chrome with inset 3px rounded semantic stripe
     Border outer;
-    outer.BorderThickness(Thickness{0, 0, 0, 1});
-    outer.BorderBrush(Application::Current().Resources().Lookup(box_value(L"CardStrokeColorDefaultBrush")).as<Brush>());
-    outer.Background(Application::Current().Resources().Lookup(box_value(L"CardBackgroundFillColorDefaultBrush")).as<Brush>());
+    outer.CornerRadius(CornerRadius{8});
+    outer.BorderThickness(Thickness{1});
+    outer.BorderBrush(lookup_brush(L"CardStrokeColorDefaultBrush"));
+    outer.Background(lookup_brush(L"CardBackgroundFillColorDefaultBrush"));
 
     Grid root_grid;
     ColumnDefinition stripe_col, body_col;
-    stripe_col.Width(GridLength{3, GridUnitType::Pixel});
+    stripe_col.Width(GridLength{8, GridUnitType::Pixel});
     body_col.Width(GridLength{1, GridUnitType::Star});
     root_grid.ColumnDefinitions().Append(stripe_col);
     root_grid.ColumnDefinitions().Append(body_col);
 
     Border stripe;
+    stripe.Width(3);
+    stripe.CornerRadius(CornerRadius{2});
+    stripe.Margin(Thickness{5, 10, 0, 10});
+    stripe.HorizontalAlignment(HorizontalAlignment::Left);
     stripe.Background(SolidColorBrush{Windows::UI::Color{0, 0, 0, 0}});
     Grid::SetColumn(stripe, 0);
     root_grid.Children().Append(stripe);
 
     StackPanel section_body;
-    section_body.Padding(Thickness{12, 10, 12, 12});
+    section_body.Padding(Thickness{10, 10, 12, 12});
     section_body.Spacing(8);
     Grid::SetColumn(section_body, 1);
     root_grid.Children().Append(section_body);
     outer.Child(root_grid);
 
-    // Header row: Sample #N + Enable + Verdict badge + elapsed + action buttons
+    // Header row: CheckBox + Sample #N + Verdict Pill + Elapsed + Icon Actions
     Grid header_row;
     ColumnDefinition hc0, hc1;
     hc0.Width(GridLength{1, GridUnitType::Star});
@@ -162,19 +219,21 @@ void MainWindow::AddTest(std::shared_ptr<Document> const& document, std::optiona
     left_hdr.Spacing(8);
     left_hdr.VerticalAlignment(VerticalAlignment::Center);
 
+    CheckBox enabled_box;
+    enabled_box.MinWidth(0);
+    enabled_box.Padding(Thickness{0});
+    enabled_box.VerticalAlignment(VerticalAlignment::Center);
+    ToolTipService::SetToolTip(enabled_box, box_value(strings_.get(L"TestEnabled")));
+    set_checked(enabled_box, test->enabled_value);
+
     TextBlock title;
     title.FontWeight(Microsoft::UI::Text::FontWeights::SemiBold());
     title.FontSize(13);
     title.VerticalAlignment(VerticalAlignment::Center);
 
-    CheckBox enabled_box;
-    enabled_box.Content(box_value(strings_.get(L"TestEnabled")));
-    enabled_box.MinWidth(0);
-    set_checked(enabled_box, test->enabled_value);
-
     Border verdict_badge;
-    verdict_badge.CornerRadius(CornerRadius{4});
-    verdict_badge.Padding(Thickness{7, 2, 7, 2});
+    verdict_badge.CornerRadius(CornerRadius{10});
+    verdict_badge.Padding(Thickness{8, 2, 8, 2});
     verdict_badge.Background(VerdictBackgroundBrush("NotRun"));
     TextBlock verdict_text;
     verdict_text.FontSize(11);
@@ -185,11 +244,11 @@ void MainWindow::AddTest(std::shared_ptr<Document> const& document, std::optiona
 
     TextBlock elapsed_text;
     elapsed_text.FontSize(11);
-    elapsed_text.Opacity(0.75);
+    elapsed_text.Opacity(0.72);
     elapsed_text.VerticalAlignment(VerticalAlignment::Center);
 
-    left_hdr.Children().Append(title);
     left_hdr.Children().Append(enabled_box);
+    left_hdr.Children().Append(title);
     left_hdr.Children().Append(verdict_badge);
     left_hdr.Children().Append(elapsed_text);
     Grid::SetColumn(left_hdr, 0);
@@ -197,23 +256,13 @@ void MainWindow::AddTest(std::shared_ptr<Document> const& document, std::optiona
 
     StackPanel right_hdr;
     right_hdr.Orientation(Orientation::Horizontal);
-    right_hdr.Spacing(4);
+    right_hdr.Spacing(2);
+    right_hdr.VerticalAlignment(VerticalAlignment::Center);
 
-    Button use_output_btn;
-    use_output_btn.Content(box_value(strings_.get(L"UseOutputAsExpected")));
-    use_output_btn.Padding(Thickness{8, 3, 8, 3});
-    use_output_btn.FontSize(11);
+    auto use_output_btn = make_compact_icon_button(L"\xE8AB", strings_.get(L"UseOutputTip"), 26);
     use_output_btn.IsEnabled(false);
-
-    Button dup_btn;
-    dup_btn.Content(box_value(strings_.get(L"DuplicateSample")));
-    dup_btn.Padding(Thickness{8, 3, 8, 3});
-    dup_btn.FontSize(11);
-
-    Button remove_btn;
-    remove_btn.Content(box_value(strings_.get(L"RemoveTest")));
-    remove_btn.Padding(Thickness{8, 3, 8, 3});
-    remove_btn.FontSize(11);
+    auto dup_btn = make_compact_icon_button(L"\xE8C8", strings_.get(L"DuplicateSampleTip"), 26);
+    auto remove_btn = make_compact_icon_button(L"\xE74D", strings_.get(L"RemoveSampleTip"), 26);
 
     right_hdr.Children().Append(use_output_btn);
     right_hdr.Children().Append(dup_btn);
@@ -238,9 +287,9 @@ void MainWindow::AddTest(std::shared_ptr<Document> const& document, std::optiona
 
     auto make_cell_shell = [](UIElement const& hdr, TextBox const& editor) {
         Border shell;
-        shell.CornerRadius(CornerRadius{4});
+        shell.CornerRadius(CornerRadius{6});
         shell.BorderThickness(Thickness{1});
-        shell.BorderBrush(Application::Current().Resources().Lookup(box_value(L"CardStrokeColorDefaultBrush")).as<Brush>());
+        shell.BorderBrush(lookup_brush(L"CardStrokeColorDefaultBrush"));
         Grid g;
         RowDefinition r0, r1;
         r0.Height(GridLength{0, GridUnitType::Auto});
@@ -256,14 +305,12 @@ void MainWindow::AddTest(std::shared_ptr<Document> const& document, std::optiona
     };
 
     auto const mono_font = FontFamily{L"Cascadia Mono, Consolas, Courier New"};
+    auto const copy_tip = strings_.get(L"CopyTextTip");
 
     // Column 0: Input
     TextBlock input_bytes_lbl;
     input_bytes_lbl.Text(hstring{UiStrings::format(strings_.get(L"BytesBadgeFormat"), {std::to_wstring(test->input_bytes.size())})});
-    Button copy_in_btn;
-    copy_in_btn.Content(box_value(strings_.get(L"CopyText")));
-    copy_in_btn.Padding(Thickness{6, 1, 6, 1});
-    copy_in_btn.FontSize(10);
+    auto copy_in_btn = make_compact_icon_button(L"\xE8C8", copy_tip, 22);
     TextBox input_box;
     input_box.AcceptsReturn(true);
     input_box.TextWrapping(TextWrapping::NoWrap);
@@ -279,13 +326,10 @@ void MainWindow::AddTest(std::shared_ptr<Document> const& document, std::optiona
     Grid::SetColumn(input_cell, 0);
     tri_grid.Children().Append(input_cell);
 
-    // Column 1: Output (always visible, directly after Input!)
+    // Column 1: Output
     TextBlock output_bytes_lbl;
     output_bytes_lbl.Text(hstring{UiStrings::format(strings_.get(L"BytesBadgeFormat"), {L"0"})});
-    Button copy_out_btn;
-    copy_out_btn.Content(box_value(strings_.get(L"CopyText")));
-    copy_out_btn.Padding(Thickness{6, 1, 6, 1});
-    copy_out_btn.FontSize(10);
+    auto copy_out_btn = make_compact_icon_button(L"\xE8C8", copy_tip, 22);
     TextBox output_box;
     output_box.AcceptsReturn(true);
     output_box.TextWrapping(TextWrapping::NoWrap);
@@ -305,16 +349,14 @@ void MainWindow::AddTest(std::shared_ptr<Document> const& document, std::optiona
     expected_bytes_lbl.Text(hstring{UiStrings::format(strings_.get(L"BytesBadgeFormat"), {std::to_wstring(test->expected_bytes.size())})});
     StackPanel exp_actions;
     exp_actions.Orientation(Orientation::Horizontal);
-    exp_actions.Spacing(6);
+    exp_actions.Spacing(4);
+    exp_actions.VerticalAlignment(VerticalAlignment::Center);
     CheckBox has_expected_box;
     has_expected_box.Content(box_value(strings_.get(L"HasExpected")));
     has_expected_box.MinWidth(0);
     has_expected_box.FontSize(11);
     set_checked(has_expected_box, test->has_expected_value);
-    Button copy_exp_btn;
-    copy_exp_btn.Content(box_value(strings_.get(L"CopyText")));
-    copy_exp_btn.Padding(Thickness{6, 1, 6, 1});
-    copy_exp_btn.FontSize(10);
+    auto copy_exp_btn = make_compact_icon_button(L"\xE8C8", copy_tip, 22);
     exp_actions.Children().Append(has_expected_box);
     exp_actions.Children().Append(copy_exp_btn);
     TextBox expected_box;
@@ -481,6 +523,51 @@ void MainWindow::AdoptOutputAsExpected(std::shared_ptr<Document> const& document
     TestsChanged(document);
 }
 
+void MainWindow::EnableAllSamples_Click(IInspectable const&, RoutedEventArgs const&) {
+    auto document = CurrentDocument();
+    if (!document || !TestsMutable(document) || document->tests.empty()) return;
+    updating_ui_ = true;
+    for (auto const& test : document->tests) {
+        test->enabled_value = true;
+        set_checked(test->enabled, true);
+    }
+    updating_ui_ = false;
+    TestsChanged(document);
+}
+
+void MainWindow::DisableAllSamples_Click(IInspectable const&, RoutedEventArgs const&) {
+    auto document = CurrentDocument();
+    if (!document || !TestsMutable(document) || document->tests.empty()) return;
+    updating_ui_ = true;
+    for (auto const& test : document->tests) {
+        test->enabled_value = false;
+        set_checked(test->enabled, false);
+    }
+    updating_ui_ = false;
+    TestsChanged(document);
+}
+
+void MainWindow::RemoveDisabledSamples_Click(IInspectable const&, RoutedEventArgs const&) {
+    auto document = CurrentDocument();
+    if (!document || !TestsMutable(document)) return;
+    bool removed = false;
+    for (auto it = document->tests.begin(); it != document->tests.end();) {
+        if (!(*it)->enabled_value) {
+            std::uint32_t index{};
+            if (document->test_panel.Children().IndexOf((*it)->container, index))
+                document->test_panel.Children().RemoveAt(index);
+            it = document->tests.erase(it);
+            removed = true;
+        } else {
+            ++it;
+        }
+    }
+    if (removed) {
+        RefreshTestHeaders(document);
+        TestsChanged(document);
+    }
+}
+
 fire_and_forget MainWindow::UseAllOutputs_Click(IInspectable const&, RoutedEventArgs const&) {
     auto lifetime = get_strong();
     auto document = CurrentDocument();
@@ -515,9 +602,9 @@ fire_and_forget MainWindow::DeleteAllSamples_Click(IInspectable const&, RoutedEv
 }
 
 void MainWindow::RenderCompilerBanner(std::shared_ptr<Document> const& document) {
-    if (CurrentDocument() != document) return;
-    if (!document || !document->result) {
-        CompilerOutputBanner().Visibility(Visibility::Collapsed);
+    if (!document || !document->compiler_banner) return;
+    if (!document->result) {
+        document->compiler_banner.Visibility(Visibility::Collapsed);
         return;
     }
     auto const& output = *document->result;
@@ -528,11 +615,11 @@ void MainWindow::RenderCompilerBanner(std::shared_ptr<Document> const& document)
                              !output.error.empty() ||
                              (output.build_outcome == "Succeeded" && document->result_mode == "compile_only");
     if (!show_banner) {
-        CompilerOutputBanner().Visibility(Visibility::Collapsed);
+        document->compiler_banner.Visibility(Visibility::Collapsed);
         return;
     }
-    CompilerOutputBanner().Visibility(Visibility::Visible);
-    CompilerAccentBar().Background(VerdictBrush(output.build_outcome));
+    document->compiler_banner.Visibility(Visibility::Visible);
+    document->compiler_accent_bar.Background(VerdictBrush(output.build_outcome));
 
     std::wstring header;
     if (output.build_outcome == "Succeeded") {
@@ -543,8 +630,8 @@ void MainWindow::RenderCompilerBanner(std::shared_ptr<Document> const& document)
             ? strings_.get(L"RunUnknown") : strings_.get(to_hstring(build_label->second));
         header = std::wstring{strings_.get(L"CompilerOutputTitle")} + L" — " + std::wstring{build_text};
     }
-    CompilerHeaderText().Text(hstring{header});
-    CompilerHeaderText().Foreground(VerdictBrush(output.build_outcome));
+    document->compiler_header.Text(hstring{header});
+    document->compiler_header.Foreground(VerdictBrush(output.build_outcome));
 
     std::wstring body;
     if (!output.error.empty()) body += std::wstring{to_hstring(output.error)};
@@ -560,29 +647,18 @@ void MainWindow::RenderCompilerBanner(std::shared_ptr<Document> const& document)
         if (!body.empty()) body += L"\n";
         body += std::wstring{strings_.get(L"CoreOutputTruncated")};
     }
-    CompilerOutputText().Text(hstring{body});
+    document->compiler_output_text.Text(hstring{body});
     bool const expanded = document->compiler_expanded && !body.empty();
-    CompilerOutputScroll().Visibility(expanded ? Visibility::Visible : Visibility::Collapsed);
-    CompilerChevronIcon().Glyph(expanded ? L"\xE70D" : L"\xE76C");
-    CompilerCopyButton().Content(box_value(strings_.get(L"CopyText")));
-    CompilerCopyButton().Visibility(body.empty() ? Visibility::Collapsed : Visibility::Visible);
-}
-
-void MainWindow::CompilerToggle_Click(IInspectable const&, RoutedEventArgs const&) {
-    if (auto document = CurrentDocument()) {
-        document->compiler_expanded = !document->compiler_expanded;
-        RenderCompilerBanner(document);
-    }
-}
-
-void MainWindow::CompilerCopy_Click(IInspectable const&, RoutedEventArgs const&) {
-    CopyTextToClipboard(CompilerOutputText().Text());
+    document->compiler_scroll.Visibility(expanded ? Visibility::Visible : Visibility::Collapsed);
+    document->compiler_chevron.Glyph(expanded ? L"\xE70D" : L"\xE76C");
+    document->compiler_copy.Visibility(body.empty() ? Visibility::Collapsed : Visibility::Visible);
 }
 
 void MainWindow::UpdateSummaryBadge(std::shared_ptr<Document> const& document) {
     if (!document) return;
     std::wstring badge_text;
     std::string badge_verdict = "NotRun";
+    bool const stale = !document->run_active && document->result && !IsResultCurrent(document);
 
     if (document->run_active) {
         auto const state = runner_configuration_.state_labels.find(document->run_state);
@@ -618,9 +694,10 @@ void MainWindow::UpdateSummaryBadge(std::shared_ptr<Document> const& document) {
                 badge_text = std::wstring{to_hstring(badge_verdict)} + L"  " + std::to_wstring(ac) + L"/" + std::to_wstring(total);
             }
         }
-        if (!IsResultCurrent(document)) badge_text += L" · " + std::wstring{strings_.get(L"ResultStale")};
     } else {
-        badge_text = std::wstring{strings_.get(L"RunIdle")};
+        std::size_t enabled_count = 0;
+        for (auto const& t : document->tests) if (t->enabled_value) ++enabled_count;
+        badge_text = std::to_wstring(enabled_count) + L"/" + std::to_wstring(document->tests.size());
     }
 
     if (document->tab_badge && document->tab_badge_text) {
@@ -638,6 +715,7 @@ void MainWindow::UpdateSummaryBadge(std::shared_ptr<Document> const& document) {
         SummaryBadge().Background(VerdictBackgroundBrush(badge_verdict));
         SummaryBadgeText().Foreground(VerdictBrush(badge_verdict));
         SummaryBadgeText().Text(hstring{badge_text});
+        OutdatedBadge().Visibility(stale ? Visibility::Visible : Visibility::Collapsed);
     }
 }
 

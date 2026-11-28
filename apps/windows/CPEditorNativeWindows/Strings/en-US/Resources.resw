@@ -663,4 +663,27 @@ Samples: {2}  |  Import: {3}</value></data>
   <data xml:space="preserve" name="SettingsCheckerApplied"><value>External checker configuration validated and applied.</value></data>
   <data xml:space="preserve" name="SettingsInvalidNumber"><value>Please enter a positive integer timeout value.</value></data>
   <data xml:space="preserve" name="SettingsReadOnlyHint"><value>Workspace recovery reached its revision limit; persistent settings are read only.</value></data>
+  <data xml:space="preserve" name="TestCasesTitle"><value>Test Cases</value></data>
+  <data xml:space="preserve" name="CheckerModePrefix"><value>Checker</value></data>
+  <data xml:space="preserve" name="CheckerModeExternalFormat"><value>External: {0}</value></data>
+  <data xml:space="preserve" name="UseExternalCheckerMenu"><value>Use external checker</value></data>
+  <data xml:space="preserve" name="ConfigureCheckerMenu"><value>Configure external checker…</value></data>
+  <data xml:space="preserve" name="EnableAllSamples"><value>Enable all samples</value></data>
+  <data xml:space="preserve" name="DisableAllSamples"><value>Disable all samples</value></data>
+  <data xml:space="preserve" name="RemoveDisabledSamples"><value>Remove disabled samples</value></data>
+  <data xml:space="preserve" name="ToggleInspectorTip"><value>Toggle test inspector (Ctrl+Shift+Y)</value></data>
+  <data xml:space="preserve" name="CompanionTip"><value>Competitive Companion inbox (Ctrl+Shift+I)</value></data>
+  <data xml:space="preserve" name="SettingsTip"><value>Settings (Ctrl+,)</value></data>
+  <data xml:space="preserve" name="AddSampleTip"><value>Add sample (Ctrl+Shift+T)</value></data>
+  <data xml:space="preserve" name="MoreSamplesTip"><value>More sample actions</value></data>
+  <data xml:space="preserve" name="OutdatedBadge"><value>Outdated</value></data>
+  <data xml:space="preserve" name="CompanionInboxTitle"><value>Companion Inbox</value></data>
+  <data xml:space="preserve" name="TopCompileTip"><value>Compile (Ctrl+B)</value></data>
+  <data xml:space="preserve" name="TopRunTip"><value>Compile &amp; Run (Ctrl+R)</value></data>
+  <data xml:space="preserve" name="TopStopTip"><value>Stop run (Shift+F5)</value></data>
+  <data xml:space="preserve" name="DuplicateSampleTip"><value>Duplicate sample</value></data>
+  <data xml:space="preserve" name="RemoveSampleTip"><value>Remove sample</value></data>
+  <data xml:space="preserve" name="UseOutputTip"><value>Use output as expected output</value></data>
+  <data xml:space="preserve" name="CopyTextTip"><value>Copy to clipboard</value></data>
+  <data xml:space="preserve" name="CompanionFilterAllLabel"><value>All</value></data>
 </root>

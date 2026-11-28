@@ -20,11 +20,11 @@ namespace {
 Border make_preview_card(hstring const& title, hstring const& input_label, hstring const& input_text,
                          hstring const& expected_label, hstring const& expected_text) {
     Border card;
-    card.CornerRadius(CornerRadius{4});
+    card.CornerRadius(CornerRadius{8});
     card.BorderThickness(Thickness{1});
     card.BorderBrush(Application::Current().Resources().Lookup(box_value(L"CardStrokeColorDefaultBrush")).as<Brush>());
     card.Background(Application::Current().Resources().Lookup(box_value(L"CardBackgroundFillColorDefaultBrush")).as<Brush>());
-    card.Padding(Thickness{8, 6, 8, 8});
+    card.Padding(Thickness{12, 10, 12, 12});
 
     StackPanel root;
     root.Spacing(6);
@@ -185,9 +185,13 @@ void MainWindow::UpdateCompanionControls() {
     for (auto const& row : companion_page_.items) {
         if (row.state == cpn::CompanionInboxState::pending) ++pending_count;
     }
-    CompanionBtnLabel().Text(pending_count > 0
-        ? hstring{UiStrings::format(strings_.get(L"CompanionBtnBadgeFormat"), {std::to_wstring(pending_count)})}
-        : strings_.get(L"CompanionBtnText"));
+    if (pending_count > 0) {
+        CompanionBtnLabel().Text(hstring{std::to_wstring(pending_count)});
+        CompanionBtnLabel().Visibility(Visibility::Visible);
+    } else {
+        CompanionBtnLabel().Text(L"");
+        CompanionBtnLabel().Visibility(Visibility::Collapsed);
+    }
 
     if (companion_listener_.running) {
         StatusCompanionText().Text(hstring{UiStrings::format(strings_.get(L"StatusBarCompanionActiveFormat"), {std::to_wstring(companion_listener_.port)})});
@@ -196,13 +200,16 @@ void MainWindow::UpdateCompanionControls() {
         StatusCompanionText().Visibility(Visibility::Collapsed);
     }
 
-    CompanionFilterAllButton().IsChecked(companion_filter_ == CompanionFilter::All);
-    CompanionFilterPendingButton().IsChecked(companion_filter_ == CompanionFilter::Pending);
-    CompanionFilterAppliedButton().IsChecked(companion_filter_ == CompanionFilter::Applied);
+    auto const target_item = companion_filter_ == CompanionFilter::Pending ? CompanionFilterPendingItem()
+        : (companion_filter_ == CompanionFilter::Applied ? CompanionFilterAppliedItem() : CompanionFilterAllItem());
+    if (CompanionFilterBar().SelectedItem() != target_item) {
+        CompanionFilterBar().SelectedItem(target_item);
+    }
 }
-void MainWindow::CompanionFilter_Click(IInspectable const& sender, RoutedEventArgs const&) {
-    if (sender == CompanionFilterPendingButton()) companion_filter_ = CompanionFilter::Pending;
-    else if (sender == CompanionFilterAppliedButton()) companion_filter_ = CompanionFilter::Applied;
+void MainWindow::CompanionFilterBar_SelectionChanged(SelectorBar const& sender, SelectorBarSelectionChangedEventArgs const&) {
+    auto const selected = sender.SelectedItem();
+    if (selected == CompanionFilterPendingItem()) companion_filter_ = CompanionFilter::Pending;
+    else if (selected == CompanionFilterAppliedItem()) companion_filter_ = CompanionFilter::Applied;
     else companion_filter_ = CompanionFilter::All;
     RenderCompanionItems();
 }

@@ -318,7 +318,18 @@
  	}
  
  	IFACEMETHODIMP ScintillaWinUI::OnUpdateComposition(ITfCompositionView *pComposition, ITfRange *pRangeNew)
-@@ -2355,6 +2401,12 @@
+@@ -2073,5 +2119,10 @@
+ 	// Change the scroll position but avoid repaint if changing to same value
+ 	void ScintillaWinUI::ChangeScrollPos(int barType, Sci::Position pos) {
++		if (!_mainWrapper->HasScrollBars())
++		{
++			return;
++		}
++
+ 		/*if (!IsVisible()) {
+ 			return;
+ 		}*/
+@@ -2355,6 +2406,12 @@
  
  	void ScintillaWinUI::NotifyParent(Scintilla::NotificationData scn)
  	{
@@ -331,7 +342,7 @@
  		if (_lock != NONE)
  		{
  			// Todo: notification queue might defeat the point of "before" notifications
-@@ -2447,6 +2499,66 @@
+@@ -2447,6 +2504,66 @@
  	void ScintillaWinUI::AddToPopUp(const char *label, int cmd, bool enabled)
  	{
  	}

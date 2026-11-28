@@ -35,23 +35,26 @@ struct MainWindow : MainWindowT<MainWindow> {
     void ViewSplit_Click(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void ViewTestsOnly_Click(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void ToggleTestPanel_Click(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void InspectorToggle_Click(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void ToggleCompanionPane_Click(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     winrt::fire_and_forget Compile_Click(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     winrt::fire_and_forget RunOnly_Click(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     winrt::fire_and_forget Run_Click(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     winrt::fire_and_forget Cancel_Click(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     winrt::fire_and_forget AddTest_Click(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void EnableAllSamples_Click(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void DisableAllSamples_Click(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void RemoveDisabledSamples_Click(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     winrt::fire_and_forget UseAllOutputs_Click(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     winrt::fire_and_forget DeleteAllSamples_Click(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     winrt::fire_and_forget ConfigureChecker_Click(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-    void CheckerToggle_Click(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-    void CompilerToggle_Click(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-    void CompilerCopy_Click(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void UseExternalCheckerMenu_Click(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void ComparisonPolicy_Click(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     winrt::fire_and_forget Settings_Click(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void RescanToolchains_Click(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     winrt::fire_and_forget RetryRecovery_Click(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     winrt::fire_and_forget SaveRecoveryAs_Click(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-    void CompanionFilter_Click(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void CompanionFilterBar_SelectionChanged(Microsoft::UI::Xaml::Controls::SelectorBar const&, Microsoft::UI::Xaml::Controls::SelectorBarSelectionChangedEventArgs const&);
     winrt::fire_and_forget ImportCompanion_Click(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     winrt::fire_and_forget RefreshCompanion_Click(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     winrt::fire_and_forget MoreCompanion_Click(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
@@ -60,11 +63,11 @@ struct MainWindow : MainWindowT<MainWindow> {
     winrt::fire_and_forget StopCompanion_Click(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void Companion_SelectionChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
     void Tabs_SelectionChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
+    void Tabs_TabItemsChanged(Microsoft::UI::Xaml::Controls::TabView const&, Windows::Foundation::Collections::IVectorChangedEventArgs const&);
     winrt::fire_and_forget Tabs_AddTabButtonClick(Microsoft::UI::Xaml::Controls::TabView const&, Windows::Foundation::IInspectable const&);
     winrt::fire_and_forget Tabs_CloseRequested(Microsoft::UI::Xaml::Controls::TabView const&, Microsoft::UI::Xaml::Controls::TabViewTabCloseRequestedEventArgs const&);
     void Profile_SelectionChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
     void Toolchain_SelectionChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
-    void Comparison_SelectionChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
     void SplitHandle_PointerPressed(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Input::PointerRoutedEventArgs const&);
     void SplitHandle_PointerMoved(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Input::PointerRoutedEventArgs const&);
     void SplitHandle_PointerReleased(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Input::PointerRoutedEventArgs const&);
@@ -120,6 +123,7 @@ private:
 
     struct Document {
         Microsoft::UI::Xaml::Controls::TabViewItem tab{nullptr};
+        Microsoft::UI::Xaml::Controls::Border tab_dirty_dot{nullptr};
         Microsoft::UI::Xaml::Controls::TextBlock tab_title{nullptr};
         Microsoft::UI::Xaml::Controls::Border tab_badge{nullptr};
         Microsoft::UI::Xaml::Controls::TextBlock tab_badge_text{nullptr};
@@ -128,7 +132,15 @@ private:
         std::shared_ptr<cpn::windows::WinUIEditAdapter> adapter;
         Microsoft::UI::Xaml::Controls::ScrollViewer test_view{nullptr};
         Microsoft::UI::Xaml::Controls::StackPanel test_panel{nullptr};
+        Microsoft::UI::Xaml::Controls::Border compiler_banner{nullptr};
+        Microsoft::UI::Xaml::Controls::Border compiler_accent_bar{nullptr};
+        Microsoft::UI::Xaml::Controls::FontIcon compiler_chevron{nullptr};
+        Microsoft::UI::Xaml::Controls::TextBlock compiler_header{nullptr};
+        Microsoft::UI::Xaml::Controls::Button compiler_copy{nullptr};
+        Microsoft::UI::Xaml::Controls::ScrollViewer compiler_scroll{nullptr};
+        Microsoft::UI::Xaml::Controls::TextBlock compiler_output_text{nullptr};
         Microsoft::UI::Xaml::Controls::Border empty_tests_panel{nullptr};
+        Microsoft::UI::Xaml::Controls::Button empty_add_test_btn{nullptr};
         std::vector<std::shared_ptr<TestView>> tests;
         std::filesystem::path path;
         std::optional<std::string> companion_title;
@@ -225,6 +237,7 @@ private:
     void RenderCompilerBanner(std::shared_ptr<Document> const&);
     void UpdateSummaryBadge(std::shared_ptr<Document> const&);
     void RefreshTestHeaders(std::shared_ptr<Document> const&);
+    void UpdateCheckerMenuState(std::shared_ptr<Document> const&);
     void AdoptOutputAsExpected(std::shared_ptr<Document> const&, std::shared_ptr<TestView> const&);
     void CopyTextToClipboard(winrt::hstring const&);
     void AddDocument(std::filesystem::path, cpn::windows::LoadedDocument, std::optional<std::string> disk_digest = {});
@@ -331,6 +344,7 @@ private:
     bool initializing_{};
     bool busy_{};
     bool selecting_document_{};
+    bool mutating_tabs_{};
     bool updating_ui_{};
     bool core_ready_{};
     bool delivery_failure_reported_{};

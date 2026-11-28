@@ -1,75 +1,75 @@
 {
-  "schema_version": 1,
-  "source_commit": "d9f60dbca65c2af54ced590d873d9438de32ce77",
-  "patch": "committed-snapshot.patch",
-  "patch_sha256": "8eded7b9a21ca147878ba4cbcdebeba06e29e28fee728e1b939b7283ecc79247",
-  "files": [
-    {
-      "path": "WinUIEditor/CodeEditorControl.cpp",
-      "before_sha256": "fd3bc8ea1405f04a1164bb05f6e4c1a8fe37cc9780d5408b71bb4aa6a4890080",
-      "after_sha256": "5e0ad4c292ccc11527765b032481712d3df0cfe96c605d32c53a4a8f65b1b3cd"
-    },
-    {
-      "path": "WinUIEditor/CodeEditorControl.h",
-      "before_sha256": "2c7aa9e168d906aeb70be2d36240b9742d4a351917a88481f16e36cc5236421e",
-      "after_sha256": "d62275a6ba977b1e8c2075db80c71e2c616db1019777e701d47585b1f1b8842d"
-    },
-    {
-      "path": "WinUIEditor/EditorBaseControl.cpp",
-      "before_sha256": "3282a1407c280f78246891a2410c0b112ac2bdca851cbc8b0da3ae7e39c40ba4",
-      "after_sha256": "a284be1b51a9673b0f92530a91eace80c95f69a58b9fe7edca5d3fc62feaf291"
-    },
-    {
-      "path": "WinUIEditor/EditorBaseControl.h",
-      "before_sha256": "aa86f3695e75ebb444e4b45bae85f6b9de7382ad7bdef46a2f17152b1f3dafb8",
-      "after_sha256": "745b9d6b6056b28c67ebd96be96ff11876a36bfd87d0dfb21d05bd8a35e8892d"
-    },
-    {
-      "path": "WinUIEditor/IEditorAccess.idl",
-      "before_sha256": "f5f79238dfd5000d5216efd585c280dc1582f3dd7356a84245815a54356ee48a",
-      "after_sha256": "38ee0eec7e6ce5afc73febec6ceae642deff814d0c72664a4a477c03368be449"
-    },
-    {
-      "path": "WinUIEditor/WinUIEditor.vcxproj",
-      "before_sha256": "e573bffda84b05a2ed5bc82414bc5f8a7cb5b9402b47a789054e8c6d5f345f2b",
-      "after_sha256": "985c37259f67d6f10cde9b1c562742d00f3e6ab7d780db7dc76809b529a6c486"
-    },
-    {
-      "path": "WinUIEditor/packages.config",
-      "before_sha256": "b6ded74ca2c3317340f6cb18b3e8fdbbdf240eac18aef42edb59ed0b93013461",
-      "after_sha256": "0e7c1f7f64b6a54fbb566d0608f5ec1136be7ae1b87c1d8bf501b59d29f5685c"
-    },
-    {
-      "path": "scintilla/winui/ScintillaWin.cxx",
-      "before_sha256": "8609a239af361949811979efbddc270dd05ee6d6b8a3fe3884dceb17508e6aa5",
-      "after_sha256": "042397ec8ca0373bb83770c0c162967601287c2379a01a4f0a263a0a11981541"
-    },
-    {
-      "path": "scintilla/winui/ScintillaWin.h",
-      "before_sha256": "e5d6508e524bd55a0806d74d369ccad2102b080872d5e269f8881193b25216d1",
-      "after_sha256": "157b0e7371f536473e4cb45bfd7afbc0f59104c3bc89920dda0b31a23932c59d"
-    },
-    {
-      "path": "scintilla/winui/PlatWin.cxx",
-      "before_sha256": "6d797abe806d2feebbfea8988fbafbb1b826dc5f3d6567ad55b3bb1a68259727",
-      "after_sha256": "182354d2763e8bc94b06dccfb6c86f5b3ebf3af3f71ab59740e01d9c1f140f36"
-    },
-    {
-      "path": "WinUIEditor/CodeEditorHandler.cpp",
-      "before_sha256": "fa30f9d7cc9fb830a48046e1c9ad8a786f3a46098d5da30ee2121fc7111207d0",
-      "after_sha256": "1a2c05512584d051f9c827eed62ae9cd3ed352eb2627280a698b4c365f38560c"
-    },
-    {
-      "path": "scintilla/src/CallTip.cxx",
-      "before_sha256": "ee57394de791867bf58967cabf18451d757f77c594440ca045fd3b5badadfec1",
-      "after_sha256": "eef727793413ca5f8307dc1deb0acee3facbacd9e57a57bad42c778770507be3"
-    }
-  ],
-  "overlays": [
-    {
-      "source": "CommittedTextState.h",
-      "target": "scintilla/winui/CommittedTextState.h",
-      "sha256": "6d4ce361eca927232057e96400850c2d4b89b73b833d1f0036f7cdf07b5d6061"
-    }
-  ]
+    "schema_version":  1,
+    "source_commit":  "d9f60dbca65c2af54ced590d873d9438de32ce77",
+    "patch":  "committed-snapshot.patch",
+    "patch_sha256":  "ee5b6d46ab051b58efa65b6d56124bf62763f3c7359665b94560148fc73af363",
+    "files":  [
+                  {
+                      "path":  "WinUIEditor/CodeEditorControl.cpp",
+                      "before_sha256":  "fd3bc8ea1405f04a1164bb05f6e4c1a8fe37cc9780d5408b71bb4aa6a4890080",
+                      "after_sha256":  "5e0ad4c292ccc11527765b032481712d3df0cfe96c605d32c53a4a8f65b1b3cd"
+                  },
+                  {
+                      "path":  "WinUIEditor/CodeEditorControl.h",
+                      "before_sha256":  "2c7aa9e168d906aeb70be2d36240b9742d4a351917a88481f16e36cc5236421e",
+                      "after_sha256":  "d62275a6ba977b1e8c2075db80c71e2c616db1019777e701d47585b1f1b8842d"
+                  },
+                  {
+                      "path":  "WinUIEditor/EditorBaseControl.cpp",
+                      "before_sha256":  "3282a1407c280f78246891a2410c0b112ac2bdca851cbc8b0da3ae7e39c40ba4",
+                      "after_sha256":  "a284be1b51a9673b0f92530a91eace80c95f69a58b9fe7edca5d3fc62feaf291"
+                  },
+                  {
+                      "path":  "WinUIEditor/EditorBaseControl.h",
+                      "before_sha256":  "aa86f3695e75ebb444e4b45bae85f6b9de7382ad7bdef46a2f17152b1f3dafb8",
+                      "after_sha256":  "745b9d6b6056b28c67ebd96be96ff11876a36bfd87d0dfb21d05bd8a35e8892d"
+                  },
+                  {
+                      "path":  "WinUIEditor/IEditorAccess.idl",
+                      "before_sha256":  "f5f79238dfd5000d5216efd585c280dc1582f3dd7356a84245815a54356ee48a",
+                      "after_sha256":  "38ee0eec7e6ce5afc73febec6ceae642deff814d0c72664a4a477c03368be449"
+                  },
+                  {
+                      "path":  "WinUIEditor/WinUIEditor.vcxproj",
+                      "before_sha256":  "e573bffda84b05a2ed5bc82414bc5f8a7cb5b9402b47a789054e8c6d5f345f2b",
+                      "after_sha256":  "985c37259f67d6f10cde9b1c562742d00f3e6ab7d780db7dc76809b529a6c486"
+                  },
+                  {
+                      "path":  "WinUIEditor/packages.config",
+                      "before_sha256":  "b6ded74ca2c3317340f6cb18b3e8fdbbdf240eac18aef42edb59ed0b93013461",
+                      "after_sha256":  "0e7c1f7f64b6a54fbb566d0608f5ec1136be7ae1b87c1d8bf501b59d29f5685c"
+                  },
+                  {
+                      "path":  "scintilla/winui/ScintillaWin.cxx",
+                      "before_sha256":  "8609a239af361949811979efbddc270dd05ee6d6b8a3fe3884dceb17508e6aa5",
+                      "after_sha256":  "5559e9e316824aaf95e9a531368a5e688bb761b29173b2b67919e181f7671bbe"
+                  },
+                  {
+                      "path":  "scintilla/winui/ScintillaWin.h",
+                      "before_sha256":  "e5d6508e524bd55a0806d74d369ccad2102b080872d5e269f8881193b25216d1",
+                      "after_sha256":  "157b0e7371f536473e4cb45bfd7afbc0f59104c3bc89920dda0b31a23932c59d"
+                  },
+                  {
+                      "path":  "scintilla/winui/PlatWin.cxx",
+                      "before_sha256":  "6d797abe806d2feebbfea8988fbafbb1b826dc5f3d6567ad55b3bb1a68259727",
+                      "after_sha256":  "182354d2763e8bc94b06dccfb6c86f5b3ebf3af3f71ab59740e01d9c1f140f36"
+                  },
+                  {
+                      "path":  "WinUIEditor/CodeEditorHandler.cpp",
+                      "before_sha256":  "fa30f9d7cc9fb830a48046e1c9ad8a786f3a46098d5da30ee2121fc7111207d0",
+                      "after_sha256":  "1a2c05512584d051f9c827eed62ae9cd3ed352eb2627280a698b4c365f38560c"
+                  },
+                  {
+                      "path":  "scintilla/src/CallTip.cxx",
+                      "before_sha256":  "ee57394de791867bf58967cabf18451d757f77c594440ca045fd3b5badadfec1",
+                      "after_sha256":  "eef727793413ca5f8307dc1deb0acee3facbacd9e57a57bad42c778770507be3"
+                  }
+              ],
+    "overlays":  [
+                     {
+                         "source":  "CommittedTextState.h",
+                         "target":  "scintilla/winui/CommittedTextState.h",
+                         "sha256":  "6d4ce361eca927232057e96400850c2d4b89b73b833d1f0036f7cdf07b5d6061"
+                     }
+                 ]
 }

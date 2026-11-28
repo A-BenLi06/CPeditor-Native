@@ -67,13 +67,37 @@ MainWindow::MainWindow() {
     RunOnlyBtnLabel().Text(strings_.get(L"RunOnlyBtnText"));
     CompileAndRunBtnLabel().Text(strings_.get(L"CompileAndRunBtnText"));
     StopBtnLabel().Text(strings_.get(L"StopBtnText"));
-    CompanionBtnLabel().Text(strings_.get(L"CompanionBtnText"));
-    CheckerToggleButton().Content(box_value(strings_.get(L"CheckerToggleText")));
-    ToolTipService::SetToolTip(CheckerConfigButton(), box_value(strings_.get(L"CheckerConfigTip")));
+    CompanionBtnLabel().Text(L"");
+    CompanionBtnLabel().Visibility(Visibility::Collapsed);
+    TestCasesHeaderText().Text(strings_.get(L"TestCasesTitle"));
+    OutdatedBadgeText().Text(strings_.get(L"OutdatedBadge"));
+    CheckerPrefixText().Text(strings_.get(L"CheckerModePrefix"));
+    CompanionPaneTitle().Text(strings_.get(L"CompanionInboxTitle"));
+    CompanionFilterAllItem().Text(strings_.get(L"CompanionFilterAllLabel"));
+    CompanionFilterPendingItem().Text(strings_.get(L"CompanionPending"));
+    CompanionFilterAppliedItem().Text(strings_.get(L"CompanionApplied"));
+
+    MenuUseExternalCheckerItem().Text(strings_.get(L"UseExternalCheckerMenu"));
+    MenuCheckerSettingsItem().Text(strings_.get(L"ConfigureCheckerMenu"));
+    MenuCompareTrailingItem().Text(strings_.get(L"ComparisonTrailing"));
+    MenuCompareStrictItem().Text(strings_.get(L"ComparisonStrict"));
+    MenuCompareByteItem().Text(strings_.get(L"ComparisonByte"));
+    MenuEnableAllSamplesItem().Text(strings_.get(L"EnableAllSamples"));
+    MenuDisableAllSamplesItem().Text(strings_.get(L"DisableAllSamples"));
+    MenuRemoveDisabledSamplesItem().Text(strings_.get(L"RemoveDisabledSamples"));
     UseAllOutputsItem().Text(strings_.get(L"UseAllOutputsAsExpected"));
     DeleteAllSamplesItem().Text(strings_.get(L"DeleteAllSamples"));
     StatusWrapButton().Content(box_value(strings_.get(L"StatusBarWrapOff")));
-    SummaryBadgeText().Text(strings_.get(L"RunIdle"));
+    SummaryBadgeText().Text(L"0/0");
+
+    ToolTipService::SetToolTip(TopCompileButton(), box_value(strings_.get(L"TopCompileTip")));
+    ToolTipService::SetToolTip(TopRunButton(), box_value(strings_.get(L"TopRunTip")));
+    ToolTipService::SetToolTip(TopStopButton(), box_value(strings_.get(L"TopStopTip")));
+    ToolTipService::SetToolTip(CompanionToggleButton(), box_value(strings_.get(L"CompanionTip")));
+    ToolTipService::SetToolTip(SettingsButton(), box_value(strings_.get(L"SettingsTip")));
+    ToolTipService::SetToolTip(InspectorToggleButton(), box_value(strings_.get(L"ToggleInspectorTip")));
+    ToolTipService::SetToolTip(AddTestButton(), box_value(strings_.get(L"AddSampleTip")));
+    ToolTipService::SetToolTip(MoreSamplesButton(), box_value(strings_.get(L"MoreSamplesTip")));
 
     KeyboardAccelerator settings_acc;
     settings_acc.Key(static_cast<Windows::System::VirtualKey>(188)); // VK_OEM_COMMA
@@ -215,9 +239,6 @@ fire_and_forget MainWindow::Root_Loaded(IInspectable const&, RoutedEventArgs con
             }
         }
         RebuildToolchainComboBox();
-        for (auto const& choice : runner_configuration_.comparisons) {
-            ComboBoxItem item; item.Content(box_value(strings_.get(to_hstring(choice.label_resource)))); Comparisons().Items().Append(item);
-        }
         for (auto const& profile : configuration_.profiles) {
             (void)runner_configuration_.default_toolchain(to_string(hstring{profile.id}));
             ComboBoxItem item; item.Content(box_value(strings_.get(profile.label_resource))); Profiles().Items().Append(item);
@@ -363,27 +384,24 @@ void MainWindow::SetViewMode(ViewMode mode) {
         SplitHandle().Visibility(Visibility::Collapsed);
     } else if (mode == ViewMode::TestsOnly) {
         // Keep EditorDeck mounted at 0px width so WinUIEdit Scintilla & Undo history survive mode switches.
-        LeftColumn().MinWidth(0); RightColumn().MinWidth(320);
+        LeftColumn().MinWidth(0); RightColumn().MinWidth(360);
         LeftColumn().Width(GridLength{0, GridUnitType::Pixel});
         SplitterColumn().Width(GridLength{0, GridUnitType::Pixel});
         RightColumn().Width(GridLength{1, GridUnitType::Star});
         SplitHandle().Visibility(Visibility::Collapsed);
     } else {
-        LeftColumn().MinWidth(260); RightColumn().MinWidth(320);
-        SplitterColumn().Width(GridLength{6, GridUnitType::Pixel});
+        LeftColumn().MinWidth(300); RightColumn().MinWidth(360);
+        SplitterColumn().Width(GridLength{7, GridUnitType::Pixel});
         SplitHandle().Visibility(Visibility::Visible);
-        if (split_left_width_ >= 260.0 && total_width > 620.0) {
-            double clamped = std::clamp(split_left_width_, 260.0, total_width - 326.0);
-            LeftColumn().Width(GridLength{clamped, GridUnitType::Pixel});
-            RightColumn().Width(GridLength{1, GridUnitType::Star});
-        } else {
-            LeftColumn().Width(GridLength{3, GridUnitType::Star});
-            RightColumn().Width(GridLength{2, GridUnitType::Star});
-        }
+        double const desired = split_left_width_ > 0.0 ? split_left_width_ : 510.0;
+        double const max_right = total_width > 667.0 ? std::min(720.0, total_width - 307.0) : 510.0;
+        double const clamped = std::clamp(desired, 360.0, std::max(360.0, max_right));
+        LeftColumn().Width(GridLength{1, GridUnitType::Star});
+        RightColumn().Width(GridLength{clamped, GridUnitType::Pixel});
     }
-    ViewEditorOnlyButton().IsChecked(mode == ViewMode::EditorOnly);
-    ViewSplitButton().IsChecked(mode == ViewMode::Split);
-    ViewTestsOnlyButton().IsChecked(mode == ViewMode::TestsOnly);
+    updating_ui_ = true;
+    InspectorToggleButton().IsChecked(mode != ViewMode::EditorOnly);
+    updating_ui_ = false;
 }
 
 void MainWindow::ViewEditorOnly_Click(IInspectable const&, RoutedEventArgs const&) { SetViewMode(ViewMode::EditorOnly); }
@@ -391,6 +409,10 @@ void MainWindow::ViewSplit_Click(IInspectable const&, RoutedEventArgs const&) { 
 void MainWindow::ViewTestsOnly_Click(IInspectable const&, RoutedEventArgs const&) { SetViewMode(ViewMode::TestsOnly); }
 void MainWindow::ToggleTestPanel_Click(IInspectable const&, RoutedEventArgs const&) {
     SetViewMode(view_mode_ == ViewMode::EditorOnly ? ViewMode::Split : ViewMode::EditorOnly);
+}
+void MainWindow::InspectorToggle_Click(IInspectable const&, RoutedEventArgs const&) {
+    if (updating_ui_) return;
+    SetViewMode(view_mode_ == ViewMode::Split ? ViewMode::EditorOnly : ViewMode::Split);
 }
 void MainWindow::ToggleCompanionPane_Click(IInspectable const&, RoutedEventArgs const&) {
     companion_pane_open_ = !companion_pane_open_;
@@ -405,35 +427,51 @@ void MainWindow::SplitHandle_PointerPressed(IInspectable const&, PointerRoutedEv
     split_drag_active_ = SplitHandle().CapturePointer(args.Pointer());
     if (split_drag_active_) {
         split_drag_start_x_ = args.GetCurrentPoint(WorkspaceSplit()).Position().X;
-        split_drag_start_left_width_ = LeftColumn().ActualWidth();
+        split_drag_start_left_width_ = RightColumn().ActualWidth();
+        SplitLine().Background(Application::Current().Resources().Lookup(box_value(L"AccentFillColorDefaultBrush")).as<Brush>());
+        SplitPill().Background(Application::Current().Resources().Lookup(box_value(L"AccentFillColorDefaultBrush")).as<Brush>());
+        SplitPill().Opacity(1.0);
         args.Handled(true);
     }
 }
 void MainWindow::SplitHandle_PointerMoved(IInspectable const&, PointerRoutedEventArgs const& args) {
     if (!split_drag_active_ || view_mode_ != ViewMode::Split) return;
     double const total = WorkspaceSplit().ActualWidth();
-    double const max_left = std::max(260.0, total - 326.0);
+    double const max_right = total > 667.0 ? std::min(720.0, total - 307.0) : 360.0;
     double const delta = args.GetCurrentPoint(WorkspaceSplit()).Position().X - split_drag_start_x_;
-    double const next = std::clamp(split_drag_start_left_width_ + delta, 260.0, max_left);
+    double const next = std::clamp(split_drag_start_left_width_ - delta, 360.0, std::max(360.0, max_right));
     split_left_width_ = next;
-    LeftColumn().Width(GridLength{next, GridUnitType::Pixel});
-    RightColumn().Width(GridLength{1, GridUnitType::Star});
+    LeftColumn().Width(GridLength{1, GridUnitType::Star});
+    RightColumn().Width(GridLength{next, GridUnitType::Pixel});
     args.Handled(true);
 }
 void MainWindow::SplitHandle_PointerReleased(IInspectable const&, PointerRoutedEventArgs const& args) {
     if (split_drag_active_) {
         split_drag_active_ = false;
         SplitHandle().ReleasePointerCapture(args.Pointer());
+        SplitLine().Background(Application::Current().Resources().Lookup(box_value(L"CardStrokeColorDefaultBrush")).as<Brush>());
+        SplitPill().Background(Application::Current().Resources().Lookup(box_value(L"ControlStrongStrokeColorDefaultBrush")).as<Brush>());
+        SplitPill().Opacity(0.0);
         args.Handled(true);
     }
 }
-void MainWindow::SplitHandle_PointerCaptureLost(IInspectable const&, PointerRoutedEventArgs const&) { split_drag_active_ = false; }
+void MainWindow::SplitHandle_PointerCaptureLost(IInspectable const&, PointerRoutedEventArgs const&) {
+    split_drag_active_ = false;
+    SplitLine().Background(Application::Current().Resources().Lookup(box_value(L"CardStrokeColorDefaultBrush")).as<Brush>());
+    SplitPill().Background(Application::Current().Resources().Lookup(box_value(L"ControlStrongStrokeColorDefaultBrush")).as<Brush>());
+    SplitPill().Opacity(0.0);
+}
 void MainWindow::SplitHandle_PointerEntered(IInspectable const&, PointerRoutedEventArgs const&) {
-    SplitHandle().Background(Application::Current().Resources().Lookup(box_value(L"AccentFillColorDefaultBrush")).as<Brush>());
+    if (!split_drag_active_) {
+        SplitLine().Background(Application::Current().Resources().Lookup(box_value(L"ControlStrongStrokeColorDefaultBrush")).as<Brush>());
+        SplitPill().Opacity(0.65);
+    }
 }
 void MainWindow::SplitHandle_PointerExited(IInspectable const&, PointerRoutedEventArgs const&) {
-    if (!split_drag_active_)
-        SplitHandle().Background(Application::Current().Resources().Lookup(box_value(L"CardStrokeColorDefaultBrush")).as<Brush>());
+    if (!split_drag_active_) {
+        SplitLine().Background(Application::Current().Resources().Lookup(box_value(L"CardStrokeColorDefaultBrush")).as<Brush>());
+        SplitPill().Opacity(0.0);
+    }
 }
 
 void MainWindow::AddDocument(std::filesystem::path path, cpn::windows::LoadedDocument loaded, std::optional<std::string> disk_digest) {
@@ -474,21 +512,32 @@ void MainWindow::AddRestoredDocument(cpn::SessionDocument record, cpn::windows::
     tab_hdr.Orientation(Orientation::Horizontal);
     tab_hdr.Spacing(6);
     TextBlock tab_title;
+    tab_title.FontSize(12);
+    tab_title.TextTrimming(TextTrimming::CharacterEllipsis);
     tab_title.VerticalAlignment(VerticalAlignment::Center);
     Border tab_badge;
-    tab_badge.CornerRadius(CornerRadius{4});
-    tab_badge.Padding(Thickness{5, 1, 5, 1});
+    tab_badge.CornerRadius(CornerRadius{9});
+    tab_badge.Padding(Thickness{6, 1, 6, 1});
     tab_badge.Visibility(Visibility::Collapsed);
     TextBlock tab_badge_text;
     tab_badge_text.FontSize(10);
     tab_badge_text.FontWeight(Microsoft::UI::Text::FontWeights::SemiBold());
     tab_badge.Child(tab_badge_text);
+    Border tab_dirty_dot;
+    tab_dirty_dot.Width(6);
+    tab_dirty_dot.Height(6);
+    tab_dirty_dot.CornerRadius(CornerRadius{3});
+    tab_dirty_dot.VerticalAlignment(VerticalAlignment::Center);
+    tab_dirty_dot.Background(Application::Current().Resources().Lookup(box_value(L"SystemFillColorCautionBrush")).as<Brush>());
+    tab_dirty_dot.Visibility(Visibility::Collapsed);
     tab_hdr.Children().Append(tab_title);
     tab_hdr.Children().Append(tab_badge);
+    tab_hdr.Children().Append(tab_dirty_dot);
     document->tab.Header(tab_hdr);
     document->tab_title = tab_title;
     document->tab_badge = tab_badge;
     document->tab_badge_text = tab_badge_text;
+    document->tab_dirty_dot = tab_dirty_dot;
 
     document->control = winrt::WinUIEditor::CodeEditorControl{};
     document->test_view = ScrollViewer{};
@@ -502,30 +551,134 @@ void MainWindow::AddRestoredDocument(cpn::SessionDocument record, cpn::windows::
     document->control.IsEnabled(false); document->control.Visibility(Visibility::Collapsed);
     document->test_view.Visibility(Visibility::Collapsed);
     document->test_view.VerticalScrollBarVisibility(ScrollBarVisibility::Auto);
-    document->test_panel.Spacing(0);
+    document->test_panel.Padding(Thickness{12, 10, 12, 14});
+    document->test_panel.Spacing(10);
 
-    // Empty samples guide card
+    // Per-document Fluent Compiler Output Card (inside scrollable test_panel)
+    Border c_banner;
+    c_banner.CornerRadius(CornerRadius{8});
+    c_banner.BorderThickness(Thickness{1});
+    c_banner.BorderBrush(Application::Current().Resources().Lookup(box_value(L"CardStrokeColorDefaultBrush")).as<Brush>());
+    c_banner.Background(Application::Current().Resources().Lookup(box_value(L"CardBackgroundFillColorDefaultBrush")).as<Brush>());
+    c_banner.Visibility(Visibility::Collapsed);
+    Grid c_grid;
+    ColumnDefinition cc0, cc1;
+    cc0.Width(GridLength{8, GridUnitType::Pixel});
+    cc1.Width(GridLength{1, GridUnitType::Star});
+    c_grid.ColumnDefinitions().Append(cc0);
+    c_grid.ColumnDefinitions().Append(cc1);
+    Border c_accent;
+    c_accent.Width(3);
+    c_accent.CornerRadius(CornerRadius{2});
+    c_accent.Margin(Thickness{5, 10, 0, 10});
+    c_accent.HorizontalAlignment(HorizontalAlignment::Left);
+    Grid::SetColumn(c_accent, 0);
+    c_grid.Children().Append(c_accent);
+    StackPanel c_body;
+    c_body.Padding(Thickness{10, 10, 12, 10});
+    c_body.Spacing(6);
+    Grid::SetColumn(c_body, 1);
+    c_grid.Children().Append(c_body);
+    c_banner.Child(c_grid);
+
+    Grid c_hdr_grid;
+    ColumnDefinition ch0, ch1;
+    ch0.Width(GridLength{1, GridUnitType::Star});
+    ch1.Width(GridLength{0, GridUnitType::Auto});
+    c_hdr_grid.ColumnDefinitions().Append(ch0);
+    c_hdr_grid.ColumnDefinitions().Append(ch1);
+    Button c_toggle;
+    c_toggle.Style(Application::Current().Resources().Lookup(box_value(L"FluentIconButtonStyle")).as<Style>());
+    c_toggle.HorizontalAlignment(HorizontalAlignment::Stretch);
+    c_toggle.HorizontalContentAlignment(HorizontalAlignment::Left);
+    c_toggle.Padding(Thickness{0});
+    StackPanel c_toggle_row;
+    c_toggle_row.Orientation(Orientation::Horizontal);
+    c_toggle_row.Spacing(8);
+    FontIcon c_chevron;
+    c_chevron.Glyph(L"\xE70D");
+    c_chevron.FontSize(11);
+    TextBlock c_header;
+    c_header.FontSize(12);
+    c_header.FontWeight(Microsoft::UI::Text::FontWeights::SemiBold());
+    c_toggle_row.Children().Append(c_chevron);
+    c_toggle_row.Children().Append(c_header);
+    c_toggle.Content(c_toggle_row);
+    Grid::SetColumn(c_toggle, 0);
+    c_hdr_grid.Children().Append(c_toggle);
+
+    Button c_copy;
+    c_copy.Style(Application::Current().Resources().Lookup(box_value(L"FluentIconButtonStyle")).as<Style>());
+    c_copy.Width(24);
+    c_copy.Height(24);
+    c_copy.Padding(Thickness{0});
+    FontIcon c_copy_icon;
+    c_copy_icon.Glyph(L"\xE8C8");
+    c_copy_icon.FontSize(12);
+    c_copy.Content(c_copy_icon);
+    ToolTipService::SetToolTip(c_copy, box_value(strings_.get(L"CopyTextTip")));
+    Grid::SetColumn(c_copy, 1);
+    c_hdr_grid.Children().Append(c_copy);
+    c_body.Children().Append(c_hdr_grid);
+
+    ScrollViewer c_scroll;
+    c_scroll.MaxHeight(180);
+    c_scroll.VerticalScrollBarVisibility(ScrollBarVisibility::Auto);
+    c_scroll.HorizontalScrollBarVisibility(ScrollBarVisibility::Auto);
+    c_scroll.Visibility(Visibility::Collapsed);
+    TextBlock c_out_text;
+    c_out_text.FontFamily(FontFamily{L"Cascadia Mono, Consolas, Courier New"});
+    c_out_text.FontSize(12);
+    c_out_text.TextWrapping(TextWrapping::NoWrap);
+    c_out_text.IsTextSelectionEnabled(true);
+    c_scroll.Content(c_out_text);
+    c_body.Children().Append(c_scroll);
+
+    document->compiler_banner = c_banner;
+    document->compiler_accent_bar = c_accent;
+    document->compiler_chevron = c_chevron;
+    document->compiler_header = c_header;
+    document->compiler_copy = c_copy;
+    document->compiler_scroll = c_scroll;
+    document->compiler_output_text = c_out_text;
+    document->test_panel.Children().Append(c_banner);
+
+    // Empty samples Fluent guide card
     Border empty_card;
-    empty_card.Margin(Thickness{12});
-    empty_card.Padding(Thickness{16});
-    empty_card.CornerRadius(CornerRadius{6});
+    empty_card.Padding(Thickness{20});
+    empty_card.CornerRadius(CornerRadius{8});
     empty_card.BorderThickness(Thickness{1});
     empty_card.BorderBrush(Application::Current().Resources().Lookup(box_value(L"CardStrokeColorDefaultBrush")).as<Brush>());
     empty_card.Background(Application::Current().Resources().Lookup(box_value(L"CardBackgroundFillColorDefaultBrush")).as<Brush>());
     StackPanel empty_stack;
-    empty_stack.Spacing(4);
+    empty_stack.Spacing(8);
+    empty_stack.HorizontalAlignment(HorizontalAlignment::Center);
+    FontIcon empty_icon;
+    empty_icon.Glyph(L"\xE8FD");
+    empty_icon.FontSize(22);
+    empty_icon.Opacity(0.55);
+    empty_icon.HorizontalAlignment(HorizontalAlignment::Center);
     TextBlock empty_title;
     empty_title.Text(strings_.get(L"NoSamplesTitle"));
     empty_title.FontWeight(Microsoft::UI::Text::FontWeights::SemiBold());
+    empty_title.HorizontalAlignment(HorizontalAlignment::Center);
     TextBlock empty_hint;
     empty_hint.Text(strings_.get(L"NoSamplesHint"));
     empty_hint.FontSize(12);
     empty_hint.Opacity(0.75);
     empty_hint.TextWrapping(TextWrapping::Wrap);
+    empty_hint.TextAlignment(TextAlignment::Center);
+    Button empty_add_btn;
+    empty_add_btn.Content(box_value(strings_.get(L"AddSampleTip")));
+    empty_add_btn.HorizontalAlignment(HorizontalAlignment::Center);
+    empty_add_btn.CornerRadius(CornerRadius{6});
+    empty_stack.Children().Append(empty_icon);
     empty_stack.Children().Append(empty_title);
     empty_stack.Children().Append(empty_hint);
+    empty_stack.Children().Append(empty_add_btn);
     empty_card.Child(empty_stack);
     document->empty_tests_panel = empty_card;
+    document->empty_add_test_btn = empty_add_btn;
     document->test_panel.Children().Append(empty_card);
 
     document->test_view.Content(document->test_panel);
@@ -533,22 +686,39 @@ void MainWindow::AddRestoredDocument(cpn::SessionDocument record, cpn::windows::
     RefreshTestHeaders(document);
     document->initial_record = std::move(record);
     const auto weak = get_weak(); const std::weak_ptr<Document> weak_document = document;
+    c_toggle.Click([weak, weak_document](auto const&, auto const&) {
+        if (auto self = weak.get()) if (auto doc = weak_document.lock()) {
+            doc->compiler_expanded = !doc->compiler_expanded;
+            self->RenderCompilerBanner(doc);
+        }
+    });
+    c_copy.Click([weak, weak_document](auto const&, auto const&) {
+        if (auto self = weak.get()) if (auto doc = weak_document.lock())
+            self->CopyTextToClipboard(doc->compiler_output_text.Text());
+    });
+    empty_add_btn.Click([weak, weak_document](auto const&, auto const&) {
+        if (auto self = weak.get()) if (auto doc = weak_document.lock()) self->AddTest(doc);
+    });
     document->loaded = document->control.Loaded(auto_revoke, [weak, weak_document](auto const&, auto const&) {
         if (auto self = weak.get()) if (auto value = weak_document.lock()) self->InitializeDocument(std::move(value));
     });
     const auto previous_tab = Tabs().SelectedItem();
     documents_.reserve(documents_.size() + 1);
+    mutating_tabs_ = true;
     try {
         documents_.push_back(document);
         EditorDeck().Children().Append(document->control); TestDeck().Children().Append(document->test_view);
-        Tabs().TabItems().Append(document->tab); Tabs().SelectedItem(document->tab); SelectDocument(document);
+        Tabs().TabItems().Append(document->tab); Tabs().SelectedItem(document->tab); mutating_tabs_ = false; SelectDocument(document);
     } catch (...) {
+        mutating_tabs_ = false;
         const auto failure = std::current_exception(); document->closed = true; document->loaded.revoke();
         if (document->adapter) document->adapter->dispose();
         std::uint32_t index{};
         try { if (EditorDeck().Children().IndexOf(document->control, index)) EditorDeck().Children().RemoveAt(index); } catch (...) {}
         try { if (TestDeck().Children().IndexOf(document->test_view, index)) TestDeck().Children().RemoveAt(index); } catch (...) {}
+        mutating_tabs_ = true;
         try { if (Tabs().TabItems().IndexOf(document->tab, index)) Tabs().TabItems().RemoveAt(index); } catch (...) {}
+        mutating_tabs_ = false;
         std::erase(documents_, document);
         try { Tabs().SelectedItem(previous_tab); SelectDocument(CurrentDocument()); } catch (...) {}
         std::rethrow_exception(failure);
@@ -637,7 +807,7 @@ void MainWindow::SelectDocument(std::shared_ptr<Document> const& selected) {
         document->control.Visibility(visibility); document->test_view.Visibility(visibility);
     }
     if (!selected) {
-        CompilerOutputBanner().Visibility(Visibility::Collapsed);
+        UpdateCheckerMenuState({});
         UpdateControls();
         return;
     }
@@ -645,9 +815,9 @@ void MainWindow::SelectDocument(std::shared_ptr<Document> const& selected) {
     try {
         select_id(Profiles(), configuration_.profiles, selected->profile);
         select_id(Toolchains(), runner_configuration_.toolchains, selected->toolchain);
-        select_id(Comparisons(), runner_configuration_.comparisons, selected->comparison);
     } catch (...) { selecting_document_ = false; throw; }
     selecting_document_ = false;
+    UpdateCheckerMenuState(selected);
     UpdateDocument(selected);
     RenderCompilerBanner(selected);
     UpdateSummaryBadge(selected);
@@ -656,6 +826,25 @@ void MainWindow::SelectDocument(std::shared_ptr<Document> const& selected) {
 
 void MainWindow::Tabs_SelectionChanged(IInspectable const&, SelectionChangedEventArgs const&) {
     if (initialized_) { SelectDocument(CurrentDocument()); ScheduleRecoverySave(); }
+}
+void MainWindow::Tabs_TabItemsChanged(TabView const& sender, Windows::Foundation::Collections::IVectorChangedEventArgs const&) {
+    if (mutating_tabs_ || shutting_down_ || !initialized_ || !WorkspaceMutable()) return;
+    auto const items = sender.TabItems();
+    if (items.Size() != documents_.size()) return;
+    std::vector<std::shared_ptr<Document>> reordered;
+    reordered.reserve(documents_.size());
+    bool order_changed = false;
+    for (std::uint32_t i = 0; i < items.Size(); ++i) {
+        auto tab_item = items.GetAt(i);
+        auto it = std::find_if(documents_.begin(), documents_.end(), [&](auto const& d) { return d->tab == tab_item; });
+        if (it == documents_.end()) return;
+        if (static_cast<std::size_t>(std::distance(documents_.begin(), it)) != i) order_changed = true;
+        reordered.push_back(*it);
+    }
+    if (!order_changed) return;
+    documents_ = std::move(reordered);
+    for (auto const& doc : documents_) UpdateDocument(doc);
+    ScheduleRecoverySave();
 }
 fire_and_forget MainWindow::Tabs_AddTabButtonClick(TabView const&, IInspectable const&) {
     co_await ExecuteAsync(Command::New);
@@ -679,12 +868,6 @@ void MainWindow::Toolchain_SelectionChanged(IInspectable const&, SelectionChange
     auto document = CurrentDocument(); const auto index = Toolchains().SelectedIndex();
     if (selecting_document_ || !document || index < 0 || !TestsMutable(document)) return;
     document->toolchain = runner_configuration_.toolchains.at(static_cast<std::size_t>(index)).id;
-    TestsChanged(document);
-}
-void MainWindow::Comparison_SelectionChanged(IInspectable const&, SelectionChangedEventArgs const&) {
-    auto document = CurrentDocument(); const auto index = Comparisons().SelectedIndex();
-    if (selecting_document_ || !document || index < 0 || !TestsMutable(document)) return;
-    document->comparison = runner_configuration_.comparisons.at(static_cast<std::size_t>(index)).id;
     TestsChanged(document);
 }
 void MainWindow::TestsChanged(std::shared_ptr<Document> const& document) {
@@ -718,7 +901,10 @@ void MainWindow::UpdateDocument(std::shared_ptr<Document> const& document) {
     const bool dirty = document->adapter ? (!available || document->adapter->dirty()) :
         (document->initial_record && (!document->save_point || cpn::sha256(document->initial_record->source_text) != document->save_point->source_digest));
     if (document->tab_title) {
-        document->tab_title.Text(hstring{name + (dirty ? std::wstring{strings_.get(UiStrings::unsaved_suffix)} : L"")});
+        document->tab_title.Text(hstring{name});
+    }
+    if (document->tab_dirty_dot) {
+        document->tab_dirty_dot.Visibility(dirty ? Visibility::Visible : Visibility::Collapsed);
     }
     UpdateSummaryBadge(document);
     if (document->result) {
@@ -815,8 +1001,18 @@ void MainWindow::UpdateControls() {
 
     Profiles().IsEnabled(metadata_mutable);
     Toolchains().IsEnabled(metadata_mutable);
-    Comparisons().IsEnabled(metadata_mutable);
-    CheckerToggleButton().IsEnabled(initialized_ && WorkspaceMutable() && !shutting_down_);
+    Tabs().CanReorderTabs(WorkspaceMutable() && !busy_ && !shutting_down_);
+
+    bool const running = !shutting_down_ && document && document->run_active;
+    bool const checker_ctrl_ok = initialized_ && WorkspaceMutable() && !shutting_down_ && !running;
+    MenuUseExternalCheckerItem().IsEnabled(checker_ctrl_ok);
+    MenuCheckerSettingsItem().IsEnabled(checker_ctrl_ok);
+    bool const policy_ok = !checker_settings_.enabled && metadata_mutable && !running;
+    MenuCompareTrailingItem().IsEnabled(policy_ok);
+    MenuCompareStrictItem().IsEnabled(policy_ok);
+    MenuCompareByteItem().IsEnabled(policy_ok);
+    CheckerMenuButton().IsEnabled(initialized_ && !shutting_down_ && !running);
+    UpdateCheckerMenuState(document);
 
     MenuNewItem().IsEnabled(file_ops_ready && WorkspaceMutable());
     MenuOpenItem().IsEnabled(file_ops_ready && WorkspaceMutable());
@@ -868,19 +1064,60 @@ void MainWindow::UpdateControls() {
                               tc && document->compiled_artifact->toolchain_dump == tc->profile.dump() &&
                               std::filesystem::is_regular_file(document->compiled_artifact->path);
 
-    CompileButton().Visibility(compiled_tc ? Visibility::Visible : Visibility::Collapsed);
-    CompileButton().IsEnabled(can_run_base && compiled_tc);
-    RunOnlyButton().IsEnabled(can_run_base && (!compiled_tc || has_artifact));
-    RunButton().IsEnabled(can_run_base);
-    CancelButton().IsEnabled(!shutting_down_ && document && document->run_active && !document->cancel_requested);
+    bool const running_active = !shutting_down_ && document && document->run_active;
+    bool const stop_enabled = running_active && !document->cancel_requested;
+
+    TopCompileButton().Visibility(compiled_tc && !running_active ? Visibility::Visible : Visibility::Collapsed);
+    TopCompileButton().IsEnabled(can_run_base && compiled_tc);
+    TopRunButton().Visibility(!running_active ? Visibility::Visible : Visibility::Collapsed);
+    TopRunButton().IsEnabled(can_run_base);
+    TopStopButton().Visibility(running_active ? Visibility::Visible : Visibility::Collapsed);
+    TopStopButton().IsEnabled(stop_enabled);
+
+    if (running_active) {
+        CompileButton().Visibility(Visibility::Collapsed);
+        RunOnlyButton().Visibility(Visibility::Collapsed);
+        RunButton().Visibility(Visibility::Collapsed);
+        CancelButton().Visibility(Visibility::Visible);
+        CancelButton().IsEnabled(stop_enabled);
+    } else if (compiled_tc) {
+        CancelButton().Visibility(Visibility::Collapsed);
+        CompileButton().Visibility(Visibility::Visible);
+        CompileButton().IsEnabled(can_run_base);
+        RunOnlyButton().Visibility(Visibility::Visible);
+        RunOnlyButton().IsEnabled(can_run_base && has_artifact);
+        RunButton().Visibility(Visibility::Visible);
+        RunButton().IsEnabled(can_run_base);
+        Grid::SetColumn(RunButton(), 2);
+        Grid::SetColumnSpan(RunButton(), 1);
+        CompileAndRunBtnLabel().Text(strings_.get(L"CompileAndRunBtnText"));
+    } else {
+        CancelButton().Visibility(Visibility::Collapsed);
+        CompileButton().Visibility(Visibility::Collapsed);
+        RunOnlyButton().Visibility(Visibility::Collapsed);
+        RunButton().Visibility(Visibility::Visible);
+        RunButton().IsEnabled(can_run_base);
+        Grid::SetColumn(RunButton(), 0);
+        Grid::SetColumnSpan(RunButton(), 3);
+        CompileAndRunBtnLabel().Text(strings_.get(L"RunOnlyBtnText"));
+    }
 
     MenuCompileItem().IsEnabled(can_run_base && compiled_tc);
     MenuRunOnlyItem().IsEnabled(can_run_base && (!compiled_tc || has_artifact));
     MenuCompileAndRunItem().IsEnabled(can_run_base);
-    MenuStopItem().IsEnabled(!shutting_down_ && document && document->run_active && !document->cancel_requested);
+    MenuStopItem().IsEnabled(stop_enabled);
     MenuAddSampleItem().IsEnabled(metadata_mutable);
     AddTestButton().IsEnabled(metadata_mutable);
-    MoreSamplesButton().IsEnabled(metadata_mutable && document && !document->tests.empty());
+    if (document && document->empty_add_test_btn) document->empty_add_test_btn.IsEnabled(metadata_mutable);
+    bool const has_tests = document && !document->tests.empty();
+    bool const has_disabled = document && std::any_of(document->tests.begin(), document->tests.end(),
+        [](auto const& t) { return !t->enabled_value; });
+    MenuEnableAllSamplesItem().IsEnabled(metadata_mutable && has_tests);
+    MenuDisableAllSamplesItem().IsEnabled(metadata_mutable && has_tests);
+    MenuRemoveDisabledSamplesItem().IsEnabled(metadata_mutable && has_disabled);
+    UseAllOutputsItem().IsEnabled(metadata_mutable && has_tests && document && IsResultCurrent(document));
+    DeleteAllSamplesItem().IsEnabled(metadata_mutable && has_tests);
+    MoreSamplesButton().IsEnabled(metadata_mutable && has_tests);
 
     UpdateRecoveryControls();
     UpdateCompanionControls();
@@ -1556,7 +1793,9 @@ void MainWindow::RemoveDocument(std::shared_ptr<Document> const& document) {
     if (TestDeck().Children().IndexOf(document->test_view, index)) TestDeck().Children().RemoveAt(index);
     std::erase(documents_, document);
     ScheduleRecoverySave();
+    mutating_tabs_ = true;
     if (Tabs().TabItems().IndexOf(document->tab, index)) Tabs().TabItems().RemoveAt(index);
+    mutating_tabs_ = false;
     if (documents_.empty()) AddDocument({}, {});
     else { if (!CurrentDocument()) Tabs().SelectedItem(documents_.front()->tab); SelectDocument(CurrentDocument()); }
 }

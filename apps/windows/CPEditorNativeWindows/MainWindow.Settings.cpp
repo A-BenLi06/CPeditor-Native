@@ -8,7 +8,6 @@ using namespace winrt;
 using namespace Windows::Foundation;
 using namespace Microsoft::UI::Xaml;
 using namespace Microsoft::UI::Xaml::Controls;
-using namespace Microsoft::UI::Xaml::Controls::Primitives;
 using namespace Microsoft::UI::Xaml::Media;
 using cpn::windows::CheckerModel;
 using cpn::windows::RunnerConfiguration;
@@ -31,6 +30,16 @@ std::uint64_t parse_positive_u64(hstring const& text) {
     if (pos != s.size() || value == 0) throw std::invalid_argument("Invalid positive timeout.");
     return value;
 }
+Border make_settings_card(UIElement const& child) {
+    Border card;
+    card.CornerRadius(CornerRadius{8});
+    card.BorderThickness(Thickness{1});
+    card.BorderBrush(Application::Current().Resources().Lookup(box_value(L"CardStrokeColorDefaultBrush")).as<Brush>());
+    card.Background(Application::Current().Resources().Lookup(box_value(L"CardBackgroundFillColorDefaultBrush")).as<Brush>());
+    card.Padding(Thickness{16, 14, 16, 14});
+    card.Child(child);
+    return card;
+}
 }
 
 void MainWindow::ApplyWorkspaceUiPreferences() {
@@ -50,12 +59,14 @@ void MainWindow::ApplyWorkspaceUiPreferences() {
     updating_ui_ = true;
     MenuWordWrapItem().IsChecked(ui_preferences_.word_wrap);
     MenuAutoPairItem().IsChecked(ui_preferences_.auto_pair);
-    CheckerToggleButton().IsChecked(checker_settings_.enabled);
     updating_ui_ = false;
     StatusWrapButton().Content(box_value(strings_.get(ui_preferences_.word_wrap ? L"StatusBarWrapOn" : L"StatusBarWrapOff")));
     if (auto doc = CurrentDocument()) {
         UpdateDocument(doc);
+        UpdateCheckerMenuState(doc);
         if (doc->result) RenderResult(doc);
+    } else {
+        UpdateCheckerMenuState({});
     }
 }
 
@@ -107,17 +118,26 @@ IAsyncAction MainWindow::ShowSettingsDialogAsync(int initial_tab) {
     if (!initialized_ || shutting_down_) co_return;
 
     bool const can_mutate = WorkspaceMutable();
-    auto const mono = Microsoft::UI::Xaml::Media::FontFamily{L"Cascadia Mono, Consolas, Courier New"};
+    auto const mono = FontFamily{L"Cascadia Mono, Consolas, Courier New"};
+    const auto weak = get_weak();
 
-    Pivot pivot;
-    pivot.MinWidth(680);
+    StackPanel shell;
+    shell.MinWidth(680);
+    shell.Spacing(12);
 
-    // Tab 0: General
-    PivotItem general_tab;
-    general_tab.Header(box_value(strings_.get(L"SettingsTabGeneral")));
+    SelectorBar nav_bar;
+    SelectorBarItem nav_general, nav_editor, nav_run;
+    nav_general.Text(strings_.get(L"SettingsTabGeneral"));
+    nav_editor.Text(strings_.get(L"SettingsTabEditor"));
+    nav_run.Text(strings_.get(L"SettingsTabRun"));
+    nav_bar.Items().Append(nav_general);
+    nav_bar.Items().Append(nav_editor);
+    nav_bar.Items().Append(nav_run);
+    shell.Children().Append(nav_bar);
+
+    // Page 0: General
     StackPanel general_panel;
-    general_panel.Spacing(14);
-    general_panel.Padding(Thickness{4, 12, 4, 8});
+    general_panel.Spacing(10);
 
     if (!can_mutate) {
         InfoBar ro_bar;
@@ -128,6 +148,8 @@ IAsyncAction MainWindow::ShowSettingsDialogAsync(int initial_tab) {
         general_panel.Children().Append(ro_bar);
     }
 
+    StackPanel appearance_group;
+    appearance_group.Spacing(12);
     ComboBox theme_combo;
     theme_combo.Header(box_value(strings_.get(L"SettingsThemeLabel")));
     theme_combo.MinWidth(240);
@@ -143,7 +165,6 @@ IAsyncAction MainWindow::ShowSettingsDialogAsync(int initial_tab) {
     else if (ui_preferences_.theme == "dark") theme_combo.SelectedIndex(2);
     else theme_combo.SelectedIndex(0);
 
-    const auto weak = get_weak();
     theme_combo.SelectionChanged([weak, theme_combo](auto const&, auto const&) {
         if (auto self = weak.get(); self && self->WorkspaceMutable()) {
             auto idx = theme_combo.SelectedIndex();
@@ -155,21 +176,20 @@ IAsyncAction MainWindow::ShowSettingsDialogAsync(int initial_tab) {
             }
         }
     });
-    general_panel.Children().Append(theme_combo);
+    appearance_group.Children().Append(theme_combo);
 
     TextBox recovery_path_box;
     recovery_path_box.Header(box_value(strings_.get(L"SettingsRecoveryLocation")));
     recovery_path_box.IsReadOnly(true);
     recovery_path_box.Text(hstring{recovery_paths_.recovery_file.wstring()});
-    general_panel.Children().Append(recovery_path_box);
-    general_tab.Content(general_panel);
+    appearance_group.Children().Append(recovery_path_box);
+    general_panel.Children().Append(make_settings_card(appearance_group));
 
-    // Tab 1: Editor
-    PivotItem editor_tab;
-    editor_tab.Header(box_value(strings_.get(L"SettingsTabEditor")));
+    // Page 1: Editor
     StackPanel editor_panel;
-    editor_panel.Spacing(14);
-    editor_panel.Padding(Thickness{4, 12, 4, 8});
+    editor_panel.Spacing(10);
+    StackPanel editor_group;
+    editor_group.Spacing(12);
 
     ToggleSwitch wrap_switch;
     wrap_switch.Header(box_value(strings_.get(L"SettingsWordWrap")));
@@ -182,7 +202,7 @@ IAsyncAction MainWindow::ShowSettingsDialogAsync(int initial_tab) {
             self->ScheduleRecoverySave();
         }
     });
-    editor_panel.Children().Append(wrap_switch);
+    editor_group.Children().Append(wrap_switch);
 
     ToggleSwitch assist_switch;
     assist_switch.Header(box_value(strings_.get(L"SettingsAutoPair")));
@@ -195,7 +215,7 @@ IAsyncAction MainWindow::ShowSettingsDialogAsync(int initial_tab) {
             self->ScheduleRecoverySave();
         }
     });
-    editor_panel.Children().Append(assist_switch);
+    editor_group.Children().Append(assist_switch);
 
     ComboBox tab_width_combo;
     tab_width_combo.Header(box_value(strings_.get(L"SettingsTabWidth")));
@@ -218,28 +238,37 @@ IAsyncAction MainWindow::ShowSettingsDialogAsync(int initial_tab) {
             }
         }
     });
-    editor_panel.Children().Append(tab_width_combo);
-    editor_tab.Content(editor_panel);
+    editor_group.Children().Append(tab_width_combo);
+    editor_panel.Children().Append(make_settings_card(editor_group));
 
-    // Tab 2: Run & Toolchains (Visual + JSON for Toolchain and External Checker)
-    PivotItem run_tab;
-    run_tab.Header(box_value(strings_.get(L"SettingsTabRun")));
+    // Page 2: Run & Toolchains
     ScrollViewer run_scroll;
     run_scroll.MaxHeight(520);
     run_scroll.VerticalScrollBarVisibility(ScrollBarVisibility::Auto);
     StackPanel run_panel;
-    run_panel.Spacing(14);
-    run_panel.Padding(Thickness{4, 12, 12, 12});
+    run_panel.Spacing(12);
+    run_panel.Padding(Thickness{0, 2, 10, 4});
+
+    // Toolchain Fluent Card
+    StackPanel tc_card_body;
+    tc_card_body.Spacing(10);
 
     TextBlock tc_title;
     tc_title.Text(strings_.get(L"SettingsToolchainSection"));
     tc_title.FontSize(14);
     tc_title.FontWeight(Microsoft::UI::Text::FontWeights::SemiBold());
-    run_panel.Children().Append(tc_title);
+    tc_card_body.Children().Append(tc_title);
 
-    StackPanel tc_top;
-    tc_top.Orientation(Orientation::Horizontal);
-    tc_top.Spacing(8);
+    Grid tc_top;
+    ColumnDefinition tc_c0, tc_c1;
+    tc_c0.Width(GridLength{1, GridUnitType::Star});
+    tc_c1.Width(GridLength{0, GridUnitType::Auto});
+    tc_top.ColumnDefinitions().Append(tc_c0);
+    tc_top.ColumnDefinitions().Append(tc_c1);
+
+    StackPanel tc_left;
+    tc_left.Orientation(Orientation::Horizontal);
+    tc_left.Spacing(8);
     ComboBox tc_picker;
     tc_picker.MinWidth(200);
     for (auto const& c : runner_configuration_.toolchains) {
@@ -257,21 +286,27 @@ IAsyncAction MainWindow::ShowSettingsDialogAsync(int initial_tab) {
 
     Button rescan_btn;
     rescan_btn.Content(box_value(strings_.get(L"SettingsRescanBtn")));
-    ToggleButton tc_visual_btn, tc_json_btn;
-    tc_visual_btn.Content(box_value(strings_.get(L"SettingsModeVisual")));
-    tc_json_btn.Content(box_value(strings_.get(L"SettingsModeJson")));
-    tc_visual_btn.IsChecked(true);
+    tc_left.Children().Append(tc_picker);
+    tc_left.Children().Append(rescan_btn);
+    Grid::SetColumn(tc_left, 0);
+    tc_top.Children().Append(tc_left);
 
-    tc_top.Children().Append(tc_picker);
-    tc_top.Children().Append(rescan_btn);
-    tc_top.Children().Append(tc_visual_btn);
-    tc_top.Children().Append(tc_json_btn);
-    run_panel.Children().Append(tc_top);
+    SelectorBar tc_mode_bar;
+    SelectorBarItem tc_visual_item, tc_json_item;
+    tc_visual_item.Text(strings_.get(L"SettingsModeVisual"));
+    tc_json_item.Text(strings_.get(L"SettingsModeJson"));
+    tc_mode_bar.Items().Append(tc_visual_item);
+    tc_mode_bar.Items().Append(tc_json_item);
+    tc_mode_bar.SelectedItem(tc_visual_item);
+    Grid::SetColumn(tc_mode_bar, 1);
+    tc_top.Children().Append(tc_mode_bar);
+    tc_card_body.Children().Append(tc_top);
 
     TextBlock tc_probe_status;
     tc_probe_status.FontSize(12);
+    tc_probe_status.Foreground(Application::Current().Resources().Lookup(box_value(L"TextFillColorSecondaryBrush")).as<Brush>());
     tc_probe_status.TextWrapping(TextWrapping::Wrap);
-    run_panel.Children().Append(tc_probe_status);
+    tc_card_body.Children().Append(tc_probe_status);
 
     StackPanel tc_visual_panel;
     tc_visual_panel.Spacing(8);
@@ -291,7 +326,7 @@ IAsyncAction MainWindow::ShowSettingsDialogAsync(int initial_tab) {
     tc_visual_panel.Children().Append(tc_run_args);
     tc_visual_panel.Children().Append(tc_run_timeout);
     tc_visual_panel.Children().Append(tc_inherit_env);
-    run_panel.Children().Append(tc_visual_panel);
+    tc_card_body.Children().Append(tc_visual_panel);
 
     TextBox tc_json_box;
     tc_json_box.AcceptsReturn(true);
@@ -300,17 +335,19 @@ IAsyncAction MainWindow::ShowSettingsDialogAsync(int initial_tab) {
     tc_json_box.MinHeight(180);
     tc_json_box.MaxHeight(260);
     tc_json_box.Visibility(Visibility::Collapsed);
-    run_panel.Children().Append(tc_json_box);
+    tc_card_body.Children().Append(tc_json_box);
 
     TextBlock tc_feedback;
     tc_feedback.FontSize(12);
     tc_feedback.TextWrapping(TextWrapping::Wrap);
-    run_panel.Children().Append(tc_feedback);
+    tc_card_body.Children().Append(tc_feedback);
 
     Button tc_apply_btn;
+    tc_apply_btn.Style(Application::Current().Resources().Lookup(box_value(L"AccentButtonStyle")).as<Style>());
     tc_apply_btn.Content(box_value(strings_.get(L"SettingsApplyToolchain")));
     tc_apply_btn.IsEnabled(can_mutate);
-    run_panel.Children().Append(tc_apply_btn);
+    tc_card_body.Children().Append(tc_apply_btn);
+    run_panel.Children().Append(make_settings_card(tc_card_body));
 
     auto load_tc_fields = [weak, tc_picker, tc_probe_status, tc_build_exe, tc_build_args, tc_build_timeout,
                            tc_run_exe, tc_run_args, tc_run_timeout, tc_inherit_env, tc_json_box, tc_feedback, can_mutate]() {
@@ -353,15 +390,12 @@ IAsyncAction MainWindow::ShowSettingsDialogAsync(int initial_tab) {
             load_tc_fields();
         }
     });
-    tc_visual_btn.Click([tc_visual_btn, tc_json_btn, tc_visual_panel, tc_json_box](auto const&, auto const&) {
-        tc_visual_btn.IsChecked(true); tc_json_btn.IsChecked(false);
-        tc_visual_panel.Visibility(Visibility::Visible); tc_json_box.Visibility(Visibility::Collapsed);
+    tc_mode_bar.SelectionChanged([tc_mode_bar, tc_visual_item, tc_visual_panel, tc_json_box](auto const&, auto const&) {
+        bool const visual = tc_mode_bar.SelectedItem() == tc_visual_item;
+        tc_visual_panel.Visibility(visual ? Visibility::Visible : Visibility::Collapsed);
+        tc_json_box.Visibility(visual ? Visibility::Collapsed : Visibility::Visible);
     });
-    tc_json_btn.Click([tc_visual_btn, tc_json_btn, tc_visual_panel, tc_json_box](auto const&, auto const&) {
-        tc_visual_btn.IsChecked(false); tc_json_btn.IsChecked(true);
-        tc_visual_panel.Visibility(Visibility::Collapsed); tc_json_box.Visibility(Visibility::Visible);
-    });
-    tc_apply_btn.Click([weak, tc_picker, tc_visual_btn, tc_build_exe, tc_build_args, tc_build_timeout,
+    tc_apply_btn.Click([weak, tc_picker, tc_mode_bar, tc_visual_item, tc_build_exe, tc_build_args, tc_build_timeout,
                         tc_run_exe, tc_run_args, tc_run_timeout, tc_inherit_env, tc_json_box, tc_feedback, load_tc_fields](auto const&, auto const&) {
         auto self = weak.get();
         if (!self || !self->WorkspaceMutable()) return;
@@ -370,7 +404,7 @@ IAsyncAction MainWindow::ShowSettingsDialogAsync(int initial_tab) {
         auto& tc = self->runner_configuration_.toolchains[static_cast<std::size_t>(idx)];
         try {
             nlohmann::json validated;
-            if (tc_visual_btn.IsChecked().Value()) {
+            if (tc_mode_bar.SelectedItem() == tc_visual_item) {
                 auto draft = RunnerConfiguration::visual_from_json(tc.profile);
                 if (draft.has_build) {
                     draft.build_executable = to_string(tc_build_exe.Text());
@@ -404,35 +438,41 @@ IAsyncAction MainWindow::ShowSettingsDialogAsync(int initial_tab) {
         }
     });
 
-    // External Checker Section
-    MenuFlyoutSeparator sep;
-    Border divider;
-    divider.Height(1);
-    divider.Background(Application::Current().Resources().Lookup(box_value(L"CardStrokeColorDefaultBrush")).as<Brush>());
-    run_panel.Children().Append(divider);
+    // External Checker Fluent Card
+    StackPanel chk_card_body;
+    chk_card_body.Spacing(10);
+
+    Grid chk_hdr;
+    ColumnDefinition ch_c0, ch_c1;
+    ch_c0.Width(GridLength{1, GridUnitType::Star});
+    ch_c1.Width(GridLength{0, GridUnitType::Auto});
+    chk_hdr.ColumnDefinitions().Append(ch_c0);
+    chk_hdr.ColumnDefinitions().Append(ch_c1);
 
     TextBlock chk_title;
     chk_title.Text(strings_.get(L"SettingsCheckerSection"));
     chk_title.FontSize(14);
     chk_title.FontWeight(Microsoft::UI::Text::FontWeights::SemiBold());
-    run_panel.Children().Append(chk_title);
+    chk_title.VerticalAlignment(VerticalAlignment::Center);
+    Grid::SetColumn(chk_title, 0);
+    chk_hdr.Children().Append(chk_title);
+
+    SelectorBar chk_mode_bar;
+    SelectorBarItem chk_visual_item, chk_json_item;
+    chk_visual_item.Text(strings_.get(L"SettingsModeVisual"));
+    chk_json_item.Text(strings_.get(L"SettingsModeJson"));
+    chk_mode_bar.Items().Append(chk_visual_item);
+    chk_mode_bar.Items().Append(chk_json_item);
+    chk_mode_bar.SelectedItem(chk_visual_item);
+    Grid::SetColumn(chk_mode_bar, 1);
+    chk_hdr.Children().Append(chk_mode_bar);
+    chk_card_body.Children().Append(chk_hdr);
 
     ToggleSwitch chk_enable_switch;
     chk_enable_switch.Header(box_value(strings_.get(L"SettingsCheckerEnabled")));
     chk_enable_switch.IsOn(checker_settings_.enabled);
     chk_enable_switch.IsEnabled(can_mutate);
-    run_panel.Children().Append(chk_enable_switch);
-
-    StackPanel chk_mode_bar;
-    chk_mode_bar.Orientation(Orientation::Horizontal);
-    chk_mode_bar.Spacing(6);
-    ToggleButton chk_visual_btn, chk_json_btn;
-    chk_visual_btn.Content(box_value(strings_.get(L"SettingsModeVisual")));
-    chk_json_btn.Content(box_value(strings_.get(L"SettingsModeJson")));
-    chk_visual_btn.IsChecked(true);
-    chk_mode_bar.Children().Append(chk_visual_btn);
-    chk_mode_bar.Children().Append(chk_json_btn);
-    run_panel.Children().Append(chk_mode_bar);
+    chk_card_body.Children().Append(chk_enable_switch);
 
     StackPanel chk_visual_panel;
     chk_visual_panel.Spacing(8);
@@ -449,7 +489,7 @@ IAsyncAction MainWindow::ShowSettingsDialogAsync(int initial_tab) {
     chk_visual_panel.Children().Append(chk_accept);
     chk_visual_panel.Children().Append(chk_wa);
     chk_visual_panel.Children().Append(chk_inherit);
-    run_panel.Children().Append(chk_visual_panel);
+    chk_card_body.Children().Append(chk_visual_panel);
 
     TextBox chk_json_box;
     chk_json_box.AcceptsReturn(true);
@@ -458,17 +498,19 @@ IAsyncAction MainWindow::ShowSettingsDialogAsync(int initial_tab) {
     chk_json_box.MinHeight(160);
     chk_json_box.MaxHeight(240);
     chk_json_box.Visibility(Visibility::Collapsed);
-    run_panel.Children().Append(chk_json_box);
+    chk_card_body.Children().Append(chk_json_box);
 
     TextBlock chk_feedback;
     chk_feedback.FontSize(12);
     chk_feedback.TextWrapping(TextWrapping::Wrap);
-    run_panel.Children().Append(chk_feedback);
+    chk_card_body.Children().Append(chk_feedback);
 
     Button chk_apply_btn;
+    chk_apply_btn.Style(Application::Current().Resources().Lookup(box_value(L"AccentButtonStyle")).as<Style>());
     chk_apply_btn.Content(box_value(strings_.get(L"SettingsApplyChecker")));
     chk_apply_btn.IsEnabled(can_mutate);
-    run_panel.Children().Append(chk_apply_btn);
+    chk_card_body.Children().Append(chk_apply_btn);
+    run_panel.Children().Append(make_settings_card(chk_card_body));
 
     auto load_chk_fields = [weak, chk_exe, chk_args, chk_timeout, chk_accept, chk_wa, chk_inherit, chk_json_box, can_mutate]() {
         auto self = weak.get();
@@ -483,7 +525,7 @@ IAsyncAction MainWindow::ShowSettingsDialogAsync(int initial_tab) {
         chk_timeout.Text(hstring{std::to_wstring(draft.wall_timeout_ms)});
         chk_accept.Text(to_hstring(CheckerModel::format_exit_codes(draft.accepted_exit_codes)));
         chk_wa.Text(to_hstring(CheckerModel::format_exit_codes(draft.wrong_answer_exit_codes)));
-        chk_inherit.IsChecked(box_value(draft.inherit_environment).as<IReference<bool>>());
+        set_checked(chk_inherit, draft.inherit_environment);
         chk_exe.IsReadOnly(!can_mutate); chk_args.IsReadOnly(!can_mutate); chk_timeout.IsReadOnly(!can_mutate);
         chk_accept.IsReadOnly(!can_mutate); chk_wa.IsReadOnly(!can_mutate); chk_inherit.IsEnabled(can_mutate);
         chk_json_box.IsReadOnly(!can_mutate);
@@ -498,21 +540,18 @@ IAsyncAction MainWindow::ShowSettingsDialogAsync(int initial_tab) {
             self->ScheduleRecoverySave();
         }
     });
-    chk_visual_btn.Click([chk_visual_btn, chk_json_btn, chk_visual_panel, chk_json_box](auto const&, auto const&) {
-        chk_visual_btn.IsChecked(true); chk_json_btn.IsChecked(false);
-        chk_visual_panel.Visibility(Visibility::Visible); chk_json_box.Visibility(Visibility::Collapsed);
+    chk_mode_bar.SelectionChanged([chk_mode_bar, chk_visual_item, chk_visual_panel, chk_json_box](auto const&, auto const&) {
+        bool const visual = chk_mode_bar.SelectedItem() == chk_visual_item;
+        chk_visual_panel.Visibility(visual ? Visibility::Visible : Visibility::Collapsed);
+        chk_json_box.Visibility(visual ? Visibility::Collapsed : Visibility::Visible);
     });
-    chk_json_btn.Click([chk_visual_btn, chk_json_btn, chk_visual_panel, chk_json_box](auto const&, auto const&) {
-        chk_visual_btn.IsChecked(false); chk_json_btn.IsChecked(true);
-        chk_visual_panel.Visibility(Visibility::Collapsed); chk_json_box.Visibility(Visibility::Visible);
-    });
-    chk_apply_btn.Click([weak, chk_enable_switch, chk_visual_btn, chk_exe, chk_args, chk_timeout,
+    chk_apply_btn.Click([weak, chk_enable_switch, chk_mode_bar, chk_visual_item, chk_exe, chk_args, chk_timeout,
                          chk_accept, chk_wa, chk_inherit, chk_json_box, chk_feedback, load_chk_fields](auto const&, auto const&) {
         auto self = weak.get();
         if (!self || !self->WorkspaceMutable()) return;
         try {
             std::string next_json;
-            if (chk_visual_btn.IsChecked().Value()) {
+            if (chk_mode_bar.SelectedItem() == chk_visual_item) {
                 auto const base = self->checker_settings_.json_text.empty()
                     ? self->checker_configuration_.default_checker.dump(2)
                     : self->checker_settings_.json_text;
@@ -542,17 +581,29 @@ IAsyncAction MainWindow::ShowSettingsDialogAsync(int initial_tab) {
     });
 
     run_scroll.Content(run_panel);
-    run_tab.Content(run_scroll);
 
-    pivot.Items().Append(general_tab);
-    pivot.Items().Append(editor_tab);
-    pivot.Items().Append(run_tab);
-    if (initial_tab >= 0 && initial_tab < 3) pivot.SelectedIndex(initial_tab);
+    Grid page_host;
+    page_host.Children().Append(general_panel);
+    page_host.Children().Append(editor_panel);
+    page_host.Children().Append(run_scroll);
+    shell.Children().Append(page_host);
+
+    auto show_page = [nav_general, nav_editor, nav_run, general_panel, editor_panel, run_scroll](SelectorBarItem const& item) {
+        general_panel.Visibility(item == nav_general ? Visibility::Visible : Visibility::Collapsed);
+        editor_panel.Visibility(item == nav_editor ? Visibility::Visible : Visibility::Collapsed);
+        run_scroll.Visibility(item == nav_run ? Visibility::Visible : Visibility::Collapsed);
+    };
+    nav_bar.SelectionChanged([nav_bar, show_page](auto const&, auto const&) {
+        if (auto item = nav_bar.SelectedItem()) show_page(item);
+    });
+    auto initial_item = initial_tab == 1 ? nav_editor : (initial_tab == 2 ? nav_run : nav_general);
+    nav_bar.SelectedItem(initial_item);
+    show_page(initial_item);
 
     ContentDialog dialog;
     dialog.XamlRoot(Root().XamlRoot());
     dialog.Title(box_value(strings_.get(L"SettingsTitle")));
-    dialog.Content(pivot);
+    dialog.Content(shell);
     dialog.CloseButtonText(strings_.get(L"Close"));
     dialog.DefaultButton(ContentDialogButton::Close);
     (void)(co_await ShowNativeDialogAsync(dialog));
@@ -568,19 +619,37 @@ fire_and_forget MainWindow::ConfigureChecker_Click(IInspectable const&, RoutedEv
     co_await ShowSettingsDialogAsync(2);
 }
 
-void MainWindow::CheckerToggle_Click(IInspectable const&, RoutedEventArgs const&) {
+void MainWindow::UseExternalCheckerMenu_Click(IInspectable const&, RoutedEventArgs const&) {
     if (updating_ui_ || !WorkspaceMutable()) return;
-    auto const checked = CheckerToggleButton().IsChecked();
-    checker_settings_.enabled = checked && checked.Value();
+    bool const next = MenuUseExternalCheckerItem().IsChecked();
+    checker_settings_.enabled = next;
     if (checker_settings_.json_text.empty()) {
         checker_settings_.json_text = checker_configuration_.default_checker.dump(2);
     }
     ui_preferences_.checker = checker_settings_;
     ApplyWorkspaceUiPreferences();
     ScheduleRecoverySave();
+    UpdateControls();
+}
+
+void MainWindow::ComparisonPolicy_Click(IInspectable const& sender, RoutedEventArgs const&) {
+    if (updating_ui_) return;
+    auto document = CurrentDocument();
+    if (!document || !TestsMutable(document)) {
+        UpdateCheckerMenuState(document);
+        return;
+    }
+    std::string next = "trailing";
+    if (sender == MenuCompareStrictItem()) next = "strict";
+    else if (sender == MenuCompareByteItem()) next = "byte";
+    if (document->comparison != next) {
+        document->comparison = std::move(next);
+        TestsChanged(document);
+    }
+    UpdateCheckerMenuState(document);
 }
 
 void MainWindow::RescanToolchains_Click(IInspectable const&, RoutedEventArgs const&) {
-    if (initialized_ && !shutting_down_) RescanToolchains();
+    RescanToolchains();
 }
 }

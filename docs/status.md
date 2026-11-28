@@ -1,11 +1,11 @@
 # 实施状态与证据
 
-更新时间：2026-11-28T12:35:12+08:00。目标仍为完成设计与实施，以下仅是当前进度，不代表全部里程碑已经通过。
+更新时间：2026-11-28T13:40:17.3944716+08:00。目标仍为完成设计与实施，以下仅是当前进度，不代表全部里程碑已经通过。
 
 | 阶段 | 状态 | 当前证据与剩余工作 |
 | --- | --- | --- |
 | 设计与源码研究 | 已完成当前基线 | 中文设计文档、固定 CP Editor 子模块与源码引用；实现中如需调整会继续更新 |
-| M0 原生编辑器 | 进行中 | macOS 端（27.0.1 arm64 / Xcode 27.2）已升级 Xcode 风格全高 `.inspector`、Liquid Glass 拖动排序胶囊标签栏、单按钮切换与圆角测试卡片并修复 CE `CompilerOutputBanner` 渲染空白缺陷，核验 Release Swift **114/114**、Core **17/17** 与新版 6 场景真机截图（`docs/screenshots/`）。Windows 10 22H2 专业工作站版（19045 / SKU 161 x64，VS 2026 Build Tools v145）已完成 WinUI 3 主界面对齐：`MenuBar`、Fluent 紧凑工具栏、左编右测可拖拽分栏与三视图模式、`Compile`/`Run Without Compiling`/`Compile & Run` 分离、Output 先行横向三栏测试区、运行时编译器自动发现与 Visual/JSON 双模配置、原生设置面板（Light/Dark/System、换行/缩进/配对开关）及 `EditorAssist`；Debug x64 全流程构建、MSIX 部署激活（`deploymentCompleted: true`、`activationRequested: true`、实测 `WinUIEditor.dll`/`WinUIEdit.dll` 加载与 `workspace.json` 持久化写入）及 Release x64 全量构建（0 警告 0 错误）均已通过。交互式桌面人工视觉／中文 IME 候选／DPI／UU 远程与整应用性能仍待验收 |
+| M0 原生编辑器 | 进行中 | macOS 端（27.0.1 arm64 / Xcode 27.2）已升级 Xcode 风格全高 `.inspector`、Liquid Glass 拖动排序胶囊标签栏、单按钮切换与圆角测试卡片并修复 CE `CompilerOutputBanner` 渲染空白缺陷，核验 Release Swift **114/114**、Core **17/17** 与新版 6 场景真机截图（`docs/screenshots/`）。Windows 10 22H2 专业工作站版（19045 / SKU 161 x64，VS 2026 Build Tools v145）已完成参考 `v0.1.1` 的 WinUI 3 / Fluent 原生样式重构：统一精简顶栏与单个 Inspector 切换按钮、左编区独立可拖拽排序 `TabView`、全高右栏（单层头部 + 等宽 `Compile`/`Run`/`Compile & Run` + 原生 `DropDownButton` Checker 菜单）、`CornerRadius="8"` 圆角测试卡与可折叠编译器输出卡片、`SelectorBar` 升级 Companion/Settings，并修复 `WinUIEditor` `ChangeScrollPos` 多标签折叠状态空滚动条崩溃与 `build.ps1` Debug/Release 包目录切换覆盖问题；Debug x64 全量测试与 Release x64 构建部署启动（`deploymentCompleted: true`、`activationRequested: true`、0 崩溃稳定运行并加载 `WinUIEditor.dll`/`Microsoft.UI.Xaml.dll`）均已通过。交互式桌面人工视觉／中文 IME 候选／DPI／UU 远程与整应用性能仍待验收 |
 | M1 可移植 Core | 进行中 | Qt-free C++20 领域、原生进程、文件事务、会话恢复、外部 checker、批量服务（含 `compile_only` / `run_only` 模式）、JobRegistry、Companion 纯解码器与 ABI 1 已实现；macOS（普通、Release、ASan/UBSan）与 Windows 10 22H2（Debug/Release x64）均通过 Core CTest **17/17**（将 MSVC Debug 检查迭代器下 `companion_api` 超时上调至 90s）与 CLI/桥接验证 |
 | M2–M4 原生功能链路/互操作 | 进行中 | macOS C ABI actor、原生测试面板、编译/运行分离、会话恢复、标签顺序持久化、协调保存与关闭、外部 checker、Companion 收件箱、MAX 精确恢复与跨标签结果归属已接入并核验。Windows 端多标签、committed 快照、C ABI Compile/Run/Cancel、artifact 复用、Output 先行测试区、外部 checker、原生设置、会话恢复及 Companion 收件箱/回环监听已接入并通过 `core-adapter-tests`、`session-tests`、`companion-tests`、`committed-text-tests` 与真机 Debug 启动；交互式窗口功能实测与 IME 闭环待执行 |
 | M5 高级服务 | 未完成 | 外部 checker 已接入 Core／C ABI／CLI、macOS 与 Windows 原生配置/诊断面板；LSP、格式化、终端、压力/交互判题和提交适配器尚未完成 |
@@ -16,6 +16,11 @@
 macOS 执行主机：macOS 27.0.1 arm64，Xcode 27.2，Swift 6.4.2，Apple Clang 21，CMake 4.4.3，Homebrew GCC 15.2.0_1（`/opt/homebrew/bin/g++-15`）。Windows 执行主机：Windows 10 22H2 专业工作站版（19045 / SKU 161 x64），PowerShell 7.7.0，VS 2026 Build Tools（18.6.3 / v145 / MSVC `19.51.36246.0` / Windows SDK `10.0.26100.0`），已在补齐 WinUI C++ 工具组件后完整通过 Debug 部署启动与 Release 构建；因命令运行环境位于隔离桌面 `WinSta0\exebox-*`，无法跨桌面截取 `WinSta0\Default` 交互窗口截图，交互界面、中文 IME 与高 DPI 验收仍需在交互桌面手动完成。
 
 ## 本轮可复核证据
+
+- **Windows 10 22H2 WinUI 3 Fluent 原生控件对齐（参考 `v0.1.1` / `f5843b5`）与多标签启动崩溃修复**：在 `Windows 10.0.19045` SKU `161` x64 主机完成：
+  - 将 WinUI 3 主工作台升级为原生 Fluent 分层：`TopToolbar` 统一 `MenuBar`、快速运行图标按钮、居中语言/工具链下拉与单个 `InspectorToggleButton`；左编区承载可拖拽重排 `TabView`（`Tabs_TabItemsChanged` 同步持久化顺序）与精简状态栏；右栏全高承载单层 `Test Cases` 头部（胶囊计数、`Outdated` 徽章、圆形 `+`/`⋯`）、等宽三列 `Compile`/`Run`/`Compile & Run` 操作条、原生 `DropDownButton` + `RadioMenuFlyoutItem` Checker 菜单、每文档独立圆角可折叠编译器输出卡、Fluent `CornerRadius="8"` 测试卡片，以及 `SelectorBar` 驱动的 Companion/Settings 面板。
+  - 修复两项真机工程问题：在 `tools/windows/build.ps1` 部署前检测并卸载 `InstallLocation` 不匹配的旧配置同包，确保 Debug/Release 间切换注册生效；在 `patches/winuiedit/committed-snapshot.patch` 中为 `ScintillaWinUI::ChangeScrollPos` 增加 `_mainWrapper->HasScrollBars()` 判空（与 `ChangeScrollRange` 一致），解决恢复多文档时未实例化折叠标签触发 `WinUIEditor.dll`（`ScrollBar::Value` `0xc0000005`）启动崩溃的问题。
+  - 执行 `pwsh -File ./tools/windows/verify.ps1 -Configuration Debug -Platform x64` 与 `pwsh -File ./tools/windows/verify.ps1 -Configuration Release -Platform x64 -Deploy -Launch`：均退出 `0`，`automatedPassed: true`，Core CTest **17/17** 与 4 组便携测试全数通过，`CPEditorNativeWindows.vcxproj` 0 警告 0 错误；Release 包 `CPEditorNative.Windows.M0_0.1.1.0_x64__z382nevsts2ce`（`out\windows\x64\Release\layout`）成功激活并稳定运行（`PID 27792`，`Responding=True`，0 条 `Application` 事件 1000/1001 崩溃记录）。
 
 - **v0.1.1 构建、CE 渲染修复与真机截图核验**：在 macOS 27.0.1（26A434）arm64 主机隔离目录 `out/releases/v0.1.1/` 完成 Release 构建与验证：Core Release CTest **17/17**（4.51s）、`CPN_REQUIRE_GNU_CPP=1` SwiftPM Release **18 个套件 114/114**（15.569s，含移除 `DisclosureGroup` 修复 CE 空白渲染后新增的像素采样测试 `compileErrorInspectorRendersVisibleLeftAndRightContent` 0.726s）、`verify_macos_build.py` 15 个 Core 对象与可执行文件（`arm64`、`minos 26.0`、`sdk 27.2`、仅系统动态库）、打包前后 `codesign --verify --strict` 及 `Info.plist`（`0.1.1` / `2`）通过；解压后启动 `CPEditorNative.app`，使用 `g++-15` 完成浅色／深色分栏（`AC` 23 ms / `WA` 7 ms）、仅 IO 三栏、Companion 收件箱、Settings 工具链配置与深色 `CE` 编译诊断（506 ms / 339 B）共 6 张真机窗口截图（`docs/screenshots/`），详情见 [v0.1.1 发布说明](releases/v0.1.1.md)。
 

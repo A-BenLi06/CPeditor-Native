@@ -258,6 +258,15 @@ try {
                 Add-AppxPackage -Path $depLocation -ErrorAction Stop
             }
         }
+        $existingPackages = @(Get-AppxPackage -Name 'CPEditorNative.Windows.M0')
+        foreach ($existingPkg in $existingPackages) {
+            $existingLoc = if ($existingPkg.InstallLocation) { $existingPkg.InstallLocation.TrimEnd('\') } else { '' }
+            $expectedLoc = $appLayout.TrimEnd('\')
+            if (-not [string]::Equals($existingLoc, $expectedLoc, [StringComparison]::OrdinalIgnoreCase)) {
+                Write-Host "正在移除不同目录的旧注册包：$($existingPkg.PackageFullName)"
+                Remove-AppxPackage -Package $existingPkg.PackageFullName -ErrorAction Stop
+            }
+        }
         Add-AppxPackage -Register $manifestPath -ForceApplicationShutdown -ErrorAction Stop
         $report.deploymentCompleted = $true
         [xml] $manifest = Get-Content -LiteralPath $manifestPath -Raw
