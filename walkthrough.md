@@ -713,3 +713,14 @@ Core 规则区分空输入、缺少预期输出与预期输出为空、checker �
   - 更新 `WorkspaceUXTests.swift` 中 `tabBarMetricsAndSeparatorVisibility()`，校验 `38`/`30`/`26`/`2` 新几何尺寸、`904`/`664`/`364`/`363` 等宽滚动边界与 `WorkspaceInspectorMetrics` 全部往返状态转换。
   - 全量执行 `CPN_REQUIRE_GNU_CPP=1 ./script/test_macos.sh`：**18 个测试套共 113 项测试全部通过**（`33.204s`）。
   - 导出 `out/macos/xcode-hierarchy-audit/` 快照（`12.300s`）并人工核验 `01`、`02`、`04`、`05`、`11`、`12`；随后运行 `./script/build_and_run.sh --verify` 构建、校验（`15` 个 Core 对象、`plutil -lint`、`codesign`）并启动真实 [CPEditorNative.app](file:///Volumes/WD-Blue-SN580-1TB/本地文件/CPEditor-Native/out/macos/CPEditorNative.app)（`PID 18084`），通过 `screencapture` 采集 `out/macos/xcode-hierarchy-audit/live-window.png` 实机检查确认全高 Inspector 贯穿标题栏、悬浮胶囊轨道与 Liquid Glass 胶囊、紧凑底栏及单层 `Test Cases` 头部视觉层级清晰（窗口保留运行供交互核验）。
+
+## 2026-11-28T12:08:28+08:00 — 右上角工具栏简化为单个 Inspector 切换按钮
+
+- **改动说明（`WorkspaceView.swift`、`WorkspaceUXTests.swift`）**：
+  - 将右上角三段布局切换控件 `layoutModePicker` 简化为单个 Xcode 风格 Inspector 切换按钮 `inspectorToggleButton`（系统图标 `sidebar.trailing`，标题随当前 Inspector 展开/收起状态动态切换 `hide_run_panel`／`show_run_panel`，复用 `WorkspaceInspectorMetrics.isInspectorPresented(for:)` 与 `layoutModeAfterInspectorToggle(isPresented:current:)` 实现分栏开启/收起一键切换，同时在 `.ioOnly` 下点击恢复标准分栏）。
+  - 在 `.split` 状态下通过 `ToolbarSpacer(.flexible, placement: .primaryAction)` 将单个按钮锚定至右侧 Inspector 标题栏最右角；Inspector 收起或处于 `.ioOnly` 时保持停靠在主工具栏最右侧，且无重复按钮。原 `⌃⌘1`／`⌃⌘2`／`⌃⌘3`／`⇧⌘Y` 菜单快捷键（`EditorCommands.swift`）与设置页布局选择（`SettingsView.swift`）完整保留。
+  - 在 `WorkspaceUXTests.tabBarMetricsAndSeparatorVisibility()` 补充单按钮切换（`.split` ⇄ `.editorOnly`、`.ioOnly` → `.split`）状态断言。
+- **验证与同步**：
+  - 实际执行主机为 `macOS` arm64、`Xcode 27.2 Build version 27B52`、`SDK 27.2`、`macOS 目标 26.0`（未在 Windows 主机执行或验证，`references/cpeditor` 子模块保持未修改）。
+  - 全量运行 `CPN_REQUIRE_GNU_CPP=1 ./script/test_macos.sh`：**18 个测试套共 113 项测试全部通过**（`34.398s`）。
+  - 导出 `out/macos/xcode-inspector-btn-audit/` 快照（`11.383s`）并运行 `./script/build_and_run.sh --verify` 构建、校验（`15` 个 Core 对象、`plutil -lint`、`codesign`）与启动真实 [CPEditorNative.app](file:///Volumes/WD-Blue-SN580-1TB/本地文件/CPEditor-Native/out/macos/CPEditorNative.app)（`PID 26788`），通过 `screencapture` 检查 `live-window.png`、`11-window-toolbar-light.png` 与 `12-window-toolbar-dark.png`，确认右上角仅保留单个圆形 `sidebar.trailing` Liquid Glass 按钮且贴右对齐（窗口保持运行供用户交互体验）。

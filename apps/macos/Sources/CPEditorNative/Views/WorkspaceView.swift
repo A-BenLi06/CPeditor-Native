@@ -29,25 +29,21 @@ struct WorkspaceView: View {
         )
     }
 
-    private var layoutModePicker: some View {
-        Picker(L10n.string("layout_mode"), selection: $workspace.layoutMode) {
-            Image(systemName: "doc.text")
-                .help(L10n.string("layout_editor_only"))
-                .accessibilityLabel(L10n.string("layout_editor_only"))
-                .tag(WorkspaceLayoutMode.editorOnly)
-            Image(systemName: "rectangle.split.2x1")
-                .help(L10n.string("layout_split"))
-                .accessibilityLabel(L10n.string("layout_split"))
-                .tag(WorkspaceLayoutMode.split)
-            Image(systemName: "checklist")
-                .help(L10n.string("layout_io_only"))
-                .accessibilityLabel(L10n.string("layout_io_only"))
-                .tag(WorkspaceLayoutMode.ioOnly)
+    private var inspectorToggleButton: some View {
+        let isInspectorOpen = WorkspaceInspectorMetrics.isInspectorPresented(for: workspace.layoutMode)
+        return Button {
+            guard workspace.canChangeLayout else { return }
+            workspace.layoutMode = WorkspaceInspectorMetrics.layoutModeAfterInspectorToggle(
+                isPresented: !isInspectorOpen,
+                current: workspace.layoutMode
+            )
+        } label: {
+            Label(
+                L10n.string(isInspectorOpen ? "hide_run_panel" : "show_run_panel"),
+                systemImage: "sidebar.trailing"
+            )
         }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .fixedSize()
-        .help(L10n.string("help_layout_mode"))
+        .help(L10n.string("help_toggle_run_panel"))
         .disabled(!workspace.canChangeLayout)
     }
 
@@ -215,7 +211,7 @@ struct WorkspaceView: View {
                 ToolbarSpacer(.fixed, placement: .primaryAction)
 
                 ToolbarItem(placement: .primaryAction) {
-                    layoutModePicker
+                    inspectorToggleButton
                 }
             }
         }
@@ -228,8 +224,9 @@ struct WorkspaceView: View {
                 )
                 .toolbar {
                     if workspace.layoutMode == .split {
+                        ToolbarSpacer(.flexible, placement: .primaryAction)
                         ToolbarItem(placement: .primaryAction) {
-                            layoutModePicker
+                            inspectorToggleButton
                         }
                     }
                 }

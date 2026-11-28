@@ -320,6 +320,12 @@ import NativeCoreBridge
         #expect(WorkspaceInspectorMetrics.layoutModeAfterInspectorToggle(isPresented: true, current: .editorOnly) == .split)
         #expect(WorkspaceInspectorMetrics.layoutModeAfterInspectorToggle(isPresented: false, current: .ioOnly) == .ioOnly)
         #expect(WorkspaceInspectorMetrics.layoutModeAfterInspectorToggle(isPresented: true, current: .ioOnly) == .split)
+        for mode in [WorkspaceLayoutMode.split, .editorOnly, .ioOnly] {
+            let nextPresented = !WorkspaceInspectorMetrics.isInspectorPresented(for: mode)
+            let toggled = WorkspaceInspectorMetrics.layoutModeAfterInspectorToggle(isPresented: nextPresented, current: mode)
+            let expected: WorkspaceLayoutMode = (mode == .split) ? .editorOnly : .split
+            #expect(toggled == expected)
+        }
 
         let ids = [RawIdentifier("doc-1"), RawIdentifier("doc-2"), RawIdentifier("doc-3"), RawIdentifier("doc-4")]
         // 选中 doc-2 时，doc-1|doc-2 与 doc-2|doc-3 隐藏分隔线，仅 doc-3|doc-4 显示。
