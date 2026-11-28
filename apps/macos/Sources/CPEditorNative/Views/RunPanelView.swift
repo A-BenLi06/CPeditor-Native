@@ -36,6 +36,7 @@ struct RunPanelView: View {
     @Bindable var session: NativeEditorSession
     @Bindable var runner: RunController
     let canConfigureRunner: Bool
+    var isInspector = false
 
     private var enabledTestCount: Int {
         session.testCases.reduce(0) { $0 + ($1.enabled ? 1 : 0) }
@@ -62,13 +63,9 @@ struct RunPanelView: View {
     var body: some View {
         let resultIsStale = latestResult != nil && !runner.resultIsCurrent(for: session)
         VStack(alignment: .leading, spacing: 0) {
-            VStack(spacing: 0) {
-                headerBar(resultIsStale: resultIsStale)
-                Divider().opacity(0.45)
-                checkerControlBar
-            }
-            .background(.bar)
-            Divider()
+            headerBar(resultIsStale: resultIsStale)
+            checkerControlBar
+            Divider().opacity(0.45)
 
             if let notice = runner.toolchainNotice(for: session) {
                 NoticeBannerView(kind: .warning, message: notice)
@@ -154,7 +151,7 @@ struct RunPanelView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(isInspector ? Color.clear : Color(nsColor: .windowBackgroundColor))
     }
 
     private func headerBar(resultIsStale: Bool) -> some View {
@@ -243,7 +240,8 @@ struct RunPanelView: View {
             }
         }
         .padding(.horizontal, 12)
-        .frame(height: DocumentTabBarMetrics.barHeight)
+        .padding(.top, 6)
+        .padding(.bottom, 4)
     }
 
     private var checkerModeSummary: String {
@@ -278,7 +276,8 @@ struct RunPanelView: View {
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.top, 2)
+        .padding(.bottom, 8)
     }
 
     private var checkerMenu: some View {

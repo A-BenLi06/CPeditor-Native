@@ -273,11 +273,13 @@ import NativeCoreBridge
 
     @Test func tabBarMetricsAndSeparatorVisibility() {
         #expect(DocumentTabBarMetrics.barHeight == 38)
-        #expect(DocumentTabBarMetrics.tabCapsuleHeight == 28)
-        #expect(DocumentTabBarMetrics.horizontalInset == 6)
+        #expect(DocumentTabBarMetrics.pillTrackHeight == 30)
+        #expect(DocumentTabBarMetrics.tabCapsuleHeight == 26)
+        #expect(DocumentTabBarMetrics.horizontalInset == 2)
         #expect(DocumentTabBarMetrics.minimumTabWidth == 120)
         #expect(DocumentTabBarMetrics.dragHysteresis == 8)
-        #expect(DocumentTabBarMetrics.tabCapsuleHeight < DocumentTabBarMetrics.barHeight)
+        #expect(DocumentTabBarMetrics.tabCapsuleHeight < DocumentTabBarMetrics.pillTrackHeight)
+        #expect(DocumentTabBarMetrics.pillTrackHeight < DocumentTabBarMetrics.barHeight)
 
         // 无标签或无效宽度时回退到最小宽度且不触发横向滚动。
         #expect(DocumentTabBarMetrics.tabWidth(forViewportWidth: 800, tabCount: 0) == 120)
@@ -285,37 +287,39 @@ import NativeCoreBridge
         #expect(!DocumentTabBarMetrics.needsHorizontalScroll(forViewportWidth: 800, tabCount: 0))
         #expect(!DocumentTabBarMetrics.needsHorizontalScroll(forViewportWidth: .infinity, tabCount: 3))
 
-        // 宽屏等宽自适应：viewport 912 -> usable 900；1 个占 900，3 个各 300，5 个各 180。
-        #expect(DocumentTabBarMetrics.tabWidth(forViewportWidth: 912, tabCount: 1) == 900)
-        #expect(DocumentTabBarMetrics.tabWidth(forViewportWidth: 912, tabCount: 3) == 300)
-        #expect(DocumentTabBarMetrics.tabWidth(forViewportWidth: 912, tabCount: 5) == 180)
-        #expect(!DocumentTabBarMetrics.needsHorizontalScroll(forViewportWidth: 912, tabCount: 1))
-        #expect(!DocumentTabBarMetrics.needsHorizontalScroll(forViewportWidth: 912, tabCount: 3))
-        #expect(!DocumentTabBarMetrics.needsHorizontalScroll(forViewportWidth: 912, tabCount: 5))
+        // 宽屏等宽自适应：viewport 904 -> usable 900；1 个占 900，3 个各 300，5 个各 180。
+        #expect(DocumentTabBarMetrics.tabWidth(forViewportWidth: 904, tabCount: 1) == 900)
+        #expect(DocumentTabBarMetrics.tabWidth(forViewportWidth: 904, tabCount: 3) == 300)
+        #expect(DocumentTabBarMetrics.tabWidth(forViewportWidth: 904, tabCount: 5) == 180)
+        #expect(!DocumentTabBarMetrics.needsHorizontalScroll(forViewportWidth: 904, tabCount: 1))
+        #expect(!DocumentTabBarMetrics.needsHorizontalScroll(forViewportWidth: 904, tabCount: 3))
+        #expect(!DocumentTabBarMetrics.needsHorizontalScroll(forViewportWidth: 904, tabCount: 5))
 
-        // 分屏默认宽度与挤压窄宽边界：usable 660 (viewport 672) 时 5 个各 132 不滚动；usable 360 (viewport 372) 时 3 个恰好 120 不滚动，少 1 pt 即触发滚动。
-        #expect(DocumentTabBarMetrics.tabWidth(forViewportWidth: 672, tabCount: 5) == 132)
-        #expect(!DocumentTabBarMetrics.needsHorizontalScroll(forViewportWidth: 672, tabCount: 5))
-        #expect(DocumentTabBarMetrics.tabWidth(forViewportWidth: 372, tabCount: 3) == 120)
-        #expect(!DocumentTabBarMetrics.needsHorizontalScroll(forViewportWidth: 372, tabCount: 3))
-        #expect(DocumentTabBarMetrics.tabWidth(forViewportWidth: 371, tabCount: 3) == 120)
-        #expect(DocumentTabBarMetrics.needsHorizontalScroll(forViewportWidth: 371, tabCount: 3))
+        // 分屏默认宽度与挤压窄宽边界：usable 660 (viewport 664) 时 5 个各 132 不滚动；usable 360 (viewport 364) 时 3 个恰好 120 不滚动，少 1 pt 即触发滚动。
+        #expect(DocumentTabBarMetrics.tabWidth(forViewportWidth: 664, tabCount: 5) == 132)
+        #expect(!DocumentTabBarMetrics.needsHorizontalScroll(forViewportWidth: 664, tabCount: 5))
+        #expect(DocumentTabBarMetrics.tabWidth(forViewportWidth: 364, tabCount: 3) == 120)
+        #expect(!DocumentTabBarMetrics.needsHorizontalScroll(forViewportWidth: 364, tabCount: 3))
+        #expect(DocumentTabBarMetrics.tabWidth(forViewportWidth: 363, tabCount: 3) == 120)
+        #expect(DocumentTabBarMetrics.needsHorizontalScroll(forViewportWidth: 363, tabCount: 3))
 
-        // Test 展开挤压与多标签溢出时钳制在 120 并开启横向滚动。
+        // Test Inspector 展开挤压与多标签溢出时钳制在 120 并开启横向滚动。
         #expect(DocumentTabBarMetrics.tabWidth(forViewportWidth: 400, tabCount: 5) == 120)
         #expect(DocumentTabBarMetrics.needsHorizontalScroll(forViewportWidth: 400, tabCount: 5))
-        #expect(DocumentTabBarMetrics.tabWidth(forViewportWidth: 912, tabCount: 10) == 120)
-        #expect(DocumentTabBarMetrics.needsHorizontalScroll(forViewportWidth: 912, tabCount: 10))
+        #expect(DocumentTabBarMetrics.tabWidth(forViewportWidth: 904, tabCount: 10) == 120)
+        #expect(DocumentTabBarMetrics.needsHorizontalScroll(forViewportWidth: 904, tabCount: 10))
 
-        // 分栏挤占度量：右侧展开／缩窄时左右列严格守恒（left + divider + right == total）。
-        let expandedSplit = WorkspaceSplitMetrics(totalWidth: 1240, splitRatio: 0.57)
-        let squeezedSplit = WorkspaceSplitMetrics(totalWidth: 1240, splitRatio: 0.30)
-        let compactSplit = WorkspaceSplitMetrics(totalWidth: 780, splitRatio: 0.50)
-        #expect(expandedSplit.leftWidth + WorkspaceSplitMetrics.dividerWidth + expandedSplit.rightWidth == 1240)
-        #expect(squeezedSplit.leftWidth + WorkspaceSplitMetrics.dividerWidth + squeezedSplit.rightWidth == 1240)
-        #expect(compactSplit.leftWidth + WorkspaceSplitMetrics.dividerWidth + compactSplit.rightWidth == 780)
-        #expect(squeezedSplit.leftWidth < expandedSplit.leftWidth)
-        #expect(squeezedSplit.rightWidth > expandedSplit.rightWidth)
+        // Inspector 宽度约束与布局模式往返映射。
+        #expect(WorkspaceInspectorMetrics.minWidth == 320)
+        #expect(WorkspaceInspectorMetrics.idealWidth == 450)
+        #expect(WorkspaceInspectorMetrics.maxWidth == 680)
+        #expect(!WorkspaceInspectorMetrics.isInspectorPresented(for: .editorOnly))
+        #expect(WorkspaceInspectorMetrics.isInspectorPresented(for: .split))
+        #expect(!WorkspaceInspectorMetrics.isInspectorPresented(for: .ioOnly))
+        #expect(WorkspaceInspectorMetrics.layoutModeAfterInspectorToggle(isPresented: false, current: .split) == .editorOnly)
+        #expect(WorkspaceInspectorMetrics.layoutModeAfterInspectorToggle(isPresented: true, current: .editorOnly) == .split)
+        #expect(WorkspaceInspectorMetrics.layoutModeAfterInspectorToggle(isPresented: false, current: .ioOnly) == .ioOnly)
+        #expect(WorkspaceInspectorMetrics.layoutModeAfterInspectorToggle(isPresented: true, current: .ioOnly) == .split)
 
         let ids = [RawIdentifier("doc-1"), RawIdentifier("doc-2"), RawIdentifier("doc-3"), RawIdentifier("doc-4")]
         // 选中 doc-2 时，doc-1|doc-2 与 doc-2|doc-3 隐藏分隔线，仅 doc-3|doc-4 显示。

@@ -697,3 +697,19 @@ Core 规则区分空输入、缺少预期输出与预期输出为空、checker �
   - **Debug x64 验证（`pwsh -File ./tools/windows/verify.ps1 -Configuration Debug -Platform x64 -Deploy -Launch`）**：退出码 `0`，`automatedPassed: true`、`appBuildCompleted: true`、`deploymentCompleted: true`、`activationRequested: true`；Core CTest **17/17** 与 `committed-text-tests`、`core-adapter-tests`、`session-tests`、`companion-tests`（涵盖 `compile_only`/`run_only` 产物复用、External Checker、ToolchainDiscovery、CheckerModel、EditorAssist 与 WorkspaceUiPreferences 往返）全部通过，`CPEditorNativeWindows.vcxproj` 0 警告 0 错误。确认部署包 `CPEditorNative.Windows.M0_z382nevsts2ce` 正常激活运行且零崩溃（`Responding=True`，已加载 `WinUIEditor.dll`、`WinUIEdit.dll`、`Microsoft.UI.Xaml.dll`），并在 `LocalState\Recovery\workspace.json` 实测写入发现的本机 MSVC `cl.exe`、`C:\Python314\python.exe`、全部 4 组工具链目录及默认文档恢复记录。因命令沙箱位于 `WinSta0\exebox-*`，无法跨桌面枚举或截取交互桌面 `WinSta0\Default` 的窗口图像，交互界面截图、中文 IME、高 DPI 与 UU 远程验证仍标记为待交互桌面手工验收；检查完毕后已关闭 Debug 测试进程。
   - **Release x64 验证（`pwsh -File ./tools/windows/verify.ps1 -Configuration Release -Platform x64`）**：退出码 `0`，`automatedPassed: true`、`editorBuildCompleted: true`、`appBuildCompleted: true`、`sessionTestsPassed: true`、`companionTestsPassed: true`、Core CTest **17/17** 与 `CPEditorNativeWindows.vcxproj` 全量 0 警告 0 错误通过，`.build.appxrecipe` 确认打包全部 10 个 JSON 配置文件与 `Toolchains\cpp-msvc.json`。
   - **基线核对**：`references/cpeditor`（`-77e563b4`）与 `third_party/WinUIEdit`（`d9f60dbca`）子模块均保持干净未改动，版本号保持 `0.1.0`。
+
+## 2026-11-28T11:03:28+08:00 — 参考 Xcode 重构全高 Inspector 与胶囊标签栏界面层级
+
+- **设计思路与主要改动**：
+  - **全高原生 Inspector 与工具栏层级（`WorkspaceView.swift`）**：
+    - 用 `WorkspaceInspectorMetrics`（`minWidth = 320`、`idealWidth = 450`、`maxWidth = 680`、`isInspectorPresented(for:)` 与 `layoutModeAfterInspectorToggle(isPresented:current:)`）替代自绘 `WorkspaceSplitMetrics`／`WorkspaceSplitContainer`／`SplitResizeHandle`，在 `WorkspaceView` 主列挂载原生 `.inspector(isPresented: inspectorPresentedBinding)` 承载右侧 `Test Cases`，使垂直分割线与半透明 Inspector 背景贯穿整个标题栏高度；同时在 `.ioOnly` 时保持 `leftEditorPane` 常驻隐藏挂载并在 `ZStack` 全宽展示 `rightRunPane(inInspector: false)`，不破坏任何编辑器实例与撤销历史。
+    - 拆分布局切换器 `layoutModePicker`：分栏展开（`.split`）时置于 `.inspector` 自身 `.toolbar` 顶部右侧，收起或切换（`.editorOnly`／`.ioOnly`）时自动停靠主工具栏末尾，并移除顶部人为通栏 `Divider()`，令统一标题工具栏无缝衔接编辑区头部。
+  - **Xcode 风格悬浮全圆角胶囊标签轨道与轻量底栏（`WorkspaceView.swift`）**：
+    - 将 `DocumentTabBarMetrics` 调整为 `barHeight = 38`、`pillTrackHeight = 30`、`tabCapsuleHeight = 26`、`horizontalInset = 2`，通过 `pillTrackFillColor` 与 `pillTrackBorderColor` 为标签栏构建独立悬浮 `Capsule(style: .continuous)` 轨道外框，内嵌 `26 pt` 等宽 Liquid Glass 选中胶囊；右侧 `+` 按钮改为 `26×26` 圆形底座控件，整栏背景与窗口标题栏统一为 `.windowBackgroundColor`，仅保留标签轨道下沿与 `EditorStatusView` 上沿 `Divider().opacity(0.45)` 界定代码画布。
+  - **单层 Inspector 头部（`RunPanelView.swift`）**：
+    - 新增 `isInspector` 参数，移除 `headerBar` 与 `checkerControlBar` 外层的 `.background(.bar)` 盒子与中间分隔线，合二为一后由单条 `Divider().opacity(0.45)` 衔接通知与样例列表；根背景在 Inspector 模式下设为 `Color.clear` 以透出 macOS 原生全高 Inspector 半透明材质。
+- **测试与验证**：
+  - 实际执行主机为 `macOS` arm64、`Xcode 27.2 Build version 27B52`、`SDK 27.2`、`macOS 目标 26.0`（本次未在 Windows 主机执行或验证，`references/cpeditor` 子模块保持干净未修改）。
+  - 更新 `WorkspaceUXTests.swift` 中 `tabBarMetricsAndSeparatorVisibility()`，校验 `38`/`30`/`26`/`2` 新几何尺寸、`904`/`664`/`364`/`363` 等宽滚动边界与 `WorkspaceInspectorMetrics` 全部往返状态转换。
+  - 全量执行 `CPN_REQUIRE_GNU_CPP=1 ./script/test_macos.sh`：**18 个测试套共 113 项测试全部通过**（`33.204s`）。
+  - 导出 `out/macos/xcode-hierarchy-audit/` 快照（`12.300s`）并人工核验 `01`、`02`、`04`、`05`、`11`、`12`；随后运行 `./script/build_and_run.sh --verify` 构建、校验（`15` 个 Core 对象、`plutil -lint`、`codesign`）并启动真实 [CPEditorNative.app](file:///Volumes/WD-Blue-SN580-1TB/本地文件/CPEditor-Native/out/macos/CPEditorNative.app)（`PID 18084`），通过 `screencapture` 采集 `out/macos/xcode-hierarchy-audit/live-window.png` 实机检查确认全高 Inspector 贯穿标题栏、悬浮胶囊轨道与 Liquid Glass 胶囊、紧凑底栏及单层 `Test Cases` 头部视觉层级清晰（窗口保留运行供交互核验）。

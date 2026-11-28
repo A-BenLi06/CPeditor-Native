@@ -7,7 +7,6 @@ struct WorkspaceView: View {
     @Environment(\.openSettings) private var openSettings
     @Environment(\.colorScheme) private var colorScheme
     @State private var workspace: Workspace
-    @State private var splitRatio: CGFloat = 0.57
 
     init(workspace: Workspace) {
         _workspace = State(initialValue: workspace)
@@ -15,6 +14,41 @@ struct WorkspaceView: View {
 
     private var canMutateWorkspace: Bool {
         !workspace.isBusy && workspace.persistentChangesAllowed
+    }
+
+    private var inspectorPresentedBinding: Binding<Bool> {
+        Binding(
+            get: { WorkspaceInspectorMetrics.isInspectorPresented(for: workspace.layoutMode) },
+            set: { presented in
+                guard workspace.canChangeLayout else { return }
+                workspace.layoutMode = WorkspaceInspectorMetrics.layoutModeAfterInspectorToggle(
+                    isPresented: presented,
+                    current: workspace.layoutMode
+                )
+            }
+        )
+    }
+
+    private var layoutModePicker: some View {
+        Picker(L10n.string("layout_mode"), selection: $workspace.layoutMode) {
+            Image(systemName: "doc.text")
+                .help(L10n.string("layout_editor_only"))
+                .accessibilityLabel(L10n.string("layout_editor_only"))
+                .tag(WorkspaceLayoutMode.editorOnly)
+            Image(systemName: "rectangle.split.2x1")
+                .help(L10n.string("layout_split"))
+                .accessibilityLabel(L10n.string("layout_split"))
+                .tag(WorkspaceLayoutMode.split)
+            Image(systemName: "checklist")
+                .help(L10n.string("layout_io_only"))
+                .accessibilityLabel(L10n.string("layout_io_only"))
+                .tag(WorkspaceLayoutMode.ioOnly)
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .fixedSize()
+        .help(L10n.string("help_layout_mode"))
+        .disabled(!workspace.canChangeLayout)
     }
 
     private var companionToolbarTitle: String {
@@ -52,15 +86,15 @@ struct WorkspaceView: View {
                 }
             }
 
-            Divider()
-
-            WorkspaceSplitContainer(
-                layoutMode: workspace.layoutMode,
-                splitRatio: $splitRatio
-            ) {
+            ZStack {
                 leftEditorPane
-            } right: {
-                rightRunPane
+                    .opacity(workspace.layoutMode == .ioOnly ? 0 : 1)
+                    .allowsHitTesting(workspace.layoutMode != .ioOnly)
+                    .accessibilityHidden(workspace.layoutMode == .ioOnly)
+
+                if workspace.layoutMode == .ioOnly {
+                    rightRunPane(inInspector: false)
+                }
             }
         }
         .navigationTitle(workspace.activeSession.map(workspace.title(for:)) ?? L10n.string("app_name"))
@@ -177,29 +211,28 @@ struct WorkspaceView: View {
                 .help(L10n.string("settings_title"))
             }
 
-            ToolbarSpacer(.fixed, placement: .primaryAction)
+            if workspace.layoutMode != .split {
+                ToolbarSpacer(.fixed, placement: .primaryAction)
 
-            ToolbarItem(placement: .primaryAction) {
-                Picker(L10n.string("layout_mode"), selection: $workspace.layoutMode) {
-                    Image(systemName: "doc.text")
-                        .help(L10n.string("layout_editor_only"))
-                        .accessibilityLabel(L10n.string("layout_editor_only"))
-                        .tag(WorkspaceLayoutMode.editorOnly)
-                    Image(systemName: "rectangle.split.2x1")
-                        .help(L10n.string("layout_split"))
-                        .accessibilityLabel(L10n.string("layout_split"))
-                        .tag(WorkspaceLayoutMode.split)
-                    Image(systemName: "checklist")
-                        .help(L10n.string("layout_io_only"))
-                        .accessibilityLabel(L10n.string("layout_io_only"))
-                        .tag(WorkspaceLayoutMode.ioOnly)
+                ToolbarItem(placement: .primaryAction) {
+                    layoutModePicker
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .fixedSize()
-                .help(L10n.string("help_layout_mode"))
-                .disabled(!workspace.canChangeLayout)
             }
+        }
+        .inspector(isPresented: inspectorPresentedBinding) {
+            rightRunPane(inInspector: true)
+                .inspectorColumnWidth(
+                    min: WorkspaceInspectorMetrics.minWidth,
+                    ideal: WorkspaceInspectorMetrics.idealWidth,
+                    max: WorkspaceInspectorMetrics.maxWidth
+                )
+                .toolbar {
+                    if workspace.layoutMode == .split {
+                        ToolbarItem(placement: .primaryAction) {
+                            layoutModePicker
+                        }
+                    }
+                }
         }
         .sheet(isPresented: Binding(
             get: { workspace.companion.isPresented },
@@ -279,7 +312,7 @@ struct WorkspaceView: View {
             }
 
             if let session = workspace.activeSession {
-                Divider()
+                Divider().opacity(0.45)
                 EditorStatusView(
                     session: session,
                     languageName: workspace.languageDisplayName(for: session),
@@ -295,10 +328,15 @@ struct WorkspaceView: View {
     }
 
     @ViewBuilder
-    private var rightRunPane: some View {
+    private func rightRunPane(inInspector: Bool) -> some View {
         if let session = workspace.activeSession {
-            RunPanelView(session: session, runner: workspace.runner, canConfigureRunner: workspace.canConfigureRunner)
-                .disabled(workspace.isLoading || workspace.isClosing)
+            RunPanelView(
+                session: session,
+                runner: workspace.runner,
+                canConfigureRunner: workspace.canConfigureRunner,
+                isInspector: inInspector
+            )
+            .disabled(workspace.isLoading || workspace.isClosing)
         } else {
             ContentUnavailableView(
                 L10n.string("no_document"),
@@ -306,152 +344,36 @@ struct WorkspaceView: View {
                 description: Text(L10n.string("no_tests_right_pane_hint"))
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color(nsColor: .windowBackgroundColor))
+            .background(inInspector ? Color.clear : Color(nsColor: .windowBackgroundColor))
         }
     }
 }
 
-internal struct WorkspaceSplitMetrics: Equatable {
-    static let dividerWidth: CGFloat = 1
+internal enum WorkspaceInspectorMetrics {
+    static let minWidth: CGFloat = 320
+    static let idealWidth: CGFloat = 450
+    static let maxWidth: CGFloat = 680
 
-    let totalWidth: CGFloat
-    let leftWidth: CGFloat
-    let rightWidth: CGFloat
-
-    init(totalWidth: CGFloat, splitRatio: CGFloat) {
-        let clampedTotal = totalWidth.isFinite ? max(0, totalWidth) : 0
-        let safeRatio = splitRatio.isFinite ? splitRatio : 0.57
-        let available = max(0, clampedTotal - Self.dividerWidth)
-        let minLeft = min(300, available * 0.45)
-        let minRight = min(320, available * 0.45)
-        let clampedLeft = min(max(available * safeRatio, minLeft), max(minLeft, available - minRight))
-        let computedRight = max(0, available - clampedLeft)
-
-        self.totalWidth = clampedTotal
-        self.leftWidth = clampedLeft
-        self.rightWidth = computedRight
-    }
-}
-
-private struct WorkspaceSplitContainer<Left: View, Right: View>: View {
-    let layoutMode: WorkspaceLayoutMode
-    @Binding var splitRatio: CGFloat
-    private let left: Left
-    private let right: Right
-
-    init(
-        layoutMode: WorkspaceLayoutMode,
-        splitRatio: Binding<CGFloat>,
-        @ViewBuilder left: () -> Left,
-        @ViewBuilder right: () -> Right
-    ) {
-        self.layoutMode = layoutMode
-        self._splitRatio = splitRatio
-        self.left = left()
-        self.right = right()
+    static func isInspectorPresented(for layoutMode: WorkspaceLayoutMode) -> Bool {
+        layoutMode == .split
     }
 
-    var body: some View {
-        GeometryReader { proxy in
-            let metrics = WorkspaceSplitMetrics(totalWidth: proxy.size.width, splitRatio: splitRatio)
-            let totalHeight = max(0, proxy.size.height)
-            let available = max(0, metrics.totalWidth - WorkspaceSplitMetrics.dividerWidth)
-            let minLeft = min(300, available * 0.45)
-            let minRight = min(320, available * 0.45)
-            let resolvedLeftWidth: CGFloat = switch layoutMode {
-            case .editorOnly: metrics.totalWidth
-            case .split: metrics.leftWidth
-            case .ioOnly: max(300, metrics.leftWidth)
-            }
-
-            ZStack(alignment: .topLeading) {
-                left
-                    .frame(width: resolvedLeftWidth, height: totalHeight)
-                    .clipped()
-                    .opacity(layoutMode == .ioOnly ? 0 : 1)
-                    .allowsHitTesting(layoutMode != .ioOnly)
-                    .accessibilityHidden(layoutMode == .ioOnly)
-
-                if layoutMode != .editorOnly {
-                    HStack(spacing: 0) {
-                        if layoutMode == .split {
-                            Color.clear
-                                .frame(width: metrics.leftWidth)
-                                .allowsHitTesting(false)
-                            SplitResizeHandle(
-                                splitRatio: $splitRatio,
-                                totalWidth: available,
-                                minLeft: minLeft,
-                                minRight: minRight
-                            )
-                        }
-                        right
-                            .frame(width: layoutMode == .ioOnly ? metrics.totalWidth : metrics.rightWidth, height: totalHeight)
-                            .background(Color(nsColor: .windowBackgroundColor))
-                    }
-                }
-            }
-            .frame(width: metrics.totalWidth, height: totalHeight, alignment: .topLeading)
+    static func layoutModeAfterInspectorToggle(
+        isPresented: Bool,
+        current: WorkspaceLayoutMode
+    ) -> WorkspaceLayoutMode {
+        if isPresented {
+            return .split
         }
-    }
-}
-
-private struct SplitResizeHandle: View {
-    @Binding var splitRatio: CGFloat
-    let totalWidth: CGFloat
-    let minLeft: CGFloat
-    let minRight: CGFloat
-
-    @State private var dragStartRatio: CGFloat?
-    @State private var pushedResizeCursor = false
-
-    var body: some View {
-        Rectangle()
-            .fill(Color(nsColor: .separatorColor))
-            .frame(width: 1)
-            .frame(maxHeight: .infinity)
-            .overlay {
-                Color.clear
-                    .frame(width: 9)
-                    .contentShape(Rectangle())
-            }
-            .onHover { hovering in
-                if hovering && !pushedResizeCursor {
-                    NSCursor.resizeLeftRight.push()
-                    pushedResizeCursor = true
-                } else if !hovering && pushedResizeCursor {
-                    NSCursor.pop()
-                    pushedResizeCursor = false
-                }
-            }
-            .onDisappear {
-                if pushedResizeCursor {
-                    NSCursor.pop()
-                    pushedResizeCursor = false
-                }
-            }
-            .gesture(
-                DragGesture(minimumDistance: 1, coordinateSpace: .global)
-                    .onChanged { value in
-                        guard totalWidth > minLeft + minRight else { return }
-                        if dragStartRatio == nil {
-                            dragStartRatio = splitRatio
-                        }
-                        let baseLeft = (dragStartRatio ?? splitRatio) * totalWidth
-                        let proposedLeft = min(max(baseLeft + value.translation.width, minLeft), totalWidth - minRight)
-                        splitRatio = proposedLeft / totalWidth
-                    }
-                    .onEnded { _ in
-                        dragStartRatio = nil
-                    }
-            )
+        return current == .split ? .editorOnly : current
     }
 }
 
 internal enum DocumentTabBarMetrics {
     static let barHeight: CGFloat = 38
-    static let tabCapsuleHeight: CGFloat = 28
-    static let horizontalInset: CGFloat = 6
+    static let pillTrackHeight: CGFloat = 30
+    static let tabCapsuleHeight: CGFloat = 26
+    static let horizontalInset: CGFloat = 2
     static let minimumTabWidth: CGFloat = 120
     static let dragHysteresis: CGFloat = 8
     static let trackCoordinateSpace = "documentTabBarTrack"
@@ -543,10 +465,16 @@ internal enum DocumentTabBarMetrics {
             : Color.black.opacity(0.055)
     }
 
-    static func trackOverlayColor(for colorScheme: ColorScheme) -> Color {
+    static func pillTrackFillColor(for colorScheme: ColorScheme) -> Color {
         colorScheme == .dark
-            ? Color.black.opacity(0.14)
-            : Color.black.opacity(0.035)
+            ? Color.white.opacity(0.075)
+            : Color.black.opacity(0.055)
+    }
+
+    static func pillTrackBorderColor(for colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark
+            ? Color.white.opacity(0.07)
+            : Color.black.opacity(0.06)
     }
 
     static func shouldShowTrailingSeparator(
@@ -682,7 +610,7 @@ private struct DocumentTabBar: View {
         let separatorColor = Color(nsColor: .separatorColor).opacity(colorScheme == .dark ? 0.72 : 0.6)
 
         GlassEffectContainer(spacing: 4) {
-            HStack(spacing: 0) {
+            HStack(spacing: 6) {
                 GeometryReader { geometry in
                     let viewportWidth = geometry.size.width
                     let tabCount = workspace.sessions.count
@@ -764,8 +692,8 @@ private struct DocumentTabBar: View {
                             .padding(.horizontal, DocumentTabBarMetrics.horizontalInset)
                             .frame(
                                 minWidth: viewportWidth,
-                                minHeight: DocumentTabBarMetrics.barHeight,
-                                maxHeight: DocumentTabBarMetrics.barHeight,
+                                minHeight: DocumentTabBarMetrics.pillTrackHeight,
+                                maxHeight: DocumentTabBarMetrics.pillTrackHeight,
                                 alignment: .leading
                             )
                             .accessibilityAddTraits(.isTabBar)
@@ -779,32 +707,35 @@ private struct DocumentTabBar: View {
                         }
                     }
                 }
-                .frame(height: DocumentTabBarMetrics.barHeight)
-
-                Rectangle()
-                    .fill(separatorColor)
-                    .frame(width: 1, height: 15)
-                    .padding(.horizontal, 6)
+                .frame(height: DocumentTabBarMetrics.pillTrackHeight)
+                .background {
+                    Capsule(style: .continuous)
+                        .fill(DocumentTabBarMetrics.pillTrackFillColor(for: colorScheme))
+                }
+                .overlay {
+                    Capsule(style: .continuous)
+                        .strokeBorder(DocumentTabBarMetrics.pillTrackBorderColor(for: colorScheme), lineWidth: 0.75)
+                }
+                .clipShape(Capsule(style: .continuous))
 
                 PanelIconButton(
                     systemImage: "plus",
                     helpKey: "help_new_document",
                     accessibilityKey: "new_file",
-                    size: 24,
+                    size: 26,
                     font: .system(size: 12, weight: .semibold),
                     isDisabled: !canMutateWorkspace
                 ) {
                     workspace.createDocument()
                 }
-                .padding(.trailing, 8)
+                .background(DocumentTabBarMetrics.pillTrackFillColor(for: colorScheme), in: Circle())
             }
+            .padding(.horizontal, 10)
+            .padding(.top, 2)
+            .padding(.bottom, 6)
         }
         .frame(height: DocumentTabBarMetrics.barHeight)
-        .background {
-            Rectangle()
-                .fill(.bar)
-                .overlay(DocumentTabBarMetrics.trackOverlayColor(for: colorScheme))
-        }
+        .background(Color(nsColor: .windowBackgroundColor))
         .onChange(of: documentIDs) { _, updatedIDs in
             if let draggingTabID, !updatedIDs.contains(draggingTabID), pendingCommit == nil {
                 resetDragState()
@@ -960,7 +891,7 @@ private struct DocumentTabItem: View {
         }
 
         tabRowContent
-            .frame(width: max(0, tabWidth - 4), height: DocumentTabBarMetrics.tabCapsuleHeight)
+            .frame(width: max(0, tabWidth - 2), height: DocumentTabBarMetrics.tabCapsuleHeight)
             .background {
                 if !isSelected && isHovered {
                     Capsule(style: .continuous)
@@ -971,7 +902,7 @@ private struct DocumentTabItem: View {
                 isSelected ? .regular.interactive() : .identity,
                 in: Capsule(style: .continuous)
             )
-            .frame(width: tabWidth, height: DocumentTabBarMetrics.barHeight)
+            .frame(width: tabWidth, height: DocumentTabBarMetrics.pillTrackHeight)
             .overlay(alignment: .trailing) {
                 if showsTrailingSeparator {
                     Rectangle()
@@ -1084,7 +1015,7 @@ struct EditorStatusView: View {
         .font(.caption)
         .foregroundStyle(.secondary)
         .padding(.horizontal, 12)
-        .padding(.vertical, 5)
-        .background(.bar)
+        .padding(.vertical, 4)
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 }
