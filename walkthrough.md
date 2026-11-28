@@ -724,3 +724,16 @@ Core 规则区分空输入、缺少预期输出与预期输出为空、checker �
   - 实际执行主机为 `macOS` arm64、`Xcode 27.2 Build version 27B52`、`SDK 27.2`、`macOS 目标 26.0`（未在 Windows 主机执行或验证，`references/cpeditor` 子模块保持未修改）。
   - 全量运行 `CPN_REQUIRE_GNU_CPP=1 ./script/test_macos.sh`：**18 个测试套共 113 项测试全部通过**（`34.398s`）。
   - 导出 `out/macos/xcode-inspector-btn-audit/` 快照（`11.383s`）并运行 `./script/build_and_run.sh --verify` 构建、校验（`15` 个 Core 对象、`plutil -lint`、`codesign`）与启动真实 [CPEditorNative.app](file:///Volumes/WD-Blue-SN580-1TB/本地文件/CPEditor-Native/out/macos/CPEditorNative.app)（`PID 26788`），通过 `screencapture` 检查 `live-window.png`、`11-window-toolbar-light.png` 与 `12-window-toolbar-dark.png`，确认右上角仅保留单个圆形 `sidebar.trailing` Liquid Glass 按钮且贴右对齐（窗口保持运行供用户交互体验）。
+
+## 2026-11-28T12:15:14+08:00 — 优化右侧 Inspector 分栏排布与测试卡片视觉呼吸感
+
+- **设计思路与主要改动**：
+  - **协调默认分栏宽度（`WorkspaceView.swift`、`WorkspaceComponents.swift`）**：将 `WorkspaceInspectorMetrics.idealWidth` 由 `450 pt` 提高至 `510 pt`（`maxWidth` 增至 `700 pt`），使默认 `1240 pt` 窗口下右侧 `Test Cases` 内两列 `220 pt` `Input` 与 `Output`（含复制按钮）完整展开不裁切并自然露出约 `28 pt` 的 `Expected Output` 横向滚动提示，左侧仍保留约 `730 pt` 可无截断容纳 5 个文档标签；同步为 `PanelIconButton` 增加可配置 `cornerRadius`，并将 `PanelSurfaceStyle.cornerRadius` 微调为 `7 pt` 以贴合外层圆角卡片。
+  - **重构右侧 Inspector 头部控件排布（`RunPanelView.swift`）**：
+    - `headerBar` 的闲置计数改用胶囊徽章（`1/1`），`+` 与 `⋯` 采用圆形悬停底座（`cornerRadius: 12`），水平与垂直内边距扩展至舒适留白（`horizontal: 14`、`top: 10`、`bottom: 8`）。
+    - 优化 `checkerControlBar` 的 `ViewThatFits` 换行分支：宽视图保持单行；默认分栏下改为整行平铺对齐的三键操作条（`Compile` / `Run` / `Compile & Run`，通过 `expanded` 等宽铺满并采用 `.regular` 控件尺寸与 `6 pt` 圆角）+ 下方 Xcode Inspector 属性对照行（左侧 `Checker:` 标签、右侧当前比较模式菜单），彻底消除原左歪右斜的阶梯式换行感。
+  - **测试卡片化分层（`RunPanelView.swift`）**：抽取共享 `InspectorCardChrome` 修饰器，为 `CompilerOutputBanner`、`TestCaseSectionView` 与 `RemovedTestResultRow` 统一配备 `10 pt` 圆角卡片底色、细描边与左端内嵌 `3 pt` 胶囊状判题色条，`LazyVStack` 以 `10 pt` 间距与 `12 pt` 边距分隔呈现（移除旧版贴边长横线分隔）。
+- **测试与验证**：
+  - 实际执行主机为 `macOS` arm64、`Xcode 27.2 Build version 27B52`、`SDK 27.2`、`macOS 目标 26.0`（未在 Windows 主机执行或验证，`references/cpeditor` 子模块保持未修改）。
+  - 更新 `WorkspaceUXTests.tabBarMetricsAndSeparatorVisibility()` 中 `idealWidth == 510`、`maxWidth == 700` 断言，全量执行 `CPN_REQUIRE_GNU_CPP=1 ./script/test_macos.sh`：**18 个测试套共 113 项测试全部通过**（`33.654s`）。
+  - 导出 `out/macos/inspector-polish-audit/` 快照（`11.401s`）核验 `01`、`02`、`04`、`05`（卡片分组、明暗对照、窄屏控件与全宽单行 `.ioOnly`）；随后运行 `./script/build_and_run.sh --verify` 启动 [CPEditorNative.app](file:///Volumes/WD-Blue-SN580-1TB/本地文件/CPEditor-Native/out/macos/CPEditorNative.app)（`PID 30134`，保留运行在桌面），通过 `screencapture` 检查 `out/macos/inspector-polish-audit/live-window.png`，确认操作栏齐平、`Output` 复制按钮完整可见、`Exp` 右侧自然露出且测试卡片层次分明舒适。

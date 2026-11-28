@@ -88,6 +88,8 @@ struct RunPanelView: View {
                         buildSucceeded: result.buildOutcome == "Succeeded" || result.buildOutcome == "NotRequired",
                         binaryPreviewBytes: runner.binaryPreviewBytes
                     )
+                    .padding(.horizontal, 12)
+                    .padding(.top, 10)
                 }
             }
 
@@ -96,7 +98,7 @@ struct RunPanelView: View {
             } else {
                 GeometryReader { proxy in
                     ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 0) {
+                        LazyVStack(alignment: .leading, spacing: 10) {
                             if session.testCases.isEmpty {
                                 emptyTestsPlaceholder
                                     .frame(minHeight: 140)
@@ -128,15 +130,12 @@ struct RunPanelView: View {
                             }
 
                             if !removedTestResults.isEmpty {
-                                VStack(alignment: .leading, spacing: 0) {
+                                VStack(alignment: .leading, spacing: 8) {
                                     Text(L10n.string("removed_test_results_title"))
                                         .font(.caption.weight(.semibold))
                                         .foregroundStyle(.secondary)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 6)
-                                        .background(Color.primary.opacity(0.03))
-                                    Divider()
+                                        .padding(.horizontal, 2)
+                                        .padding(.top, 2)
                                     ForEach(removedTestResults) { test in
                                         RemovedTestResultRow(
                                             test: test,
@@ -146,6 +145,8 @@ struct RunPanelView: View {
                                 }
                             }
                         }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
                     }
                 }
             }
@@ -186,8 +187,11 @@ struct RunPanelView: View {
                 }
             } else {
                 Text("\(enabledTestCount)/\(session.testCases.count)")
-                    .font(.caption.monospacedDigit())
+                    .font(.caption2.monospacedDigit().weight(.medium))
                     .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1.5)
+                    .background(.quaternary.opacity(0.6), in: Capsule())
                     .help(String(format: L10n.string("tests_count_format"), enabledTestCount, session.testCases.count))
             }
 
@@ -198,6 +202,7 @@ struct RunPanelView: View {
                     systemImage: "plus",
                     helpKey: "add_test",
                     size: 24,
+                    cornerRadius: 12,
                     font: .system(size: 12, weight: .medium),
                     isDisabled: !canEditTests
                 ) {
@@ -229,7 +234,7 @@ struct RunPanelView: View {
                     Image(systemName: "ellipsis.circle")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(canEditTests ? AnyShapeStyle(.secondary) : AnyShapeStyle(.quaternary))
-                        .panelIconHoverChrome(size: 24, cornerRadius: 5, enabled: canEditTests)
+                        .panelIconHoverChrome(size: 24, cornerRadius: 12, enabled: canEditTests)
                 }
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
@@ -239,9 +244,9 @@ struct RunPanelView: View {
                 .accessibilityLabel(L10n.string("more_actions"))
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 6)
-        .padding(.bottom, 4)
+        .padding(.horizontal, 14)
+        .padding(.top, 10)
+        .padding(.bottom, 8)
     }
 
     private var checkerModeSummary: String {
@@ -259,28 +264,28 @@ struct RunPanelView: View {
     private var checkerControlBar: some View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 8) {
-                checkerMenu
-                Spacer(minLength: 4)
-                executionButtons
+                checkerMenu(showPrefix: true)
+                Spacer(minLength: 8)
+                executionButtons(expanded: false)
             }
 
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    checkerMenu
-                    Spacer(minLength: 4)
-                }
-                HStack {
-                    Spacer(minLength: 0)
-                    executionButtons
+            VStack(alignment: .leading, spacing: 8) {
+                executionButtons(expanded: true)
+
+                HStack(spacing: 8) {
+                    Text(L10n.string("checker_mode_prefix"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 8)
+                    checkerMenu(showPrefix: false)
                 }
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 2)
-        .padding(.bottom, 8)
+        .padding(.horizontal, 14)
+        .padding(.bottom, 10)
     }
 
-    private var checkerMenu: some View {
+    private func checkerMenu(showPrefix: Bool) -> some View {
         Menu {
             Toggle(L10n.string("use_external_checker"), isOn: Binding(
                 get: { runner.externalCheckerEnabled },
@@ -313,9 +318,9 @@ struct RunPanelView: View {
                 Image(systemName: runner.externalCheckerEnabled ? "checkmark.shield" : "slider.horizontal.3")
                     .font(.caption)
                     .foregroundStyle(runner.externalCheckerEnabled ? Color.accentColor : Color.secondary)
-                Text("\(L10n.string("checker_mode_prefix")) \(checkerModeSummary)")
+                Text(showPrefix ? "\(L10n.string("checker_mode_prefix")) \(checkerModeSummary)" : checkerModeSummary)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(showPrefix ? .secondary : .primary)
                     .lineLimit(1)
             }
         }
@@ -324,8 +329,9 @@ struct RunPanelView: View {
         .disabled(runner.isRunning)
     }
 
-    private var executionButtons: some View {
-        HStack(spacing: 6) {
+    @ViewBuilder
+    private func executionButtons(expanded: Bool) -> some View {
+        let content = HStack(spacing: 6) {
             if runner.isRunning {
                 Button {
                     runner.cancel()
@@ -336,6 +342,8 @@ struct RunPanelView: View {
                         Image(systemName: "stop.fill")
                             .foregroundStyle(.red)
                     }
+                    .lineLimit(1)
+                    .frame(maxWidth: expanded ? .infinity : nil)
                 }
                 .buttonStyle(.bordered)
                 .help(L10n.string("help_cancel_run"))
@@ -344,6 +352,8 @@ struct RunPanelView: View {
                     runner.compile(session)
                 } label: {
                     Label(L10n.string("compile_short"), systemImage: "hammer")
+                        .lineLimit(1)
+                        .frame(maxWidth: expanded ? .infinity : nil)
                 }
                 .buttonStyle(.bordered)
                 .disabled(!runner.canCompile(session))
@@ -353,6 +363,8 @@ struct RunPanelView: View {
                     runner.runOnly(session)
                 } label: {
                     Label(L10n.string("run_short"), systemImage: "play.rectangle")
+                        .lineLimit(1)
+                        .frame(maxWidth: expanded ? .infinity : nil)
                 }
                 .buttonStyle(.bordered)
                 .disabled(!runner.canRunOnly(session))
@@ -362,6 +374,8 @@ struct RunPanelView: View {
                     runner.runAll(session)
                 } label: {
                     Label(L10n.string("compile_and_run_short"), systemImage: "play.fill")
+                        .lineLimit(1)
+                        .frame(maxWidth: expanded ? .infinity : nil)
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(!runner.canRun(session))
@@ -371,15 +385,22 @@ struct RunPanelView: View {
                     runner.runAll(session)
                 } label: {
                     Label(L10n.string("run_short"), systemImage: "play.fill")
+                        .lineLimit(1)
+                        .frame(maxWidth: expanded ? .infinity : nil)
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(!runner.canRun(session))
                 .help(L10n.string("help_run_interpreted"))
             }
         }
-        .controlSize(.small)
-        .buttonBorderShape(.roundedRectangle(radius: 5))
-        .fixedSize()
+        .controlSize(expanded ? .regular : .small)
+        .buttonBorderShape(.roundedRectangle(radius: 6))
+
+        if expanded {
+            content
+        } else {
+            content.fixedSize()
+        }
     }
 
     private var emptyTestsPlaceholder: some View {
@@ -412,6 +433,38 @@ struct RunPanelView: View {
     }
 }
 
+private struct InspectorCardChrome: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+    let accentColor: Color?
+    var isDimmed = false
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+        let borderColor: Color = if let accentColor {
+            accentColor.opacity(isDimmed ? 0.18 : 0.35)
+        } else {
+            PanelSurfaceStyle.hairlineBorder
+        }
+
+        content
+            .background(
+                Color(nsColor: .controlBackgroundColor).opacity(colorScheme == .dark ? 0.55 : 0.78),
+                in: shape
+            )
+            .overlay(alignment: .leading) {
+                if let accentColor {
+                    Capsule(style: .continuous)
+                        .fill(accentColor.opacity(isDimmed ? 0.28 : 0.78))
+                        .frame(width: 3)
+                        .padding(.vertical, 10)
+                        .padding(.leading, 4)
+                }
+            }
+            .clipShape(shape)
+            .overlay(shape.strokeBorder(borderColor, lineWidth: 0.75))
+    }
+}
+
 private struct CompilerOutputBanner: View {
     let build: ProcessReport
     let buildSucceeded: Bool
@@ -426,32 +479,29 @@ private struct CompilerOutputBanner: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            DisclosureGroup(isExpanded: $isExpanded) {
-                ProcessOutputView(report: build, binaryPreviewBytes: binaryPreviewBytes)
-                    .padding(.top, 6)
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: buildSucceeded ? "terminal" : "exclamationmark.triangle.fill")
-                        .font(.caption)
-                        .foregroundStyle(buildSucceeded ? Color.secondary : Color.orange)
-                    Text(L10n.string("compiler_output"))
-                        .font(.caption.weight(.semibold))
-                    if !buildSucceeded {
-                        VerdictBadge(verdict: "CE", compact: true)
-                    }
-                    Spacer(minLength: 4)
-                    Text(String(format: L10n.string("elapsed_format"), build.elapsedMS))
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.secondary)
+        DisclosureGroup(isExpanded: $isExpanded) {
+            ProcessOutputView(report: build, binaryPreviewBytes: binaryPreviewBytes)
+                .padding(.top, 8)
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: buildSucceeded ? "terminal" : "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(buildSucceeded ? Color.secondary : Color.orange)
+                Text(L10n.string("compiler_output"))
+                    .font(.caption.weight(.semibold))
+                if !buildSucceeded {
+                    VerdictBadge(verdict: "CE", compact: true)
                 }
+                Spacer(minLength: 4)
+                Text(String(format: L10n.string("elapsed_format"), build.elapsedMS))
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(buildSucceeded ? Color.clear : Color.orange.opacity(0.08))
-
-            Divider()
         }
+        .padding(.leading, buildSucceeded ? 12 : 14)
+        .padding(.trailing, 12)
+        .padding(.vertical, 9)
+        .modifier(InspectorCardChrome(accentColor: buildSucceeded ? nil : .orange))
     }
 }
 
@@ -517,84 +567,92 @@ private struct TestCaseSectionView: View {
         let outputDisplayText = outputCanDisplay
             ? outputBytes.text
             : outputBytes.hexPreview(maximumBytes: binaryPreviewBytes)
-        let metrics = TestCaseGridMetrics(viewportWidth: wellWidth > 0 ? wellWidth : max(0, availableWidth - 26))
+        let metrics = TestCaseGridMetrics(viewportWidth: wellWidth > 0 ? wellWidth : max(0, availableWidth - 40))
+        let hasFootnotes = !test.input.isUTF8 || test.expected?.isUTF8 == false || test.expected == nil || !outputCanDisplay
 
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 8) {
-                    Toggle(isOn: $test.enabled) {
-                        Text(String(format: L10n.string("test_number"), number))
-                            .font(.subheadline.weight(.semibold))
-                    }
-                    .toggleStyle(.checkbox)
-                    .disabled(!canEdit)
+            HStack(spacing: 8) {
+                Toggle(isOn: $test.enabled) {
+                    Text(String(format: L10n.string("test_number"), number))
+                        .font(.subheadline.weight(.semibold))
+                }
+                .toggleStyle(.checkbox)
+                .disabled(!canEdit)
 
-                    if let matchingResult {
-                        VerdictBadge(verdict: matchingResult.verdict, compact: true, dimmed: resultIsStale)
-                        Text(String(format: L10n.string("elapsed_format"), matchingResult.process.elapsedMS))
-                            .font(.caption2.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                    }
+                if let matchingResult {
+                    VerdictBadge(verdict: matchingResult.verdict, compact: true, dimmed: resultIsStale)
+                    Text(String(format: L10n.string("elapsed_format"), matchingResult.process.elapsedMS))
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
 
-                    Spacer(minLength: 4)
+                Spacer(minLength: 4)
 
-                    HStack(spacing: 2) {
-                        if let output = replacementExpectedOutput {
-                            PanelIconButton(
-                                systemImage: "arrow.uturn.up.square",
-                                helpKey: "use_output_as_expected",
-                                tint: Color.accentColor
-                            ) {
-                                useOutputAsExpected(output)
-                            }
-                        }
-
+                HStack(spacing: 2) {
+                    if let output = replacementExpectedOutput {
                         PanelIconButton(
-                            systemImage: isExpandedHeight ? "rectangle.compress.vertical" : "rectangle.expand.vertical",
-                            helpKey: isExpandedHeight ? "collapse_editor" : "expand_editor"
+                            systemImage: "arrow.uturn.up.square",
+                            helpKey: "use_output_as_expected",
+                            tint: Color.accentColor
                         ) {
-                            isExpandedHeight.toggle()
-                        }
-
-                        PanelIconButton(
-                            systemImage: "plus.square.on.square",
-                            helpKey: "duplicate_test",
-                            isDisabled: !canEdit,
-                            action: duplicate
-                        )
-
-                        PanelIconButton(
-                            systemImage: "trash",
-                            helpKey: "remove_test",
-                            isDisabled: !canEdit,
-                            action: remove
-                        )
-                    }
-                }
-
-                ScrollView(.horizontal) {
-                    HStack(alignment: .top, spacing: 0) {
-                        ForEach(TestCaseGridMetrics.columnOrder, id: \.self) { column in
-                            if column != TestCaseGridMetrics.columnOrder.first {
-                                Divider()
-                            }
-                            columnPane(column, outputBytes: outputBytes, outputDisplayText: outputDisplayText)
-                                .frame(width: metrics.columnWidth)
+                            useOutputAsExpected(output)
                         }
                     }
-                    .frame(width: metrics.contentWidth, height: ioPaneHeight, alignment: .topLeading)
+
+                    PanelIconButton(
+                        systemImage: isExpandedHeight ? "rectangle.compress.vertical" : "rectangle.expand.vertical",
+                        helpKey: isExpandedHeight ? "collapse_editor" : "expand_editor"
+                    ) {
+                        isExpandedHeight.toggle()
+                    }
+
+                    PanelIconButton(
+                        systemImage: "plus.square.on.square",
+                        helpKey: "duplicate_test",
+                        isDisabled: !canEdit,
+                        action: duplicate
+                    )
+
+                    PanelIconButton(
+                        systemImage: "trash",
+                        helpKey: "remove_test",
+                        isDisabled: !canEdit,
+                        action: remove
+                    )
                 }
-                .frame(height: ioPaneHeight)
-                .scrollIndicators(metrics.needsHorizontalScroll ? .visible : .hidden, axes: .horizontal)
-                .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
-                .onGeometryChange(for: CGFloat.self, of: \.size.width) { wellWidth = $0 }
-                .panelSurfaceWell()
-                .opacity(test.enabled ? 1.0 : 0.55)
+            }
+            .padding(.leading, 12)
+            .padding(.trailing, 10)
+            .padding(.top, 9)
+            .padding(.bottom, 7)
 
-                footnotes(outputBytes: outputBytes, outputCanDisplay: outputCanDisplay)
+            ScrollView(.horizontal) {
+                HStack(alignment: .top, spacing: 0) {
+                    ForEach(TestCaseGridMetrics.columnOrder, id: \.self) { column in
+                        if column != TestCaseGridMetrics.columnOrder.first {
+                            Divider()
+                        }
+                        columnPane(column, outputBytes: outputBytes, outputDisplayText: outputDisplayText)
+                            .frame(width: metrics.columnWidth)
+                    }
+                }
+                .frame(width: metrics.contentWidth, height: ioPaneHeight, alignment: .topLeading)
+            }
+            .frame(height: ioPaneHeight)
+            .scrollIndicators(metrics.needsHorizontalScroll ? .visible : .hidden, axes: .horizontal)
+            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+            .onGeometryChange(for: CGFloat.self, of: \.size.width) { wellWidth = $0 }
+            .panelSurfaceWell()
+            .opacity(test.enabled ? 1.0 : 0.55)
+            .padding(.leading, 10)
+            .padding(.trailing, 8)
+            .padding(.bottom, (hasFootnotes || hasDiagnostics) ? 6 : 9)
 
-                if hasDiagnostics, let matchingResult {
-                    VStack(alignment: .leading, spacing: 6) {
+            if hasFootnotes || (hasDiagnostics && matchingResult != nil) {
+                VStack(alignment: .leading, spacing: 6) {
+                    footnotes(outputBytes: outputBytes, outputCanDisplay: outputCanDisplay)
+
+                    if hasDiagnostics, let matchingResult {
                         if !matchingResult.process.stderr.data.isEmpty {
                             OutputBytesView(
                                 title: L10n.string("stderr_title"),
@@ -621,20 +679,12 @@ private struct TestCaseSectionView: View {
                         }
                     }
                 }
+                .padding(.leading, 12)
+                .padding(.trailing, 10)
+                .padding(.bottom, 9)
             }
-            .padding(.leading, 14)
-            .padding(.trailing, 12)
-            .padding(.vertical, 12)
-            .overlay(alignment: .leading) {
-                if let verdictColor {
-                    Rectangle()
-                        .fill(verdictColor.opacity(resultIsStale ? 0.25 : 0.78))
-                        .frame(width: 3)
-                }
-            }
-
-            Divider()
         }
+        .modifier(InspectorCardChrome(accentColor: verdictColor, isDimmed: resultIsStale))
     }
 
     @ViewBuilder
@@ -786,35 +836,27 @@ private struct RemovedTestResultRow: View {
 
     var body: some View {
         let descriptor = VerdictDescriptor.forVerdict(test.verdict)
-        VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 8) {
-                    VerdictBadge(descriptor: descriptor, compact: true)
-                    Text(test.testcaseID)
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                    Spacer(minLength: 4)
-                    Text(String(format: L10n.string("elapsed_format"), test.process.elapsedMS))
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-                ProcessOutputView(report: test.process, binaryPreviewBytes: binaryPreviewBytes)
-                if let checker = test.checker {
-                    CheckerDiagnosticsView(report: checker, binaryPreviewBytes: binaryPreviewBytes)
-                }
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                VerdictBadge(descriptor: descriptor, compact: true)
+                Text(test.testcaseID)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                Text(String(format: L10n.string("elapsed_format"), test.process.elapsedMS))
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
             }
-            .padding(.leading, 14)
-            .padding(.trailing, 12)
-            .padding(.vertical, 10)
-            .overlay(alignment: .leading) {
-                Rectangle()
-                    .fill(descriptor.tone.color.opacity(0.78))
-                    .frame(width: 3)
+            ProcessOutputView(report: test.process, binaryPreviewBytes: binaryPreviewBytes)
+            if let checker = test.checker {
+                CheckerDiagnosticsView(report: checker, binaryPreviewBytes: binaryPreviewBytes)
             }
-
-            Divider()
         }
+        .padding(.leading, 12)
+        .padding(.trailing, 10)
+        .padding(.vertical, 10)
+        .modifier(InspectorCardChrome(accentColor: descriptor.tone.color))
     }
 }
 

@@ -311,8 +311,8 @@ import NativeCoreBridge
 
         // Inspector 宽度约束与布局模式往返映射。
         #expect(WorkspaceInspectorMetrics.minWidth == 320)
-        #expect(WorkspaceInspectorMetrics.idealWidth == 450)
-        #expect(WorkspaceInspectorMetrics.maxWidth == 680)
+        #expect(WorkspaceInspectorMetrics.idealWidth == 510)
+        #expect(WorkspaceInspectorMetrics.maxWidth == 700)
         #expect(!WorkspaceInspectorMetrics.isInspectorPresented(for: .editorOnly))
         #expect(WorkspaceInspectorMetrics.isInspectorPresented(for: .split))
         #expect(!WorkspaceInspectorMetrics.isInspectorPresented(for: .ioOnly))

@@ -348,8 +348,8 @@ struct WorkspaceView: View {
 
 internal enum WorkspaceInspectorMetrics {
     static let minWidth: CGFloat = 320
-    static let idealWidth: CGFloat = 450
-    static let maxWidth: CGFloat = 680
+    static let idealWidth: CGFloat = 510
+    static let maxWidth: CGFloat = 700
 
     static func isInspectorPresented(for layoutMode: WorkspaceLayoutMode) -> Bool {
         layoutMode == .split

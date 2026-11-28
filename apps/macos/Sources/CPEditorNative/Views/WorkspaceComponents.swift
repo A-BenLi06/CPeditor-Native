@@ -253,6 +253,7 @@ struct PanelIconButton: View {
     var accessibilityKey: String? = nil
     var tint: Color? = nil
     var size: CGFloat = 22
+    var cornerRadius: CGFloat = 6
     var font: Font = .system(size: 11.5, weight: .medium)
     var isDisabled = false
     let action: () -> Void
@@ -262,7 +263,7 @@ struct PanelIconButton: View {
             Image(systemName: systemImage)
                 .font(font)
                 .foregroundStyle(isDisabled ? AnyShapeStyle(.quaternary) : AnyShapeStyle(tint ?? .secondary))
-                .panelIconHoverChrome(size: size, cornerRadius: 5, enabled: !isDisabled)
+                .panelIconHoverChrome(size: size, cornerRadius: cornerRadius, enabled: !isDisabled)
         }
         .buttonStyle(.plain)
         .disabled(isDisabled)
@@ -291,7 +292,7 @@ struct CopyTextButton: View {
 }
 
 enum PanelSurfaceStyle {
-    static let cornerRadius: CGFloat = 6
+    static let cornerRadius: CGFloat = 7
     static let cellHeaderHeight: CGFloat = 26
     static let cellHeaderBackground = Color.primary.opacity(0.035)
     static let hairlineBorder = Color(nsColor: .separatorColor).opacity(0.55)
